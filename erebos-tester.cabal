@@ -18,9 +18,26 @@ category:            Testing
 extra-source-files:  CHANGELOG.md
 
 executable erebos-tester
+  ghc-options:         -Wall
+  main-is:             Wrapper.hs
+  -- other-modules:
+  -- other-extensions:
+  build-depends:       base ^>=4.13.0.0,
+                       filepath ^>=1.4.2.1,
+                       linux-namespaces ^>=0.1.3,
+                       process ^>=1.6.9,
+                       unix ^>=2.7.2.2,
+  hs-source-dirs:      src
+  default-language:    Haskell2010
+
+executable erebos-tester-core
+  ghc-options:         -Wall -threaded
   main-is:             Main.hs
   -- other-modules:
   -- other-extensions:
-  build-depends:       base ^>=4.13.0.0
+  default-extensions:  LambdaCase
+  build-depends:       base ^>=4.13.0.0,
+                       process ^>=1.6.9,
+                       stm ^>=2.5.0.1,
   hs-source-dirs:      src
   default-language:    Haskell2010
