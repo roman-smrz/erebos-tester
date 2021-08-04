@@ -4,6 +4,9 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 
+import Text.Regex.TDFA
+import Text.Regex.TDFA.String
+
 import System.Environment
 import System.IO
 import System.IO.Error
@@ -82,6 +85,31 @@ spawnOn node cmd = do
         , procOutput = out
         }
 
+tryMatch :: Regex -> [String] -> Maybe (String, [String])
+tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
+                   | otherwise = fmap (x:) <$> tryMatch re xs
+tryMatch _ [] = Nothing
+
+expect :: Process -> String -> IO ()
+expect p pat = case compile defaultCompOpt defaultExecOpt ("^" ++ pat ++ "$") of
+                    Right re -> do
+                        mbmatch <- atomically $ do
+                            out <- readTVar (procOutput p)
+                            case tryMatch re out of
+                                 Nothing -> retry
+                                 Just (m, out') -> do
+                                     writeTVar (procOutput p) out'
+                                     return $ Just m
+                        case mbmatch of
+                             Just line -> putStrLn $ "\ESC[32m" ++ nodeName (procNode p) ++ "+> " ++ line ++ "\ESC[0m"
+                             Nothing -> putStrLn $ "\ESC[31m" ++ nodeName (procNode p) ++ "/> expect failed" ++ "\ESC[0m"
+                    Left err -> putStrLn $ "failed to parse re: " ++ err
+
+send :: Process -> String -> IO ()
+send p str = do
+    hPutStrLn (procStdin p) str
+    hFlush (procStdin p)
+
 main :: IO ()
 main = do
     [tool] <- getArgs
@@ -93,4 +121,11 @@ main = do
     p1 <- spawnOn node1 tool
     p2 <- spawnOn node2 tool
 
-    void $ return (p1, p2)
+    send p1 "create-identity Device1"
+    send p2 "create-identity Device2"
+    send p1 "start-server"
+    send p2 "start-server"
+    expect p1 "peer [0-9]+ 192.168.0.11:29665"
+    expect p1 "peer [0-9]+ 192.168.0.12:29665"
+    expect p2 "peer [0-9]+ 192.168.0.12:29665"
+    expect p2 "peer [0-9]+ 192.168.0.11:29665"
