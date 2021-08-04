@@ -7,18 +7,22 @@ import Control.Monad
 import Text.Regex.TDFA
 import Text.Regex.TDFA.String
 
+import System.Directory
 import System.Environment
+import System.FilePath
 import System.IO
 import System.IO.Error
 import System.Process
 
 data Network = Network
     { netNodes :: MVar [(Int, Node)]
+    , netDir :: FilePath
     }
 
 data Node = Node
     { nodeNetwork :: Network
     , nodeName :: String
+    , nodeDir :: FilePath
     }
 
 data Process = Process
@@ -28,22 +32,36 @@ data Process = Process
     , procOutput :: TVar [String]
     }
 
+testDir :: FilePath
+testDir = "./.test"
+
 initNetwork :: IO Network
 initNetwork = do
+    exists <- doesPathExist testDir
+    when exists $ ioError $ userError $ testDir ++ " exists"
+    createDirectoryIfMissing True testDir
+
     callCommand "ip link add name br0 type bridge"
     callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
     callCommand "ip link set dev br0 up"
     callCommand "ip link set dev lo up"
-    Network <$> newMVar []
+    Network <$> newMVar [] <*> pure testDir
 
 getNode :: Network -> Int -> IO Node
 getNode net idx = (lookup idx <$> readMVar (netNodes net)) >>= \case
     Just node -> return node
     _ -> do
         let name = "node" ++ show idx
+            dir = netDir net </> ("erebos" ++ show idx)
             node = Node { nodeNetwork = net
                         , nodeName = name
+                        , nodeDir = dir
                         }
+
+        exists <- doesPathExist dir
+        when exists $ ioError $ userError $ dir ++ " exists"
+        createDirectoryIfMissing True dir
+
         callCommand $ "ip netns add \""++ name ++ "\""
         callCommand $ "ip link add \"veth" ++ show idx ++ ".0\" type veth peer name \"veth" ++ show idx ++ ".1\" netns \"" ++ name ++ "\""
         callCommand $ "ip link set dev \"veth" ++ show idx ++ ".0\" master br0 up"
@@ -59,7 +77,9 @@ callOn node cmd = callCommand $ "ip netns exec \"" ++ nodeName node ++ "\" " ++ 
 spawnOn :: Node -> String -> IO Process
 spawnOn node cmd = do
     (Just hin, Just hout, Just herr, handle) <- createProcess (shell $ "ip netns exec \"" ++ nodeName node ++ "\" " ++ cmd)
-        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe }
+        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
+        , env = Just [("EREBOS_DIR", nodeDir node)]
+        }
     out <- newTVarIO []
 
     let readingLoop :: Handle -> (String -> IO ()) -> IO ()
