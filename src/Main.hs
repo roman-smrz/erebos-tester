@@ -9,6 +9,7 @@ import Text.Regex.TDFA.String
 
 import System.Directory
 import System.Environment
+import System.Exit
 import System.FilePath
 import System.IO
 import System.IO.Error
@@ -21,6 +22,7 @@ data Network = Network
 
 data Node = Node
     { nodeNetwork :: Network
+    , nodeProcesses :: MVar [Process]
     , nodeName :: String
     , nodeDir :: FilePath
     }
@@ -47,13 +49,33 @@ initNetwork = do
     callCommand "ip link set dev lo up"
     Network <$> newMVar [] <*> pure testDir
 
+exitNetwork :: Network -> IO ()
+exitNetwork net = do
+    nodes <- readMVar (netNodes net)
+    ok <- fmap and $ forM nodes $ \(_, node) -> do
+        processes <- readMVar (nodeProcesses node)
+        fmap and $ forM processes $ \p -> do
+            hClose (procStdin p)
+            waitForProcess (procHandle p) >>= \case
+                ExitSuccess -> return True
+                ExitFailure code -> do
+                    putStrLn $ "\ESC[31m" ++ nodeName node ++ "!!> exit code: " ++ show code ++ "\ESC[0m"
+                    return False
+
+    if ok
+       then do removeDirectoryRecursive $ netDir net
+               exitSuccess
+       else exitFailure
+
 getNode :: Network -> Int -> IO Node
 getNode net idx = (lookup idx <$> readMVar (netNodes net)) >>= \case
     Just node -> return node
     _ -> do
+        processes <- newMVar []
         let name = "node" ++ show idx
             dir = netDir net </> ("erebos" ++ show idx)
             node = Node { nodeNetwork = net
+                        , nodeProcesses = processes
                         , nodeName = name
                         , nodeDir = dir
                         }
@@ -98,12 +120,15 @@ spawnOn node cmd = do
     void $ forkIO $ readingLoop herr $ \line -> do
         putStrLn $ "\ESC[31m" ++ nodeName node ++ "!> " ++ line ++ "\ESC[0m"
 
-    return Process
-        { procHandle = handle
-        , procNode = node
-        , procStdin = hin
-        , procOutput = out
-        }
+    let process = Process
+            { procHandle = handle
+            , procNode = node
+            , procStdin = hin
+            , procOutput = out
+            }
+
+    modifyMVar_ (nodeProcesses node) $ return . (process:)
+    return process
 
 tryMatch :: Regex -> [String] -> Maybe (String, [String])
 tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
@@ -149,3 +174,5 @@ main = do
     expect p1 "peer [0-9]+ 192.168.0.12:29665"
     expect p2 "peer [0-9]+ 192.168.0.12:29665"
     expect p2 "peer [0-9]+ 192.168.0.11:29665"
+
+    exitNetwork net
