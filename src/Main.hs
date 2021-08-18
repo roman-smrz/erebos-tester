@@ -21,6 +21,7 @@ import System.IO
 import System.IO.Error
 import System.Process
 
+import Parser
 import Test
 
 data Network = Network
@@ -193,25 +194,7 @@ runTest tool test = do
 
 main :: IO ()
 main = do
-    [tool] <- getArgs
+    tool <- getEnv "EREBOS_TEST_TOOL"
+    files <- getArgs
 
-    let pat1 = "peer [0-9]+ 192.168.0.11:29665"
-    let pat2 = "peer [0-9]+ 192.168.0.12:29665"
-    Right re1 <- return $ compile defaultCompOpt defaultExecOpt ("^" ++ pat1 ++ "$")
-    Right re2 <- return $ compile defaultCompOpt defaultExecOpt ("^" ++ pat2 ++ "$")
-
-    runTest tool Test
-        { testName = T.pack "Test"
-        , testSteps =
-            [ Spawn (ProcName (T.pack "p1")) (NodeName (T.pack "n1"))
-            , Spawn (ProcName (T.pack "p2")) (NodeName (T.pack "n2"))
-            , Send (ProcName (T.pack "p1")) (T.pack "create-identity Device1")
-            , Send (ProcName (T.pack "p2")) (T.pack "create-identity Device2")
-            , Send (ProcName (T.pack "p1")) (T.pack "start-server")
-            , Send (ProcName (T.pack "p2")) (T.pack "start-server")
-            , Expect (ProcName (T.pack "p1")) re1
-            , Expect (ProcName (T.pack "p1")) re2
-            , Expect (ProcName (T.pack "p2")) re2
-            , Expect (ProcName (T.pack "p2")) re1
-            ]
-        }
+    forM_ files $ mapM_ (runTest tool) <=< parseTestFile
