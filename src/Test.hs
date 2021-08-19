@@ -19,6 +19,7 @@ data Test = Test
 data TestStep = Spawn ProcName NodeName
               | Send ProcName Text
               | Expect ProcName Regex
+              | Wait
 
 newtype ProcName = ProcName Text
     deriving (Eq, Ord)

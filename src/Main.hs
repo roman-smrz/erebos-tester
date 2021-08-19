@@ -190,6 +190,11 @@ runTest tool test = do
             p <- getProcess net pname
             expect p regex
 
+        Wait -> do
+            putStr "Waiting..."
+            hFlush stdout
+            void $ getLine
+
     exitNetwork net
 
 main :: IO ()

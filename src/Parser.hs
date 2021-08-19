@@ -110,9 +110,14 @@ testExpect = do
     pname <- procName
     return $ Expect pname re
 
+testWait :: TestParser TestStep
+testWait = do
+    wsymbol "wait"
+    return $ Wait
+
 parseTestDefinition :: TestParser Test
 parseTestDefinition = label "test definition" $ toplevel $ do
-    block (\name steps -> return $ Test name steps) header (testSpawn <|> testSend <|> testExpect)
+    block (\name steps -> return $ Test name steps) header (testSpawn <|> testSend <|> testExpect <|> testWait)
     where header = do
               wsymbol "test"
               lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
