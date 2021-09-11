@@ -19,6 +19,8 @@ import System.Exit
 import System.FilePath
 import System.IO
 import System.IO.Error
+import System.Posix.Process
+import System.Posix.Signals
 import System.Process
 
 import Parser
@@ -177,6 +179,21 @@ runTest :: String -> Test -> IO ()
 runTest tool test = do
     net <- initNetwork
 
+    let sigHandler SignalInfo { siginfoSpecific = chld } = do
+            nodes <- readMVar (netNodes net)
+            forM_ nodes $ \node -> do
+                processes <- readMVar (nodeProcesses node)
+                forM_ processes $ \p -> do
+                    mbpid <- getPid (procHandle p)
+                    when (mbpid == Just (siginfoPid chld)) $ do
+                        let err detail = putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName node) ++ "!!> child " ++ detail ++ "\ESC[0m"
+                        case siginfoStatus chld of
+                             Exited ExitSuccess -> putStrLn $ unpackNodeName (nodeName node) ++ ".> child exited successfully"
+                             Exited (ExitFailure code) -> err $ "process exited with status " ++ show code
+                             Terminated sig _ -> err $ "terminated with signal " ++ show sig
+                             Stopped sig -> err $ "stopped with signal " ++ show sig
+    oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
+
     forM_ (testSteps test) $ \case
         Spawn pname nname -> do
             node <- getNode net nname
@@ -195,6 +212,7 @@ runTest tool test = do
             hFlush stdout
             void $ getLine
 
+    _ <- installHandler processStatusChanged oldHandler Nothing
     exitNetwork net
 
 main :: IO ()
