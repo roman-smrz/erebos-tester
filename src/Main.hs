@@ -5,7 +5,6 @@ import Control.Concurrent.STM
 import Control.Monad
 
 import Data.List
-import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -28,13 +27,13 @@ import Test
 
 data Network = Network
     { netNodes :: MVar [Node]
+    , netProcesses :: MVar [Process]
     , netDir :: FilePath
     }
 
 data Node = Node
     { nodeName :: NodeName
     , nodeNetwork :: Network
-    , nodeProcesses :: MVar [Process]
     , nodeDir :: FilePath
     }
 
@@ -59,20 +58,18 @@ initNetwork = do
     callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
     callCommand "ip link set dev br0 up"
     callCommand "ip link set dev lo up"
-    Network <$> newMVar [] <*> pure testDir
+    Network <$> newMVar [] <*> newMVar [] <*> pure testDir
 
 exitNetwork :: Network -> IO ()
 exitNetwork net = do
-    nodes <- readMVar (netNodes net)
-    ok <- fmap and $ forM nodes $ \node -> do
-        processes <- readMVar (nodeProcesses node)
-        fmap and $ forM processes $ \p -> do
-            hClose (procStdin p)
-            waitForProcess (procHandle p) >>= \case
-                ExitSuccess -> return True
-                ExitFailure code -> do
-                    putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName node) ++ "!!> exit code: " ++ show code ++ "\ESC[0m"
-                    return False
+    processes <- readMVar (netProcesses net)
+    ok <- fmap and $ forM processes $ \p -> do
+        hClose (procStdin p)
+        waitForProcess (procHandle p) >>= \case
+            ExitSuccess -> return True
+            ExitFailure code -> do
+                putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName (procNode p)) ++ "!!> exit code: " ++ show code ++ "\ESC[0m"
+                return False
 
     if ok
        then do removeDirectoryRecursive $ netDir net
@@ -83,12 +80,10 @@ getNode :: Network -> NodeName -> IO Node
 getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> readMVar (netNodes net)) >>= \case
     Just node -> return node
     _ -> do
-        processes <- newMVar []
         let name = T.unpack tnname
             dir = netDir net </> ("erebos_" ++ name)
             node = Node { nodeName = nname
                         , nodeNetwork = net
-                        , nodeProcesses = processes
                         , nodeDir = dir
                         }
 
@@ -141,15 +136,12 @@ spawnOn node pname cmd = do
             , procOutput = out
             }
 
-    modifyMVar_ (nodeProcesses node) $ return . (process:)
+    modifyMVar_ (netProcesses (nodeNetwork node)) $ return . (process:)
     return process
 
 getProcess :: Network -> ProcName -> IO Process
 getProcess net pname = do
-    nodes <- readMVar (netNodes net)
-    (p:_) <- fmap catMaybes $ forM nodes $ \node -> do
-        processes <- readMVar (nodeProcesses node)
-        return $ find ((pname==).procName) processes
+    Just p <- find ((pname==).procName) <$> readMVar (netProcesses net)
     return p
 
 tryMatch :: Regex -> [String] -> Maybe (String, [String])
@@ -180,18 +172,16 @@ runTest tool test = do
     net <- initNetwork
 
     let sigHandler SignalInfo { siginfoSpecific = chld } = do
-            nodes <- readMVar (netNodes net)
-            forM_ nodes $ \node -> do
-                processes <- readMVar (nodeProcesses node)
-                forM_ processes $ \p -> do
-                    mbpid <- getPid (procHandle p)
-                    when (mbpid == Just (siginfoPid chld)) $ do
-                        let err detail = putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName node) ++ "!!> child " ++ detail ++ "\ESC[0m"
-                        case siginfoStatus chld of
-                             Exited ExitSuccess -> putStrLn $ unpackNodeName (nodeName node) ++ ".> child exited successfully"
-                             Exited (ExitFailure code) -> err $ "process exited with status " ++ show code
-                             Terminated sig _ -> err $ "terminated with signal " ++ show sig
-                             Stopped sig -> err $ "stopped with signal " ++ show sig
+            processes <- readMVar (netProcesses net)
+            forM_ processes $ \p -> do
+                mbpid <- getPid (procHandle p)
+                when (mbpid == Just (siginfoPid chld)) $ do
+                    let err detail = putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName (procNode p)) ++ "!!> child " ++ detail ++ "\ESC[0m"
+                    case siginfoStatus chld of
+                         Exited ExitSuccess -> putStrLn $ unpackNodeName (nodeName (procNode p)) ++ ".> child exited successfully"
+                         Exited (ExitFailure code) -> err $ "process exited with status " ++ show code
+                         Terminated sig _ -> err $ "terminated with signal " ++ show sig
+                         Stopped sig -> err $ "stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
     forM_ (testSteps test) $ \case
