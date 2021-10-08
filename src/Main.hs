@@ -68,7 +68,7 @@ exitNetwork net = do
         waitForProcess (procHandle p) >>= \case
             ExitSuccess -> return True
             ExitFailure code -> do
-                putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName (procNode p)) ++ "!!> exit code: " ++ show code ++ "\ESC[0m"
+                putStrLn $ "\ESC[31m" ++ unpackProcName (procName p) ++ "!!> exit code: " ++ show code ++ "\ESC[0m"
                 return False
 
     if ok
@@ -117,16 +117,16 @@ spawnOn node pname cmd = do
             tryIOError (hGetLine h) >>= \case
                 Left err
                     | isEOFError err -> return ()
-                    | otherwise -> putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName node) ++ "!!> IO error: " ++ show err ++ "\ESC[0m"
+                    | otherwise -> putStrLn $ "\ESC[31m" ++ unpackProcName pname ++ "!!> IO error: " ++ show err ++ "\ESC[0m"
                 Right line -> do
                     act line
                     readingLoop h act
 
     void $ forkIO $ readingLoop hout $ \line -> do
-        putStrLn $ unpackNodeName (nodeName node) ++ "> " ++ line
+        putStrLn $ unpackProcName pname ++ "> " ++ line
         atomically $ modifyTVar out (++[line])
     void $ forkIO $ readingLoop herr $ \line -> do
-        putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName node) ++ "!> " ++ line ++ "\ESC[0m"
+        putStrLn $ "\ESC[31m" ++ unpackProcName pname ++ "!> " ++ line ++ "\ESC[0m"
 
     let process = Process
             { procName = pname
@@ -159,8 +159,8 @@ expect p re = do
                  writeTVar (procOutput p) out'
                  return $ Just m
     case mbmatch of
-         Just line -> putStrLn $ "\ESC[32m" ++ unpackNodeName (nodeName (procNode p)) ++ "+> " ++ line ++ "\ESC[0m"
-         Nothing -> putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName (procNode p)) ++ "/> expect failed" ++ "\ESC[0m"
+         Just line -> putStrLn $ "\ESC[32m" ++ unpackProcName (procName p) ++ "+> " ++ line ++ "\ESC[0m"
+         Nothing -> putStrLn $ "\ESC[31m" ++ unpackProcName (procName p) ++ "/> expect failed" ++ "\ESC[0m"
 
 send :: Process -> Text -> IO ()
 send p line = do
@@ -176,9 +176,9 @@ runTest tool test = do
             forM_ processes $ \p -> do
                 mbpid <- getPid (procHandle p)
                 when (mbpid == Just (siginfoPid chld)) $ do
-                    let err detail = putStrLn $ "\ESC[31m" ++ unpackNodeName (nodeName (procNode p)) ++ "!!> child " ++ detail ++ "\ESC[0m"
+                    let err detail = putStrLn $ "\ESC[31m" ++ unpackProcName (procName p) ++ "!!> child " ++ detail ++ "\ESC[0m"
                     case siginfoStatus chld of
-                         Exited ExitSuccess -> putStrLn $ unpackNodeName (nodeName (procNode p)) ++ ".> child exited successfully"
+                         Exited ExitSuccess -> putStrLn $ unpackProcName (procName p) ++ ".> child exited successfully"
                          Exited (ExitFailure code) -> err $ "process exited with status " ++ show code
                          Terminated sig _ -> err $ "terminated with signal " ++ show sig
                          Stopped sig -> err $ "stopped with signal " ++ show sig
