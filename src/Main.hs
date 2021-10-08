@@ -40,9 +40,10 @@ data Node = Node
 data Process = Process
     { procName :: ProcName
     , procHandle :: ProcessHandle
-    , procNode :: Node
+    , procNode :: Either Network Node
     , procStdin :: Handle
     , procOutput :: TVar [String]
+    , procKillWith :: Maybe Signal
     }
 
 testDir :: FilePath
@@ -58,13 +59,21 @@ initNetwork = do
     callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
     callCommand "ip link set dev br0 up"
     callCommand "ip link set dev lo up"
-    Network <$> newMVar [] <*> newMVar [] <*> pure testDir
+    net <- Network <$> newMVar [] <*> newMVar [] <*> pure testDir
+    void $ spawnOn (Left net) (ProcName (T.pack "tcpdump")) (Just softwareTermination) $
+        "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
+    return net
 
 exitNetwork :: Network -> IO ()
 exitNetwork net = do
     processes <- readMVar (netProcesses net)
     ok <- fmap and $ forM processes $ \p -> do
         hClose (procStdin p)
+        case procKillWith p of
+             Nothing -> return ()
+             Just sig -> getPid (procHandle p) >>= \case
+                Nothing -> return ()
+                Just pid -> signalProcess sig pid
         waitForProcess (procHandle p) >>= \case
             ExitSuccess -> return True
             ExitFailure code -> do
@@ -104,11 +113,12 @@ getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> readMVar (n
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
 
-spawnOn :: Node -> ProcName -> String -> IO Process
-spawnOn node pname cmd = do
-    (Just hin, Just hout, Just herr, handle) <- createProcess (shell $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd)
+spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> IO Process
+spawnOn target pname killWith cmd = do
+    let prefix = either (const "") (\node -> "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" ") target
+    (Just hin, Just hout, Just herr, handle) <- createProcess (shell $ prefix ++ cmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
-        , env = Just [("EREBOS_DIR", nodeDir node)]
+        , env = Just [("EREBOS_DIR", either netDir nodeDir target)]
         }
     out <- newTVarIO []
 
@@ -126,17 +136,20 @@ spawnOn node pname cmd = do
         putStrLn $ unpackProcName pname ++ "> " ++ line
         atomically $ modifyTVar out (++[line])
     void $ forkIO $ readingLoop herr $ \line -> do
-        putStrLn $ "\ESC[31m" ++ unpackProcName pname ++ "!> " ++ line ++ "\ESC[0m"
+        case pname of
+             ProcName tname | tname == T.pack "tcpdump" -> return ()
+             _ -> putStrLn $ "\ESC[31m" ++ unpackProcName pname ++ "!> " ++ line ++ "\ESC[0m"
 
     let process = Process
             { procName = pname
             , procHandle = handle
-            , procNode = node
+            , procNode = target
             , procStdin = hin
             , procOutput = out
+            , procKillWith = killWith
             }
 
-    modifyMVar_ (netProcesses (nodeNetwork node)) $ return . (process:)
+    modifyMVar_ (netProcesses (either id nodeNetwork target)) $ return . (process:)
     return process
 
 getProcess :: Network -> ProcName -> IO Process
@@ -187,7 +200,7 @@ runTest tool test = do
     forM_ (testSteps test) $ \case
         Spawn pname nname -> do
             node <- getNode net nname
-            void $ spawnOn node pname tool
+            void $ spawnOn (Right node) pname Nothing tool
 
         Send pname line -> do
             p <- getProcess net pname
