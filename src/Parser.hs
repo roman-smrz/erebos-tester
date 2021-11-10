@@ -26,11 +26,14 @@ type TestParser = ParsecT Void TestStream (State (Set ProcName))
 
 type TestStream = TL.Text
 
+skipLineComment :: TestParser ()
+skipLineComment = L.skipLineComment $ TL.pack "#"
+
 scn :: TestParser ()
-scn = L.space space1 empty empty
+scn = L.space space1 skipLineComment empty
 
 sc :: TestParser ()
-sc = L.space (void $ takeWhile1P Nothing f) empty empty
+sc = L.space (void $ takeWhile1P Nothing f) skipLineComment empty
     where f x = x == ' ' || x == '\t'
 
 wordChar :: TestParser (Token TestStream)
