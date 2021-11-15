@@ -212,9 +212,9 @@ runTest out tool test = do
             expect out p regex
 
         Wait -> do
-            putStr "Waiting..."
-            hFlush stdout
+            outPrompt out $ T.pack "Waiting..."
             void $ getLine
+            outClearPrompt out
 
     _ <- installHandler processStatusChanged oldHandler Nothing
     exitNetwork out net
