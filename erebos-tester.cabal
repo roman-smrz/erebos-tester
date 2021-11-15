@@ -33,10 +33,12 @@ executable erebos-tester
 executable erebos-tester-core
   ghc-options:         -Wall -threaded
   main-is:             Main.hs
-  other-modules:       Parser
+  other-modules:       Output
+                       Parser
                        Test
   -- other-extensions:
-  default-extensions:  LambdaCase
+  default-extensions:  ImportQualifiedPost
+                       LambdaCase
   build-depends:       base             >=4.13 && <5,
                        containers ^>=0.6.2.1,
                        directory ^>=1.3.6.0,

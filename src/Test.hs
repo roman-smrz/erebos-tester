@@ -2,8 +2,8 @@ module Test (
     Test(..),
     TestStep(..),
 
-    ProcName(..), unpackProcName,
-    NodeName(..), unpackNodeName,
+    ProcName(..), textProcName, unpackProcName,
+    NodeName(..), textNodeName, unpackNodeName,
 ) where
 
 import Data.Text (Text)
@@ -24,11 +24,17 @@ data TestStep = Spawn ProcName NodeName
 newtype ProcName = ProcName Text
     deriving (Eq, Ord)
 
+textProcName :: ProcName -> Text
+textProcName (ProcName name) = name
+
 unpackProcName :: ProcName -> String
 unpackProcName (ProcName tname) = T.unpack tname
 
 newtype NodeName = NodeName Text
     deriving (Eq, Ord)
+
+textNodeName :: NodeName -> Text
+textNodeName (NodeName name) = name
 
 unpackNodeName :: NodeName -> String
 unpackNodeName (NodeName tname) = T.unpack tname

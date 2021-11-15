@@ -10,7 +10,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Text.Regex.TDFA
-import Text.Regex.TDFA.String
+import Text.Regex.TDFA.Text
 
 import System.Directory
 import System.Environment
@@ -22,6 +22,7 @@ import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
+import Output
 import Parser
 import Test
 
@@ -42,15 +43,15 @@ data Process = Process
     , procHandle :: ProcessHandle
     , procNode :: Either Network Node
     , procStdin :: Handle
-    , procOutput :: TVar [String]
+    , procOutput :: TVar [Text]
     , procKillWith :: Maybe Signal
     }
 
 testDir :: FilePath
 testDir = "./.test"
 
-initNetwork :: IO Network
-initNetwork = do
+initNetwork :: Output -> IO Network
+initNetwork out = do
     exists <- doesPathExist testDir
     when exists $ ioError $ userError $ testDir ++ " exists"
     createDirectoryIfMissing True testDir
@@ -60,12 +61,12 @@ initNetwork = do
     callCommand "ip link set dev br0 up"
     callCommand "ip link set dev lo up"
     net <- Network <$> newMVar [] <*> newMVar [] <*> pure testDir
-    void $ spawnOn (Left net) (ProcName (T.pack "tcpdump")) (Just softwareTermination) $
+    void $ spawnOn out (Left net) (ProcName (T.pack "tcpdump")) (Just softwareTermination) $
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
     return net
 
-exitNetwork :: Network -> IO ()
-exitNetwork net = do
+exitNetwork :: Output -> Network -> IO ()
+exitNetwork out net = do
     processes <- readMVar (netProcesses net)
     ok <- fmap and $ forM processes $ \p -> do
         hClose (procStdin p)
@@ -77,7 +78,7 @@ exitNetwork net = do
         waitForProcess (procHandle p) >>= \case
             ExitSuccess -> return True
             ExitFailure code -> do
-                putStrLn $ "\ESC[31m" ++ unpackProcName (procName p) ++ "!!> exit code: " ++ show code ++ "\ESC[0m"
+                outLine out OutputChildFail (Just $ procName p) $ T.pack $ "exit code: " ++ show code
                 return False
 
     if ok
@@ -113,39 +114,39 @@ getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> readMVar (n
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
 
-spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> IO Process
-spawnOn target pname killWith cmd = do
+spawnOn :: Output -> Either Network Node -> ProcName -> Maybe Signal -> String -> IO Process
+spawnOn out target pname killWith cmd = do
     let prefix = either (const "") (\node -> "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" ") target
     (Just hin, Just hout, Just herr, handle) <- createProcess (shell $ prefix ++ cmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
         , env = Just [("EREBOS_DIR", either netDir nodeDir target)]
         }
-    out <- newTVarIO []
+    pout <- newTVarIO []
 
-    let readingLoop :: Handle -> (String -> IO ()) -> IO ()
+    let readingLoop :: Handle -> (Text -> IO ()) -> IO ()
         readingLoop h act =
-            tryIOError (hGetLine h) >>= \case
+            tryIOError (T.hGetLine h) >>= \case
                 Left err
                     | isEOFError err -> return ()
-                    | otherwise -> putStrLn $ "\ESC[31m" ++ unpackProcName pname ++ "!!> IO error: " ++ show err ++ "\ESC[0m"
+                    | otherwise -> outLine out OutputChildFail (Just pname) $ T.pack $ "IO error: " ++ show err
                 Right line -> do
                     act line
                     readingLoop h act
 
     void $ forkIO $ readingLoop hout $ \line -> do
-        putStrLn $ unpackProcName pname ++ "> " ++ line
-        atomically $ modifyTVar out (++[line])
+        outLine out OutputChildStdout (Just pname) line
+        atomically $ modifyTVar pout (++[line])
     void $ forkIO $ readingLoop herr $ \line -> do
         case pname of
              ProcName tname | tname == T.pack "tcpdump" -> return ()
-             _ -> putStrLn $ "\ESC[31m" ++ unpackProcName pname ++ "!> " ++ line ++ "\ESC[0m"
+             _ -> outLine out OutputChildStderr (Just pname) line
 
     let process = Process
             { procName = pname
             , procHandle = handle
             , procNode = target
             , procStdin = hin
-            , procOutput = out
+            , procOutput = pout
             , procKillWith = killWith
             }
 
@@ -157,50 +158,50 @@ getProcess net pname = do
     Just p <- find ((pname==).procName) <$> readMVar (netProcesses net)
     return p
 
-tryMatch :: Regex -> [String] -> Maybe (String, [String])
+tryMatch :: Regex -> [Text] -> Maybe (Text, [Text])
 tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-expect :: Process -> Regex -> IO ()
-expect p re = do
+expect :: Output -> Process -> Regex -> IO ()
+expect out p re = do
     mbmatch <- atomically $ do
-        out <- readTVar (procOutput p)
-        case tryMatch re out of
+        line <- readTVar (procOutput p)
+        case tryMatch re line of
              Nothing -> retry
              Just (m, out') -> do
                  writeTVar (procOutput p) out'
                  return $ Just m
     case mbmatch of
-         Just line -> putStrLn $ "\ESC[32m" ++ unpackProcName (procName p) ++ "+> " ++ line ++ "\ESC[0m"
-         Nothing -> putStrLn $ "\ESC[31m" ++ unpackProcName (procName p) ++ "/> expect failed" ++ "\ESC[0m"
+         Just line -> outLine out OutputMatch (Just $ procName p) line
+         Nothing -> outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed"
 
 send :: Process -> Text -> IO ()
 send p line = do
     T.hPutStrLn (procStdin p) line
     hFlush (procStdin p)
 
-runTest :: String -> Test -> IO ()
-runTest tool test = do
-    net <- initNetwork
+runTest :: Output -> String -> Test -> IO ()
+runTest out tool test = do
+    net <- initNetwork out
 
     let sigHandler SignalInfo { siginfoSpecific = chld } = do
             processes <- readMVar (netProcesses net)
             forM_ processes $ \p -> do
                 mbpid <- getPid (procHandle p)
                 when (mbpid == Just (siginfoPid chld)) $ do
-                    let err detail = putStrLn $ "\ESC[31m" ++ unpackProcName (procName p) ++ "!!> child " ++ detail ++ "\ESC[0m"
+                    let err detail = outLine out OutputChildFail (Just $ procName p) detail
                     case siginfoStatus chld of
-                         Exited ExitSuccess -> putStrLn $ unpackProcName (procName p) ++ ".> child exited successfully"
-                         Exited (ExitFailure code) -> err $ "process exited with status " ++ show code
-                         Terminated sig _ -> err $ "terminated with signal " ++ show sig
-                         Stopped sig -> err $ "stopped with signal " ++ show sig
+                         Exited ExitSuccess -> outLine out OutputChildInfo (Just $ procName p) $ T.pack $ "child exited successfully"
+                         Exited (ExitFailure code) -> err $ T.pack $ "child process exited with status " ++ show code
+                         Terminated sig _ -> err $ T.pack $ "child terminated with signal " ++ show sig
+                         Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
     forM_ (testSteps test) $ \case
         Spawn pname nname -> do
             node <- getNode net nname
-            void $ spawnOn (Right node) pname Nothing tool
+            void $ spawnOn out (Right node) pname Nothing tool
 
         Send pname line -> do
             p <- getProcess net pname
@@ -208,7 +209,7 @@ runTest tool test = do
 
         Expect pname regex -> do
             p <- getProcess net pname
-            expect p regex
+            expect out p regex
 
         Wait -> do
             putStr "Waiting..."
@@ -216,11 +217,12 @@ runTest tool test = do
             void $ getLine
 
     _ <- installHandler processStatusChanged oldHandler Nothing
-    exitNetwork net
+    exitNetwork out net
 
 main :: IO ()
 main = do
     tool <- getEnv "EREBOS_TEST_TOOL"
     files <- getArgs
+    out <- startOutput
 
-    forM_ files $ mapM_ (runTest tool) <=< parseTestFile
+    forM_ files $ mapM_ (runTest out tool) <=< parseTestFile
