@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
@@ -65,10 +66,10 @@ initNetwork out = do
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
     return net
 
-exitNetwork :: Output -> Network -> IO ()
-exitNetwork out net = do
+exitNetwork :: Output -> Network -> Bool -> IO ()
+exitNetwork out net okTest = do
     processes <- readMVar (netProcesses net)
-    ok <- fmap and $ forM processes $ \p -> do
+    okProc <- fmap and $ forM processes $ \p -> do
         hClose (procStdin p)
         case procKillWith p of
              Nothing -> return ()
@@ -81,7 +82,7 @@ exitNetwork out net = do
                 outLine out OutputChildFail (Just $ procName p) $ T.pack $ "exit code: " ++ show code
                 return False
 
-    if ok
+    if okTest && okProc
        then do removeDirectoryRecursive $ netDir net
                exitSuccess
        else exitFailure
@@ -163,9 +164,10 @@ tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-expect :: Output -> Process -> Regex -> IO ()
+expect :: Output -> Process -> Regex -> IO Bool
 expect out p re = do
-    mbmatch <- atomically $ do
+    delay <- registerDelay 1000000
+    mbmatch <- atomically $ (Nothing <$ (check =<< readTVar delay)) <|> do
         line <- readTVar (procOutput p)
         case tryMatch re line of
              Nothing -> retry
@@ -173,13 +175,22 @@ expect out p re = do
                  writeTVar (procOutput p) out'
                  return $ Just m
     case mbmatch of
-         Just line -> outLine out OutputMatch (Just $ procName p) line
-         Nothing -> outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed"
+         Just line -> do
+             outLine out OutputMatch (Just $ procName p) line
+             return True
+         Nothing -> do
+             outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed"
+             return False
 
-send :: Process -> Text -> IO ()
+send :: Process -> Text -> IO Bool
 send p line = do
     T.hPutStrLn (procStdin p) line
     hFlush (procStdin p)
+    return True
+
+allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
+allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
+allM [] _ = return True
 
 runTest :: Output -> String -> Test -> IO ()
 runTest out tool test = do
@@ -198,10 +209,11 @@ runTest out tool test = do
                          Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
-    forM_ (testSteps test) $ \case
+    ok <- allM (testSteps test) $ \case
         Spawn pname nname -> do
             node <- getNode net nname
             void $ spawnOn out (Right node) pname Nothing tool
+            return True
 
         Send pname line -> do
             p <- getProcess net pname
@@ -215,9 +227,10 @@ runTest out tool test = do
             outPrompt out $ T.pack "Waiting..."
             void $ getLine
             outClearPrompt out
+            return True
 
     _ <- installHandler processStatusChanged oldHandler Nothing
-    exitNetwork out net
+    exitNetwork out net ok
 
 main :: IO ()
 main = do
