@@ -79,14 +79,14 @@ quotedString = label "string" $ lexeme $ do
     symbol "\""
     return $ TL.toStrict str
 
-regex :: TestParser Regex
+regex :: TestParser (Regex, Text)
 regex = label "regular expression" $ lexeme $ do
     symbol "/"
     pat <- takeWhileP Nothing (/='/')
     symbol "/"
     case compile defaultCompOpt defaultExecOpt ("^" ++ TL.unpack pat ++ "$") of
          Left err -> fail err
-         Right re -> return re
+         Right re -> return (re, TL.toStrict pat)
 
 testSpawn :: TestParser TestStep
 testSpawn = do
@@ -108,10 +108,10 @@ testSend = do
 testExpect :: TestParser TestStep
 testExpect = do
     wsymbol "expect"
-    re <- regex
+    (re, pat) <- regex
     wsymbol "from"
     pname <- procName
-    return $ Expect pname re
+    return $ Expect pname re pat
 
 testWait :: TestParser TestStep
 testWait = do

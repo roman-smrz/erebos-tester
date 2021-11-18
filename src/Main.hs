@@ -164,8 +164,8 @@ tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-expect :: Output -> Process -> Regex -> IO Bool
-expect out p re = do
+expect :: Output -> Process -> Regex -> Text -> IO Bool
+expect out p re pat = do
     delay <- registerDelay 1000000
     mbmatch <- atomically $ (Nothing <$ (check =<< readTVar delay)) <|> do
         line <- readTVar (procOutput p)
@@ -179,7 +179,7 @@ expect out p re = do
              outLine out OutputMatch (Just $ procName p) line
              return True
          Nothing -> do
-             outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed"
+             outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed /" `T.append` pat `T.append` T.pack "/"
              return False
 
 send :: Process -> Text -> IO Bool
@@ -219,9 +219,9 @@ runTest out tool test = do
             p <- getProcess net pname
             send p line
 
-        Expect pname regex -> do
+        Expect pname regex pat -> do
             p <- getProcess net pname
-            expect out p regex
+            expect out p regex pat
 
         Wait -> do
             outPrompt out $ T.pack "Waiting..."

@@ -18,7 +18,7 @@ data Test = Test
 
 data TestStep = Spawn ProcName NodeName
               | Send ProcName Text
-              | Expect ProcName Regex
+              | Expect ProcName Regex Text
               | Wait
 
 newtype ProcName = ProcName Text
