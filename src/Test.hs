@@ -11,6 +11,8 @@ import qualified Data.Text as T
 
 import Text.Regex.TDFA
 
+import Process
+
 data Test = Test
     { testName :: Text
     , testSteps :: [TestStep]
@@ -20,15 +22,6 @@ data TestStep = Spawn ProcName NodeName
               | Send ProcName Text
               | Expect ProcName Regex Text
               | Wait
-
-newtype ProcName = ProcName Text
-    deriving (Eq, Ord)
-
-textProcName :: ProcName -> Text
-textProcName (ProcName name) = name
-
-unpackProcName :: ProcName -> String
-unpackProcName (ProcName tname) = T.unpack tname
 
 newtype NodeName = NodeName Text
     deriving (Eq, Ord)

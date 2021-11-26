@@ -26,6 +26,7 @@ import System.Process
 
 import Output
 import Parser
+import Process
 import Test
 
 data Network = Network
@@ -38,15 +39,6 @@ data Node = Node
     { nodeName :: NodeName
     , nodeNetwork :: Network
     , nodeDir :: FilePath
-    }
-
-data Process = Process
-    { procName :: ProcName
-    , procHandle :: ProcessHandle
-    , procNode :: Either Network Node
-    , procStdin :: Handle
-    , procOutput :: TVar [Text]
-    , procKillWith :: Maybe Signal
     }
 
 data Options = Options
@@ -73,11 +65,11 @@ initNetwork out useGDB = do
     callCommand "ip link set dev lo up"
     net <- Network <$> newMVar [] <*> newMVar [] <*> pure testDir
 
-    void $ spawnOn out (Left net) (ProcName (T.pack "tcpdump")) (Just softwareTermination) $
+    void $ spawnOn out (Left net) (ProcNameTcpdump) (Just softwareTermination) $
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
 
     when useGDB $ do
-        gdb <- spawnOn out (Left net) (ProcName (T.pack "gdb")) Nothing $
+        gdb <- spawnOn out (Left net) (ProcNameGDB) Nothing $
             "gdb --quiet --interpreter=mi3"
         send gdb $ T.pack "-gdb-set schedule-multiple on"
         send gdb $ T.pack "-gdb-set mi-async on"
@@ -89,7 +81,7 @@ exitNetwork :: Output -> Network -> Bool -> IO ()
 exitNetwork out net okTest = do
     processes <- readMVar (netProcesses net)
     forM_ processes $ \p -> do
-        when (procName p /= ProcName (T.pack "gdb")) $ do
+        when (procName p /= ProcNameGDB) $ do
             hClose (procStdin p)
         case procKillWith p of
              Nothing -> return ()
@@ -98,7 +90,7 @@ exitNetwork out net okTest = do
                 Just pid -> signalProcess sig pid
 
     forM_ processes $ \p -> do
-        when (procName p == ProcName (T.pack "gdb")) $ do
+        when (procName p == ProcNameGDB) $ do
             let gdbSession = do
                     catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
                         Just line -> do
@@ -175,25 +167,24 @@ spawnOn out target pname killWith cmd = do
         atomically $ modifyTVar pout (++[line])
     void $ forkIO $ readingLoop herr $ \line -> do
         case pname of
-             ProcName tname | tname == T.pack "tcpdump" -> return ()
+             ProcNameTcpdump -> return ()
              _ -> outLine out OutputChildStderr (Just pname) line
 
     let process = Process
             { procName = pname
             , procHandle = handle
-            , procNode = target
             , procStdin = hin
             , procOutput = pout
             , procKillWith = killWith
             }
 
     let net = either id nodeNetwork target
-    when (pname /= ProcName (T.pack "gdb")) $ do
+    when (pname /= ProcNameGDB) $ do
         getPid handle >>= \case
             Just pid -> void $ do
                 ps <- readMVar (netProcesses net)
                 forM_ ps $ \gdb -> do
-                    when (procName gdb == ProcName (T.pack "gdb")) $ do
+                    when (procName gdb == ProcNameGDB) $ do
                         send gdb $ T.pack $ "-add-inferior"
                         send gdb $ T.pack $ "-target-attach --thread-group i" ++ show (length ps) ++ " " ++ show pid
                         send gdb $ T.pack $ "-exec-continue --thread-group i" ++ show (length ps)

@@ -35,6 +35,7 @@ executable erebos-tester-core
   main-is:             Main.hs
   other-modules:       Output
                        Parser
+                       Process
                        Test
   -- other-extensions:
   default-extensions:  ImportQualifiedPost
