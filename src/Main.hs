@@ -13,6 +13,7 @@ import qualified Data.Text.IO as T
 import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
+import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.Exit
@@ -48,11 +49,20 @@ data Process = Process
     , procKillWith :: Maybe Signal
     }
 
+data Options = Options
+    { optGDB :: Bool
+    }
+
+defaultOptions :: Options
+defaultOptions = Options
+    { optGDB = False
+    }
+
 testDir :: FilePath
 testDir = "./.test"
 
-initNetwork :: Output -> IO Network
-initNetwork out = do
+initNetwork :: Output -> Bool -> IO Network
+initNetwork out useGDB = do
     exists <- doesPathExist testDir
     when exists $ ioError $ userError $ testDir ++ " exists"
     createDirectoryIfMissing True testDir
@@ -62,20 +72,46 @@ initNetwork out = do
     callCommand "ip link set dev br0 up"
     callCommand "ip link set dev lo up"
     net <- Network <$> newMVar [] <*> newMVar [] <*> pure testDir
+
     void $ spawnOn out (Left net) (ProcName (T.pack "tcpdump")) (Just softwareTermination) $
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
+
+    when useGDB $ do
+        gdb <- spawnOn out (Left net) (ProcName (T.pack "gdb")) Nothing $
+            "gdb --quiet --interpreter=mi3"
+        send gdb $ T.pack "-gdb-set schedule-multiple on"
+        send gdb $ T.pack "-gdb-set mi-async on"
+        send gdb $ T.pack "-gdb-set print symbol-loading off"
+
     return net
 
 exitNetwork :: Output -> Network -> Bool -> IO ()
 exitNetwork out net okTest = do
     processes <- readMVar (netProcesses net)
-    okProc <- fmap and $ forM processes $ \p -> do
-        hClose (procStdin p)
+    forM_ processes $ \p -> do
+        when (procName p /= ProcName (T.pack "gdb")) $ do
+            hClose (procStdin p)
         case procKillWith p of
              Nothing -> return ()
              Just sig -> getPid (procHandle p) >>= \case
                 Nothing -> return ()
                 Just pid -> signalProcess sig pid
+
+    forM_ processes $ \p -> do
+        when (procName p == ProcName (T.pack "gdb")) $ do
+            let gdbSession = do
+                    catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
+                        Just line -> do
+                            send p (T.pack "-interpreter-exec console \"" `T.append` line `T.append` T.pack "\"")
+                            gdbSession
+                        Nothing -> return ()
+
+            outPrompt out $ T.pack "gdb> "
+            gdbSession
+            outClearPrompt out
+            hClose (procStdin p)
+
+    okProc <- fmap and $ forM processes $ \p -> do
         waitForProcess (procHandle p) >>= \case
             ExitSuccess -> return True
             ExitFailure code -> do
@@ -151,7 +187,19 @@ spawnOn out target pname killWith cmd = do
             , procKillWith = killWith
             }
 
-    modifyMVar_ (netProcesses (either id nodeNetwork target)) $ return . (process:)
+    let net = either id nodeNetwork target
+    when (pname /= ProcName (T.pack "gdb")) $ do
+        getPid handle >>= \case
+            Just pid -> void $ do
+                ps <- readMVar (netProcesses net)
+                forM_ ps $ \gdb -> do
+                    when (procName gdb == ProcName (T.pack "gdb")) $ do
+                        send gdb $ T.pack $ "-add-inferior"
+                        send gdb $ T.pack $ "-target-attach --thread-group i" ++ show (length ps) ++ " " ++ show pid
+                        send gdb $ T.pack $ "-exec-continue --thread-group i" ++ show (length ps)
+            Nothing -> return ()
+
+    modifyMVar_ (netProcesses net) $ return . (process:)
     return process
 
 getProcess :: Network -> ProcName -> IO Process
@@ -182,19 +230,18 @@ expect out p re pat = do
              outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed /" `T.append` pat `T.append` T.pack "/"
              return False
 
-send :: Process -> Text -> IO Bool
+send :: Process -> Text -> IO ()
 send p line = do
     T.hPutStrLn (procStdin p) line
     hFlush (procStdin p)
-    return True
 
 allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
 allM [] _ = return True
 
-runTest :: Output -> String -> Test -> IO ()
-runTest out tool test = do
-    net <- initNetwork out
+runTest :: Output -> String -> Bool -> Test -> IO ()
+runTest out tool useGDB test = do
+    net <- initNetwork out useGDB
 
     let sigHandler SignalInfo { siginfoSpecific = chld } = do
             processes <- readMVar (netProcesses net)
@@ -218,6 +265,7 @@ runTest out tool test = do
         Send pname line -> do
             p <- getProcess net pname
             send p line
+            return True
 
         Expect pname regex pat -> do
             p <- getProcess net pname
@@ -232,10 +280,22 @@ runTest out tool test = do
     _ <- installHandler processStatusChanged oldHandler Nothing
     exitNetwork out net ok
 
+
+options :: [OptDescr (Options -> Options)]
+options =
+     [ Option ['g'] ["gdb"]
+        (NoArg (\opts -> opts { optGDB = True }))
+        "run GDB and attach spawned pracesses"
+     ]
+
 main :: IO ()
 main = do
     tool <- getEnv "EREBOS_TEST_TOOL"
-    files <- getArgs
-    out <- startOutput
+    args <- getArgs
+    (opts, files) <- case getOpt Permute options args of
+        (o, files, []) -> return (foldl (flip id) defaultOptions o, files)
+        (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
+            where header = "Usage: erebos-tester [OPTION...]"
 
-    forM_ files $ mapM_ (runTest out tool) <=< parseTestFile
+    out <- startOutput
+    forM_ files $ mapM_ (runTest out tool (optGDB opts)) <=< parseTestFile
