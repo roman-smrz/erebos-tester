@@ -102,11 +102,18 @@ instance (GInit f, GInit h) => GInit (f :*: h) where ginit = ginit :*: ginit
 
 data Param a = forall b. Param String (Lens' a (Maybe b)) (TestParser b)
 
-command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (b -> TestParser a) -> TestParser a
+command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (b -> TestParser a) -> TestParser [a]
 command name params fin = do
     wsymbol name
-    let helper prev cur = do
-            (s, cur') <- choice $ flip map params $ \(Param sym l p) -> do
+    let blockHelper prev cur = L.indentBlock scn $ helper prev cur
+        helper prev cur = choice $ concat
+            [[ do void $ eol
+                  L.IndentNone . (:[]) <$> fin cur
+             ]
+            ,[ do void $ lexeme (char ':')
+                  return $ L.IndentSome Nothing (return . concat) (blockHelper prev cur)
+             ]
+            , flip map params $ \(Param sym l p) -> do
                 x <- if null sym
                     then do
                         x <- p
@@ -118,10 +125,10 @@ command name params fin = do
                         when (any (== sym) prev) $ do
                             fail $ "multiple '" ++ sym ++ "' parameters"
                         p
-                return $ (sym, l .~ Just x $ cur)
-            (eol >> return cur') <|> helper (s:prev) cur'
+                helper (sym:prev) (l .~ Just x $ cur)
+            ]
 
-    fin =<< helper [] (G.to ginit)
+    blockHelper [] (G.to ginit)
 
 
 data SpawnBuilder = SpawnBuilder
@@ -132,7 +139,7 @@ data SpawnBuilder = SpawnBuilder
 
 makeLenses ''SpawnBuilder
 
-testSpawn :: TestParser TestStep
+testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn"
     [ Param "on" spawnBuilderNode nodeName
     , Param "as" spawnBuilderProc procName
@@ -149,7 +156,7 @@ data SendBuilder = SendBuilder
 
 makeLenses ''SendBuilder
 
-testSend :: TestParser TestStep
+testSend :: TestParser [TestStep]
 testSend = command "send"
     [ Param "to" sendBuilderProc procName
     , Param "" sendBuilderLine quotedString
@@ -166,7 +173,7 @@ data ExpectBuilder = ExpectBuilder
 
 makeLenses ''ExpectBuilder
 
-testExpect :: TestParser TestStep
+testExpect :: TestParser [TestStep]
 testExpect = command "expect"
     [ Param "from" expectBuilderProc procName
     , Param "" expectBuilderRegex regex
@@ -176,14 +183,19 @@ testExpect = command "expect"
         <*> (maybe (fail "missing regex to match") (return . snd) $ b ^. expectBuilderRegex)
 
 
-testWait :: TestParser TestStep
+testWait :: TestParser [TestStep]
 testWait = do
     wsymbol "wait"
-    return $ Wait
+    return [Wait]
 
 parseTestDefinition :: TestParser Test
 parseTestDefinition = label "test definition" $ toplevel $ do
-    block (\name steps -> return $ Test name steps) header (testSpawn <|> testSend <|> testExpect <|> testWait)
+    block (\name steps -> return $ Test name $ concat steps) header $ choice
+        [ testSpawn
+        , testSend
+        , testExpect
+        , testWait
+        ]
     where header = do
               wsymbol "test"
               lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
