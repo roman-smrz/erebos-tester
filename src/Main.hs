@@ -6,6 +6,7 @@ import Control.Concurrent.STM
 import Control.Monad
 
 import Data.List
+import Data.Maybe
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
@@ -42,12 +43,16 @@ data Node = Node
     }
 
 data Options = Options
-    { optGDB :: Bool
+    { optDefaultTool :: String
+    , optProcTools :: [(ProcName, String)]
+    , optGDB :: Bool
     }
 
 defaultOptions :: Options
 defaultOptions = Options
-    { optGDB = False
+    { optDefaultTool = ""
+    , optProcTools = []
+    , optGDB = False
     }
 
 testDir :: FilePath
@@ -230,9 +235,9 @@ allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
 allM [] _ = return True
 
-runTest :: Output -> String -> Bool -> Test -> IO ()
-runTest out tool useGDB test = do
-    net <- initNetwork out useGDB
+runTest :: Output -> Options -> Test -> IO ()
+runTest out opts test = do
+    net <- initNetwork out $ optGDB opts
 
     let sigHandler SignalInfo { siginfoSpecific = chld } = do
             processes <- readMVar (netProcesses net)
@@ -250,7 +255,8 @@ runTest out tool useGDB test = do
     ok <- allM (testSteps test) $ \case
         Spawn pname nname -> do
             node <- getNode net nname
-            void $ spawnOn out (Right node) pname Nothing tool
+            void $ spawnOn out (Right node) pname Nothing $
+                fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
             return True
 
         Send pname line -> do
@@ -274,19 +280,27 @@ runTest out tool useGDB test = do
 
 options :: [OptDescr (Options -> Options)]
 options =
-     [ Option ['g'] ["gdb"]
+    [ Option ['T'] ["tool"]
+        (ReqArg (\str opts -> case break (==':') str of
+                                   (path, []) -> opts { optDefaultTool = path }
+                                   (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
+                ) "PATH")
+        "test tool to be used"
+    , Option ['g'] ["gdb"]
         (NoArg (\opts -> opts { optGDB = True }))
         "run GDB and attach spawned pracesses"
-     ]
+    ]
 
 main :: IO ()
 main = do
-    tool <- getEnv "EREBOS_TEST_TOOL"
+    envtool <- fromMaybe (error "No test tool defined") <$> lookupEnv "EREBOS_TEST_TOOL"
     args <- getArgs
     (opts, files) <- case getOpt Permute options args of
-        (o, files, []) -> return (foldl (flip id) defaultOptions o, files)
+        (o, files, []) -> return (foldl (flip id) defaultOptions { optDefaultTool = envtool } o, files)
         (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
             where header = "Usage: erebos-tester [OPTION...]"
 
+    optDefaultTool opts `seq` return ()
+
     out <- startOutput
-    forM_ files $ mapM_ (runTest out tool (optGDB opts)) <=< parseTestFile
+    forM_ files $ mapM_ (runTest out opts) <=< parseTestFile
