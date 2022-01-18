@@ -297,7 +297,7 @@ options =
         "default timeout in seconds with microsecond precision"
     , Option ['g'] ["gdb"]
         (NoArg (\opts -> opts { optGDB = True }))
-        "run GDB and attach spawned pracesses"
+        "run GDB and attach spawned processes"
     ]
 
 main :: IO ()
