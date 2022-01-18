@@ -7,10 +7,12 @@ import Control.Monad
 
 import Data.List
 import Data.Maybe
+import Data.Scientific
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
+import Text.Read
 import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
@@ -45,6 +47,7 @@ data Node = Node
 data Options = Options
     { optDefaultTool :: String
     , optProcTools :: [(ProcName, String)]
+    , optTimeout :: Scientific
     , optGDB :: Bool
     }
 
@@ -52,6 +55,7 @@ defaultOptions :: Options
 defaultOptions = Options
     { optDefaultTool = ""
     , optProcTools = []
+    , optTimeout = 1
     , optGDB = False
     }
 
@@ -208,9 +212,9 @@ tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-expect :: Output -> Process -> Regex -> Text -> IO Bool
-expect out p re pat = do
-    delay <- registerDelay 1000000
+expect :: Output -> Options -> Process -> Regex -> Text -> IO Bool
+expect out opts p re pat = do
+    delay <- registerDelay $ ceiling $ 1000000 * optTimeout opts
     mbmatch <- atomically $ (Nothing <$ (check =<< readTVar delay)) <|> do
         line <- readTVar (procOutput p)
         case tryMatch re line of
@@ -266,7 +270,7 @@ runTest out opts test = do
 
         Expect pname regex pat -> do
             p <- getProcess net pname
-            expect out p regex pat
+            expect out opts p regex pat
 
         Wait -> do
             outPrompt out $ T.pack "Waiting..."
@@ -286,6 +290,11 @@ options =
                                    (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
                 ) "PATH")
         "test tool to be used"
+    , Option ['t'] ["timeout"]
+        (ReqArg (\str opts -> case readMaybe str of
+                                   Just timeout -> opts { optTimeout = timeout }
+                                   Nothing -> error "timeout must be a number") "SECONDS")
+        "default timeout in seconds with microsecond precision"
     , Option ['g'] ["gdb"]
         (NoArg (\opts -> opts { optGDB = True }))
         "run GDB and attach spawned pracesses"
