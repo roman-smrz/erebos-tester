@@ -27,6 +27,7 @@ import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
+import GDB
 import Output
 import Parser
 import Process
@@ -78,11 +79,7 @@ initNetwork out useGDB = do
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
 
     when useGDB $ do
-        gdb <- spawnOn out (Left net) (ProcNameGDB) Nothing $
-            "gdb --quiet --interpreter=mi3"
-        send gdb $ T.pack "-gdb-set schedule-multiple on"
-        send gdb $ T.pack "-gdb-set mi-async on"
-        send gdb $ T.pack "-gdb-set print symbol-loading off"
+        gdbInit =<< spawnOn out (Left net) ProcNameGDB Nothing gdbCmd
 
     return net
 
@@ -100,15 +97,8 @@ exitNetwork out net okTest = do
 
     forM_ processes $ \p -> do
         when (procName p == ProcNameGDB) $ do
-            let gdbSession = do
-                    catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
-                        Just line -> do
-                            send p (T.pack "-interpreter-exec console \"" `T.append` line `T.append` T.pack "\"")
-                            gdbSession
-                        Nothing -> return ()
-
             outPrompt out $ T.pack "gdb> "
-            gdbSession
+            gdbSession p
             outClearPrompt out
             hClose (procStdin p)
 
@@ -194,9 +184,7 @@ spawnOn out target pname killWith cmd = do
                 ps <- readMVar (netProcesses net)
                 forM_ ps $ \gdb -> do
                     when (procName gdb == ProcNameGDB) $ do
-                        send gdb $ T.pack $ "-add-inferior"
-                        send gdb $ T.pack $ "-target-attach --thread-group i" ++ show (length ps) ++ " " ++ show pid
-                        send gdb $ T.pack $ "-exec-continue --thread-group i" ++ show (length ps)
+                        addInferior gdb (length ps) pid
             Nothing -> return ()
 
     modifyMVar_ (netProcesses net) $ return . (process:)
@@ -229,11 +217,6 @@ expect out opts p re pat = do
          Nothing -> do
              outLine out OutputMatchFail (Just $ procName p) $ T.pack "expect failed /" `T.append` pat `T.append` T.pack "/"
              return False
-
-send :: Process -> Text -> IO ()
-send p line = do
-    T.hPutStrLn (procStdin p) line
-    hFlush (procStdin p)
 
 allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False

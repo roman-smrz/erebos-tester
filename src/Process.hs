@@ -2,12 +2,14 @@ module Process (
     Process(..),
     ProcName(..),
     textProcName, unpackProcName,
+    send,
 ) where
 
 import Control.Concurrent.STM
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.IO as T
 
 import System.IO
 import System.Posix.Signals
@@ -33,3 +35,8 @@ textProcName ProcNameGDB = T.pack "gdb"
 
 unpackProcName :: ProcName -> String
 unpackProcName = T.unpack . textProcName
+
+send :: Process -> Text -> IO ()
+send p line = do
+    T.hPutStrLn (procStdin p) line
+    hFlush (procStdin p)

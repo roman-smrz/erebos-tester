@@ -33,7 +33,8 @@ executable erebos-tester
 executable erebos-tester-core
   ghc-options:         -Wall -threaded
   main-is:             Main.hs
-  other-modules:       Output
+  other-modules:       GDB
+                       Output
                        Parser
                        Process
                        Test
