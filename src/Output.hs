@@ -1,11 +1,14 @@
 module Output (
     Output, OutputType(..),
+    MonadOutput(..),
     startOutput,
     outLine,
     outPrompt, outClearPrompt,
 ) where
 
 import Control.Concurrent.MVar
+import Control.Monad.IO.Class
+import Control.Monad.Reader
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -29,6 +32,13 @@ data OutputType = OutputChildStdout
                 | OutputChildFail
                 | OutputMatch
                 | OutputMatchFail
+                | OutputError
+
+class MonadIO m => MonadOutput m where
+    getOutput :: m Output
+
+instance MonadIO m => MonadOutput (ReaderT Output m) where
+    getOutput = ask
 
 startOutput :: IO Output
 startOutput =  Output <$> newMVar OutputState { outCurPrompt = Nothing }
@@ -40,6 +50,7 @@ outColor OutputChildInfo = T.pack "0"
 outColor OutputChildFail = T.pack "31"
 outColor OutputMatch = T.pack "32"
 outColor OutputMatchFail = T.pack "31"
+outColor OutputError = T.pack "31"
 
 outSign :: OutputType -> Text
 outSign OutputChildStdout = T.empty
@@ -48,6 +59,7 @@ outSign OutputChildInfo = T.pack "."
 outSign OutputChildFail = T.pack "!!"
 outSign OutputMatch = T.pack "+"
 outSign OutputMatchFail = T.pack "/"
+outSign OutputError = T.pack "!!"
 
 clearPrompt :: OutputState -> IO ()
 clearPrompt OutputState { outCurPrompt = Just _ } = T.putStr $ T.pack "\ESC[2K\r"
@@ -57,8 +69,11 @@ showPrompt :: OutputState -> IO ()
 showPrompt OutputState { outCurPrompt = Just p } = T.putStr p >> hFlush stdout
 showPrompt _ = return ()
 
-outLine :: Output -> OutputType -> Maybe ProcName -> Text -> IO ()
-outLine out otype mbproc line = withMVar (outState out) $ \st -> do
+ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
+ioWithOutput act = liftIO . act =<< getOutput
+
+outLine :: MonadOutput m => OutputType -> Maybe ProcName -> Text -> m ()
+outLine otype mbproc line = ioWithOutput $ \out -> withMVar (outState out) $ \st -> do
     clearPrompt st
     TL.putStrLn $ TL.fromChunks
         [ T.pack "\ESC[", outColor otype, T.pack "m"
@@ -70,14 +85,14 @@ outLine out otype mbproc line = withMVar (outState out) $ \st -> do
         ]
     showPrompt st
 
-outPrompt :: Output -> Text -> IO ()
-outPrompt out p = modifyMVar_ (outState out) $ \st -> do
+outPrompt :: MonadOutput m => Text -> m ()
+outPrompt p = ioWithOutput $ \out -> modifyMVar_ (outState out) $ \st -> do
     clearPrompt st
     let st' = st { outCurPrompt = Just p }
     showPrompt st'
     return st'
 
-outClearPrompt :: Output -> IO ()
-outClearPrompt out = modifyMVar_ (outState out) $ \st -> do
+outClearPrompt :: MonadOutput m => m ()
+outClearPrompt = ioWithOutput $ \out -> modifyMVar_ (outState out) $ \st -> do
     clearPrompt st
     return st { outCurPrompt = Nothing }

@@ -6,6 +6,7 @@ module Process (
 ) where
 
 import Control.Concurrent.STM
+import Control.Monad.IO.Class
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -36,7 +37,7 @@ textProcName ProcNameGDB = T.pack "gdb"
 unpackProcName :: ProcName -> String
 unpackProcName = T.unpack . textProcName
 
-send :: Process -> Text -> IO ()
-send p line = do
+send :: MonadIO m => Process -> Text -> m ()
+send p line = liftIO $ do
     T.hPutStrLn (procStdin p) line
     hFlush (procStdin p)

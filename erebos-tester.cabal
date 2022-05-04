@@ -43,8 +43,10 @@ executable erebos-tester-core
                        ExistentialQuantification
                        FlexibleContexts
                        FlexibleInstances
+                       GeneralizedNewtypeDeriving
                        ImportQualifiedPost
                        LambdaCase
+                       MultiParamTypeClasses
                        RankNTypes
                        TypeFamilies
                        TypeOperators
