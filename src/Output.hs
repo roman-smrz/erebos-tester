@@ -20,7 +20,14 @@ import System.IO
 
 import Test
 
-data Output = Output { outState :: MVar OutputState }
+data Output = Output
+    { outState :: MVar OutputState
+    , outConfig :: OutputConfig
+    }
+
+data OutputConfig = OutputConfig
+    { outVerbose :: Bool
+    }
 
 data OutputState = OutputState
     { outCurPrompt :: Maybe Text
@@ -40,8 +47,10 @@ class MonadIO m => MonadOutput m where
 instance MonadIO m => MonadOutput (ReaderT Output m) where
     getOutput = ask
 
-startOutput :: IO Output
-startOutput =  Output <$> newMVar OutputState { outCurPrompt = Nothing }
+startOutput :: Bool -> IO Output
+startOutput verbose = Output
+    <$> newMVar OutputState { outCurPrompt = Nothing }
+    <*> pure OutputConfig { outVerbose = verbose }
 
 outColor :: OutputType -> Text
 outColor OutputChildStdout = T.pack "0"
@@ -61,6 +70,16 @@ outSign OutputMatch = T.pack "+"
 outSign OutputMatchFail = T.pack "/"
 outSign OutputError = T.pack "!!"
 
+printWhenQuiet :: OutputType -> Bool
+printWhenQuiet = \case
+    OutputChildStdout -> False
+    OutputChildStderr -> True
+    OutputChildInfo -> False
+    OutputChildFail -> True
+    OutputMatch -> False
+    OutputMatchFail -> True
+    OutputError -> True
+
 clearPrompt :: OutputState -> IO ()
 clearPrompt OutputState { outCurPrompt = Just _ } = T.putStr $ T.pack "\ESC[2K\r"
 clearPrompt _ = return ()
@@ -73,17 +92,19 @@ ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
 ioWithOutput act = liftIO . act =<< getOutput
 
 outLine :: MonadOutput m => OutputType -> Maybe ProcName -> Text -> m ()
-outLine otype mbproc line = ioWithOutput $ \out -> withMVar (outState out) $ \st -> do
-    clearPrompt st
-    TL.putStrLn $ TL.fromChunks
-        [ T.pack "\ESC[", outColor otype, T.pack "m"
-        , maybe T.empty textProcName mbproc
-        , outSign otype
-        , T.pack "> "
-        , line
-        , T.pack "\ESC[0m"
-        ]
-    showPrompt st
+outLine otype mbproc line = ioWithOutput $ \out ->
+    when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
+        withMVar (outState out) $ \st -> do
+            clearPrompt st
+            TL.putStrLn $ TL.fromChunks
+                [ T.pack "\ESC[", outColor otype, T.pack "m"
+                , maybe T.empty textProcName mbproc
+                , outSign otype
+                , T.pack "> "
+                , line
+                , T.pack "\ESC[0m"
+                ]
+            showPrompt st
 
 outPrompt :: MonadOutput m => Text -> m ()
 outPrompt p = ioWithOutput $ \out -> modifyMVar_ (outState out) $ \st -> do

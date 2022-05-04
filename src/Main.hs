@@ -50,6 +50,7 @@ data Node = Node
 data Options = Options
     { optDefaultTool :: String
     , optProcTools :: [(ProcName, String)]
+    , optVerbose :: Bool
     , optTimeout :: Scientific
     , optGDB :: Bool
     }
@@ -58,6 +59,7 @@ defaultOptions :: Options
 defaultOptions = Options
     { optDefaultTool = ""
     , optProcTools = []
+    , optVerbose = False
     , optTimeout = 1
     , optGDB = False
     }
@@ -327,6 +329,9 @@ options =
                                    (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
                 ) "PATH")
         "test tool to be used"
+    , Option ['v'] ["verbose"]
+        (NoArg (\opts -> opts { optVerbose = True }))
+        "show output of processes and successful tests"
     , Option ['t'] ["timeout"]
         (ReqArg (\str opts -> case readMaybe str of
                                    Just timeout -> opts { optTimeout = timeout }
@@ -348,5 +353,5 @@ main = do
 
     optDefaultTool opts `seq` return ()
 
-    out <- startOutput
+    out <- startOutput $ optVerbose opts
     forM_ files $ mapM_ (runTest out opts) <=< parseTestFile
