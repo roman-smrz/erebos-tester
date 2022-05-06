@@ -120,7 +120,7 @@ initNetwork = do
         when exists $ ioError $ userError $ testDir ++ " exists"
         createDirectoryIfMissing True testDir
 
-        callCommand "ip link add name br0 type bridge"
+        callCommand "ip link add name br0 group 1 type bridge"
         callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
         callCommand "ip link set dev br0 up"
         callCommand "ip link set dev lo up"
@@ -161,10 +161,13 @@ exitNetwork net = do
                 outLine OutputChildFail (Just $ procName p) $ T.pack $ "exit code: " ++ show code
                 liftIO . atomically . flip writeTVar False =<< asks teFailed
 
+    liftIO $ do
+        callCommand $ "ip -all netns del"
+        callCommand $ "ip link del group 1"
+
     failed <- liftIO . atomically . readTVar =<< asks teFailed
     liftIO $ if failed then exitFailure
-                       else do removeDirectoryRecursive $ netDir net
-                               exitSuccess
+                       else removeDirectoryRecursive $ netDir net
 
 getNode :: Network -> NodeName -> TestRun Node
 getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> liftIO (readMVar (netNodes net))) >>= \case
@@ -183,7 +186,7 @@ getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> liftIO (rea
 
         modifyMVar_ (netNodes net) $ \nodes -> do
             callCommand $ "ip netns add \""++ name ++ "\""
-            callCommand $ "ip link add \"veth_" ++ name ++ ".0\" type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
+            callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
             callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
             callOn node $ "ip addr add 192.168.0." ++ show (11 + length nodes) ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
             callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
