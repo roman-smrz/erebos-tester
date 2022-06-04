@@ -1,5 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 module Parser (
     parseTestFile,
 ) where
@@ -10,7 +12,7 @@ import Control.Monad.State
 import Data.Char
 import Data.Set (Set)
 import qualified Data.Set as S
-import Data.Text (Text)
+import Data.Text qualified as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import Data.Void
@@ -20,8 +22,6 @@ import Generics.Deriving.Base as G
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
-import Text.Regex.TDFA (defaultCompOpt, defaultExecOpt)
-import Text.Regex.TDFA.String
 
 import System.Exit
 
@@ -30,6 +30,9 @@ import Test
 type TestParser = ParsecT Void TestStream (State (Set ProcName))
 
 type TestStream = TL.Text
+
+instance MonadEval TestParser where
+    lookupStringVar _ = return T.empty
 
 skipLineComment :: TestParser ()
 skipLineComment = L.skipLineComment $ TL.pack "#"
@@ -77,12 +80,23 @@ procName = label "process name" $ lexeme $ do
     cs <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_' || x == '-')
     return $ ProcName $ TL.toStrict (c `TL.cons` cs)
 
-quotedString :: TestParser Text
+varExpansion :: TestParser VarName
+varExpansion = do
+    void $ char '$'
+    choice
+        [ VarName . (:[]) . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+        ,do void $ char '{'
+            name <- takeWhile1P Nothing (/='}')
+            void $ char '}'
+            return $ VarName $ T.splitOn (T.singleton '.') (TL.toStrict name)
+        ]
+
+quotedString :: TestParser StringExpr
 quotedString = label "string" $ lexeme $ do
     symbol "\""
     let inner = choice
             [ char '"' >> return []
-            , takeWhile1P Nothing (`notElem` "\"\\") >>= \s -> (s:) <$> inner
+            , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (Left (TL.toStrict s):) <$> inner
             ,do void $ char '\\'
                 c <- choice
                     [ char '\\' >> return '\\'
@@ -92,27 +106,30 @@ quotedString = label "string" $ lexeme $ do
                     , char 'r' >> return '\r'
                     , char 't' >> return '\t'
                     ]
-                (TL.singleton c:) <$> inner
+                (Left (T.singleton c) :) <$> inner
+            ,do name <- varExpansion
+                (Right name :) <$> inner
             ]
-    TL.toStrict . TL.concat <$> inner
+    StringExpr <$> inner
 
-regex :: TestParser (Regex, Text)
+regex :: TestParser RegexExpr
 regex = label "regular expression" $ lexeme $ do
     symbol "/"
     let inner = choice
             [ char '/' >> return []
-            , takeWhile1P Nothing (`notElem` "/\\") >>= \s -> (s:) <$> inner
+            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Left (TL.unpack s) :) <$> inner
             ,do void $ char '\\'
                 s <- choice
-                    [ char '/' >> return (TL.singleton '/')
-                    , anySingle >>= \c -> return (TL.pack ['\\', c])
+                    [ char '/' >> return (Left $ "/")
+                    , anySingle >>= \c -> return (Left ['\\', c])
                     ]
                 (s:) <$> inner
+            ,do name <- varExpansion
+                (Right name :) <$> inner
             ]
-    pat <- TL.concat <$> inner
-    case compile defaultCompOpt defaultExecOpt ("^" ++ TL.unpack pat ++ "$") of
-         Left err -> fail err
-         Right re -> return (re, TL.toStrict pat)
+    expr <- RegexExpr <$> inner
+    _ <- evalRegexExpr expr -- test regex parsing with empty variables
+    return expr
 
 
 class GInit f where ginit :: f x
@@ -171,7 +188,7 @@ testSpawn = command "spawn"
 
 data SendBuilder = SendBuilder
     { _sendBuilderProc :: Maybe ProcName
-    , _sendBuilderLine :: Maybe Text
+    , _sendBuilderLine :: Maybe StringExpr
     }
     deriving (Generic)
 
@@ -188,7 +205,7 @@ testSend = command "send"
 
 data ExpectBuilder = ExpectBuilder
     { _expectBuilderProc :: Maybe ProcName
-    , _expectBuilderRegex :: Maybe (Regex, Text)
+    , _expectBuilderRegex :: Maybe RegexExpr
     }
     deriving (Generic)
 
@@ -200,8 +217,7 @@ testExpect = command "expect"
     , Param "" expectBuilderRegex regex
     ] $ \b -> Expect
         <$> (maybe (fail "missing 'from' <proc>") return $ b ^. expectBuilderProc)
-        <*> (maybe (fail "missing regex to match") (return . fst) $ b ^. expectBuilderRegex)
-        <*> (maybe (fail "missing regex to match") (return . snd) $ b ^. expectBuilderRegex)
+        <*> (maybe (fail "missing regex to match") return $ b ^. expectBuilderRegex)
 
 
 testWait :: TestParser [TestStep]

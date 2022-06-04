@@ -1,11 +1,13 @@
 module Main where
 
+import Control.Arrow
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
+import Control.Monad.State
 
 import Data.List
 import Data.Maybe
@@ -14,7 +16,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
-import Text.Read
+import Text.Read (readMaybe)
 import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
@@ -74,8 +76,12 @@ data TestEnv = TestEnv
     , teOptions :: Options
     }
 
-newtype TestRun a = TestRun { fromTestRun :: ReaderT TestEnv (ExceptT () IO) a }
-    deriving (Functor, Applicative, Monad, MonadReader TestEnv, MonadIO)
+data TestState = TestState
+    { tsVars :: [(VarName, Text)]
+    }
+
+newtype TestRun a = TestRun { fromTestRun :: ReaderT TestEnv (StateT TestState (ExceptT () IO)) a }
+    deriving (Functor, Applicative, Monad, MonadReader TestEnv, MonadState TestState, MonadIO)
 
 instance MonadFail TestRun where
     fail str = do
@@ -90,6 +96,8 @@ instance MonadError () TestRun where
 
     catchError (TestRun act) handler = TestRun $ catchError act $ fromTestRun . handler
 
+instance MonadEval TestRun where
+    lookupStringVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< gets (lookup name . tsVars)
 
 instance MonadOutput TestRun where
     getOutput = asks teOutput
@@ -97,8 +105,9 @@ instance MonadOutput TestRun where
 forkTest :: TestRun () -> TestRun ()
 forkTest act = do
     tenv <- ask
+    tstate <- get
     void $ liftIO $ forkIO $ do
-        runExceptT (runReaderT (fromTestRun act) tenv) >>= \case
+        runExceptT (flip evalStateT tstate $ flip runReaderT tenv $ fromTestRun act) >>= \case
             Left () -> atomically $ writeTVar (teFailed tenv) True
             Right () -> return ()
 
@@ -283,7 +292,9 @@ runTest out opts test = do
         <$> pure out
         <*> newTVarIO False
         <*> pure opts
-    (fmap $ either (const False) id) $ runExceptT $ flip runReaderT tenv $ fromTestRun $ do
+    tstate <- TestState
+        <$> pure []
+    (fmap $ either (const False) id) $ runExceptT $ flip evalStateT tstate $ flip runReaderT tenv $ fromTestRun $ do
         net <- initNetwork
 
         let sigHandler SignalInfo { siginfoSpecific = chld } = do
@@ -305,12 +316,15 @@ runTest out opts test = do
                 void $ spawnOn (Right node) pname Nothing $
                     fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
 
-            Send pname line -> do
+            Send pname expr -> do
                 p <- getProcess net pname
+                line <- evalStringExpr expr
                 send p line
 
-            Expect pname regex pat -> do
+            Expect pname expr@(RegexExpr ps) -> do
                 p <- getProcess net pname
+                regex <- evalRegexExpr expr
+                pat <- evalStringExpr (StringExpr $ map (left T.pack) ps)
                 expect p regex pat
 
             Wait -> do
