@@ -80,15 +80,36 @@ procName = label "process name" $ lexeme $ do
 quotedString :: TestParser Text
 quotedString = label "string" $ lexeme $ do
     symbol "\""
-    str <- takeWhileP Nothing (/='"')
-    symbol "\""
-    return $ TL.toStrict str
+    let inner = choice
+            [ char '"' >> return []
+            , takeWhile1P Nothing (`notElem` "\"\\") >>= \s -> (s:) <$> inner
+            ,do void $ char '\\'
+                c <- choice
+                    [ char '\\' >> return '\\'
+                    , char '"' >> return '"'
+                    , char '$' >> return '$'
+                    , char 'n' >> return '\n'
+                    , char 'r' >> return '\r'
+                    , char 't' >> return '\t'
+                    ]
+                (TL.singleton c:) <$> inner
+            ]
+    TL.toStrict . TL.concat <$> inner
 
 regex :: TestParser (Regex, Text)
 regex = label "regular expression" $ lexeme $ do
     symbol "/"
-    pat <- takeWhileP Nothing (/='/')
-    symbol "/"
+    let inner = choice
+            [ char '/' >> return []
+            , takeWhile1P Nothing (`notElem` "/\\") >>= \s -> (s:) <$> inner
+            ,do void $ char '\\'
+                s <- choice
+                    [ char '/' >> return (TL.singleton '/')
+                    , anySingle >>= \c -> return (TL.pack ['\\', c])
+                    ]
+                (s:) <$> inner
+            ]
+    pat <- TL.concat <$> inner
     case compile defaultCompOpt defaultExecOpt ("^" ++ TL.unpack pat ++ "$") of
          Left err -> fail err
          Right re -> return (re, TL.toStrict pat)
