@@ -181,7 +181,7 @@ exitNetwork net = do
 getNode :: Network -> NodeName -> TestRun Node
 getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> liftIO (readMVar (netNodes net))) >>= \case
     Just node -> return node
-    _ -> liftIO $ do
+    _ -> do
         let name = T.unpack tnname
             dir = netDir net </> ("erebos_" ++ name)
             node = Node { nodeName = nname
@@ -189,18 +189,22 @@ getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> liftIO (rea
                         , nodeDir = dir
                         }
 
-        exists <- doesPathExist dir
-        when exists $ ioError $ userError $ dir ++ " exists"
-        createDirectoryIfMissing True dir
+        ip <- liftIO $ do
+            exists <- doesPathExist dir
+            when exists $ ioError $ userError $ dir ++ " exists"
+            createDirectoryIfMissing True dir
 
-        modifyMVar_ (netNodes net) $ \nodes -> do
-            callCommand $ "ip netns add \""++ name ++ "\""
-            callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
-            callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
-            callOn node $ "ip addr add 192.168.0." ++ show (11 + length nodes) ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
-            callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
-            callOn node $ "ip link set dev lo up"
-            return $ node : nodes
+            modifyMVar (netNodes net) $ \nodes -> do
+                let ip = "192.168.0." ++ show (11 + length nodes)
+                callCommand $ "ip netns add \""++ name ++ "\""
+                callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
+                callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
+                callOn node $ "ip addr add " ++ ip ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
+                callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
+                callOn node $ "ip link set dev lo up"
+                return $ (node : nodes, ip)
+
+        modify $ \s -> s { tsVars = (VarName [tnname, T.pack "ip"], T.pack ip) : tsVars s }
         return node
 
 callOn :: Node -> String -> IO ()
