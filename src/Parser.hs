@@ -103,12 +103,12 @@ varExpansion = do
             return $ VarName $ T.splitOn (T.singleton '.') (TL.toStrict name)
         ]
 
-quotedString :: TestParser StringExpr
+quotedString :: TestParser (Expr Text)
 quotedString = label "string" $ lexeme $ do
     symbol "\""
     let inner = choice
             [ char '"' >> return []
-            , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (Left (TL.toStrict s):) <$> inner
+            , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (StringLit (TL.toStrict s):) <$> inner
             ,do void $ char '\\'
                 c <- choice
                     [ char '\\' >> return '\\'
@@ -118,29 +118,29 @@ quotedString = label "string" $ lexeme $ do
                     , char 'r' >> return '\r'
                     , char 't' >> return '\t'
                     ]
-                (Left (T.singleton c) :) <$> inner
+                (StringLit (T.singleton c) :) <$> inner
             ,do name <- varExpansion
-                (Right name :) <$> inner
+                (StringVar name :) <$> inner
             ]
-    StringExpr <$> inner
+    Concat <$> inner
 
-regex :: TestParser RegexExpr
+regex :: TestParser (Expr Regex)
 regex = label "regular expression" $ lexeme $ do
     symbol "/"
     let inner = choice
             [ char '/' >> return []
-            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Left (TL.unpack s) :) <$> inner
+            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (StringLit (TL.toStrict s) :) <$> inner
             ,do void $ char '\\'
                 s <- choice
-                    [ char '/' >> return (Left $ "/")
-                    , anySingle >>= \c -> return (Left ['\\', c])
+                    [ char '/' >> return (StringLit $ T.singleton '/')
+                    , anySingle >>= \c -> return (StringLit $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
             ,do name <- varExpansion
-                (Right name :) <$> inner
+                (StringVar name :) <$> inner
             ]
-    expr <- RegexExpr <$> inner
-    _ <- evalRegexExpr expr -- test regex parsing with empty variables
+    expr <- Regex <$> inner
+    _ <- eval expr -- test regex parsing with empty variables
     return expr
 
 
@@ -200,7 +200,7 @@ testSpawn = command "spawn"
 
 data SendBuilder = SendBuilder
     { _sendBuilderProc :: Maybe ProcName
-    , _sendBuilderLine :: Maybe StringExpr
+    , _sendBuilderLine :: Maybe (Expr Text)
     }
     deriving (Generic)
 
@@ -217,7 +217,7 @@ testSend = command "send"
 
 data ExpectBuilder = ExpectBuilder
     { _expectBuilderProc :: Maybe ProcName
-    , _expectBuilderRegex :: Maybe RegexExpr
+    , _expectBuilderRegex :: Maybe (Expr Regex)
     , _expectBuilderCaptures :: Maybe [VarName]
     }
     deriving (Generic)

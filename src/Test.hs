@@ -7,8 +7,8 @@ module Test (
 
     MonadEval(..),
     VarName(..), textVarName, unpackVarName,
-    StringExpr(..), evalStringExpr,
-    RegexExpr(..), evalRegexExpr,
+    Expr(..), eval,
+    Regex,
 ) where
 
 import Control.Monad
@@ -18,7 +18,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import Text.Regex.TDFA
-import Text.Regex.TDFA.String
+import Text.Regex.TDFA.Text
 
 import Process
 
@@ -28,8 +28,8 @@ data Test = Test
     }
 
 data TestStep = Spawn ProcName NodeName
-              | Send ProcName StringExpr
-              | Expect ProcName RegexExpr [VarName]
+              | Send ProcName (Expr Text)
+              | Expect ProcName (Expr Regex) [VarName]
               | Wait
 
 newtype NodeName = NodeName Text
@@ -42,7 +42,7 @@ unpackNodeName :: NodeName -> String
 unpackNodeName (NodeName tname) = T.unpack tname
 
 
-class Monad m => MonadEval m where
+class MonadFail m => MonadEval m where
   lookupStringVar :: VarName -> m Text
 
 
@@ -55,20 +55,21 @@ textVarName (VarName name) = T.concat $ intersperse (T.singleton '.') name
 unpackVarName :: VarName -> String
 unpackVarName = T.unpack . textVarName
 
-data StringExpr = StringExpr [Either Text VarName]
 
-evalStringExpr :: MonadEval m => StringExpr -> m Text
-evalStringExpr (StringExpr xs) = fmap T.concat $ forM xs $ \case
-    Left text -> return text
-    Right var -> lookupStringVar var
+data Expr a where
+    StringVar :: VarName -> Expr Text
+    StringLit :: Text -> Expr Text
+    Concat :: [Expr Text] -> Expr Text
+    Regex :: [Expr Text] -> Expr Regex
 
-data RegexExpr = RegexExpr [Either String VarName]
-
-evalRegexExpr :: (MonadFail m, MonadEval m) => RegexExpr -> m Regex
-evalRegexExpr (RegexExpr xs) = do
+eval :: MonadEval m => Expr a -> m a
+eval (StringVar var) = lookupStringVar var
+eval (StringLit str) = return str
+eval (Concat xs) = T.concat <$> mapM eval xs
+eval (Regex xs) = do
     parts <- forM xs $ \case
-        Left str -> return str
-        Right var -> concatMap (\c -> ['\\',c]) . T.unpack <$> lookupStringVar var
-    case compile defaultCompOpt defaultExecOpt $ concat $ concat [["^"], parts, ["$"]] of
+        StringLit str -> return str
+        expr -> T.concatMap (\c -> T.pack ['\\', c]) <$> eval expr
+    case compile defaultCompOpt defaultExecOpt $ T.concat $ concat [[T.singleton '^'], parts, [T.singleton '$']] of
         Left err -> fail err
         Right re -> return re

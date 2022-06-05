@@ -43,6 +43,7 @@ executable erebos-tester-core
                        ExistentialQuantification
                        FlexibleContexts
                        FlexibleInstances
+                       GADTs
                        GeneralizedNewtypeDeriving
                        ImportQualifiedPost
                        LambdaCase

@@ -1,6 +1,5 @@
 module Main where
 
-import Control.Arrow
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -333,13 +332,13 @@ runTest out opts test = do
 
             Send pname expr -> do
                 p <- getProcess net pname
-                line <- evalStringExpr expr
+                line <- eval expr
                 send p line
 
-            Expect pname expr@(RegexExpr ps) captures -> do
+            Expect pname expr@(Regex ps) captures -> do
                 p <- getProcess net pname
-                regex <- evalRegexExpr expr
-                pat <- evalStringExpr (StringExpr $ map (left T.pack) ps)
+                regex <- eval expr
+                pat <- eval (Concat ps)
                 expect p regex pat captures
 
             Wait -> do
