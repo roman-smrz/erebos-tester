@@ -12,6 +12,7 @@ import Control.Monad.State
 import Data.Char
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Text (Text)
 import Data.Text qualified as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
@@ -68,6 +69,13 @@ block merge header item = L.indentBlock scn $ do
         , L.IndentNone <$> merge h []
         ]
 
+listOf :: TestParser a -> TestParser [a]
+listOf item = do
+    sc
+    x <- item
+    sc
+    (x:) <$> choice [ char ',' >> listOf item, return [] ]
+
 nodeName :: TestParser NodeName
 nodeName = label "network node name" $ lexeme $ do
     c <- lowerChar
@@ -80,11 +88,15 @@ procName = label "process name" $ lexeme $ do
     cs <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_' || x == '-')
     return $ ProcName $ TL.toStrict (c `TL.cons` cs)
 
+identifier :: TestParser Text
+identifier = do
+    TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+
 varExpansion :: TestParser VarName
 varExpansion = do
     void $ char '$'
     choice
-        [ VarName . (:[]) . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+        [ VarName . (:[]) <$> identifier
         ,do void $ char '{'
             name <- takeWhile1P Nothing (/='}')
             void $ char '}'
@@ -206,6 +218,7 @@ testSend = command "send"
 data ExpectBuilder = ExpectBuilder
     { _expectBuilderProc :: Maybe ProcName
     , _expectBuilderRegex :: Maybe RegexExpr
+    , _expectBuilderCaptures :: Maybe [VarName]
     }
     deriving (Generic)
 
@@ -215,9 +228,11 @@ testExpect :: TestParser [TestStep]
 testExpect = command "expect"
     [ Param "from" expectBuilderProc procName
     , Param "" expectBuilderRegex regex
+    , Param "capture" expectBuilderCaptures (listOf $ VarName . (:[]) <$> identifier)
     ] $ \b -> Expect
         <$> (maybe (fail "missing 'from' <proc>") return $ b ^. expectBuilderProc)
         <*> (maybe (fail "missing regex to match") return $ b ^. expectBuilderRegex)
+        <*> (maybe (return []) return $ b ^. expectBuilderCaptures)
 
 
 testWait :: TestParser [TestStep]

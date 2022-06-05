@@ -263,13 +263,13 @@ getProcess net pname = liftIO $ do
     Just p <- find ((pname==).procName) <$> readMVar (netProcesses net)
     return p
 
-tryMatch :: Regex -> [Text] -> Maybe (Text, [Text])
-tryMatch re (x:xs) | Right (Just _) <- regexec re x = Just (x, xs)
+tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
+tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexec re x = Just ((x, capture), xs)
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-expect :: Process -> Regex -> Text -> TestRun ()
-expect p re pat = do
+expect :: Process -> Regex -> Text -> [VarName] -> TestRun ()
+expect p re pat vars = do
     timeout <- asks $ optTimeout . teOptions
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
@@ -280,7 +280,18 @@ expect p re pat = do
                  writeTVar (procOutput p) out'
                  return $ Just m
     case mbmatch of
-         Just line -> do
+         Just (line, capture) -> do
+             when (length vars /= length capture) $ do
+                 outLine OutputMatchFail (Just $ procName p) $ T.pack "mismatched number of capture variables /" `T.append` pat `T.append` T.pack "/"
+                 throwError ()
+
+             forM_ vars $ \name -> do
+                 cur <- gets (lookup name . tsVars)
+                 when (isJust cur) $ do
+                     outLine OutputMatchFail (Just $ procName p) $ T.pack "variable already exists: '" `T.append` textVarName name `T.append` T.pack "'"
+                     throwError ()
+
+             modify $ \s -> s { tsVars = zip vars capture ++ tsVars s }
              outLine OutputMatch (Just $ procName p) line
          Nothing -> do
              outLine OutputMatchFail (Just $ procName p) $ T.pack "expect failed /" `T.append` pat `T.append` T.pack "/"
@@ -325,11 +336,11 @@ runTest out opts test = do
                 line <- evalStringExpr expr
                 send p line
 
-            Expect pname expr@(RegexExpr ps) -> do
+            Expect pname expr@(RegexExpr ps) captures -> do
                 p <- getProcess net pname
                 regex <- evalRegexExpr expr
                 pat <- evalStringExpr (StringExpr $ map (left T.pack) ps)
-                expect p regex pat
+                expect p regex pat captures
 
             Wait -> do
                 outPrompt $ T.pack "Waiting..."

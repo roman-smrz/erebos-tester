@@ -6,7 +6,7 @@ module Test (
     NodeName(..), textNodeName, unpackNodeName,
 
     MonadEval(..),
-    VarName(..), unpackVarName,
+    VarName(..), textVarName, unpackVarName,
     StringExpr(..), evalStringExpr,
     RegexExpr(..), evalRegexExpr,
 ) where
@@ -29,7 +29,7 @@ data Test = Test
 
 data TestStep = Spawn ProcName NodeName
               | Send ProcName StringExpr
-              | Expect ProcName RegexExpr
+              | Expect ProcName RegexExpr [VarName]
               | Wait
 
 newtype NodeName = NodeName Text
@@ -49,8 +49,11 @@ class Monad m => MonadEval m where
 data VarName = VarName [Text]
     deriving (Eq, Ord)
 
+textVarName :: VarName -> Text
+textVarName (VarName name) = T.concat $ intersperse (T.singleton '.') name
+
 unpackVarName :: VarName -> String
-unpackVarName (VarName name) = concat $ intersperse "." $ map T.unpack name
+unpackVarName = T.unpack . textVarName
 
 data StringExpr = StringExpr [Either Text VarName]
 
