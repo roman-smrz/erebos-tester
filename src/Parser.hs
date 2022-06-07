@@ -152,16 +152,28 @@ instance (GInit f, GInit h) => GInit (f :*: h) where ginit = ginit :*: ginit
 
 data Param a = forall b. Param String (Lens' a (Maybe b)) (TestParser b)
 
-command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (b -> TestParser a) -> TestParser [a]
+getSourceLine :: TestParser SourceLine
+getSourceLine = do
+    pstate <- statePosState <$> getParserState
+    return $ SourceLine $ T.concat
+        [ T.pack $ sourcePosPretty $ pstateSourcePos pstate
+        , T.pack ": "
+        , TL.toStrict $ TL.takeWhile (/='\n') $ pstateInput pstate
+        ]
+
+command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (SourceLine -> b -> TestParser a) -> TestParser [a]
 command name params fin = do
+    origline <- getSourceLine
     wsymbol name
-    let blockHelper prev cur = L.indentBlock scn $ helper prev cur
-        helper prev cur = choice $ concat
+    let blockHelper line prev cur = L.indentBlock scn $ helper line prev cur
+        helper line prev cur = choice $ concat
             [[ do void $ eol
-                  L.IndentNone . (:[]) <$> fin cur
+                  L.IndentNone . (:[]) <$> fin line cur
              ]
             ,[ do void $ lexeme (char ':')
-                  return $ L.IndentSome Nothing (return . concat) (blockHelper prev cur)
+                  return $ L.IndentSome Nothing (return . concat) $ do
+                      line' <- getSourceLine
+                      blockHelper line' prev cur
              ]
             , flip map params $ \(Param sym l p) -> do
                 x <- if null sym
@@ -175,10 +187,10 @@ command name params fin = do
                         when (any (== sym) prev) $ do
                             fail $ "multiple '" ++ sym ++ "' parameters"
                         p
-                helper (sym:prev) (l .~ Just x $ cur)
+                helper line (sym:prev) (l .~ Just x $ cur)
             ]
 
-    blockHelper [] (G.to ginit)
+    blockHelper origline [] (G.to ginit)
 
 
 data SpawnBuilder = SpawnBuilder
@@ -193,7 +205,7 @@ testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn"
     [ Param "on" spawnBuilderNode nodeName
     , Param "as" spawnBuilderProc procName
-    ] $ \b -> Spawn
+    ] $ \_ b -> Spawn
         <$> (maybe (fail "missing 'as' <proc>") return $ b ^. spawnBuilderProc)
         <*> (maybe (fail "missing 'on' <node>") return $ b ^. spawnBuilderNode)
 
@@ -210,7 +222,7 @@ testSend :: TestParser [TestStep]
 testSend = command "send"
     [ Param "to" sendBuilderProc procName
     , Param "" sendBuilderLine quotedString
-    ] $ \b -> Send
+    ] $ \_ b -> Send
         <$> (maybe (fail "missing 'to' <proc>") return $ b ^. sendBuilderProc)
         <*> (maybe (fail "missing line to send") return $ b ^. sendBuilderLine)
 
@@ -229,7 +241,7 @@ testExpect = command "expect"
     [ Param "from" expectBuilderProc procName
     , Param "" expectBuilderRegex regex
     , Param "capture" expectBuilderCaptures (listOf $ VarName . (:[]) <$> identifier)
-    ] $ \b -> Expect
+    ] $ \s b -> Expect s
         <$> (maybe (fail "missing 'from' <proc>") return $ b ^. expectBuilderProc)
         <*> (maybe (fail "missing regex to match") return $ b ^. expectBuilderRegex)
         <*> (maybe (return []) return $ b ^. expectBuilderCaptures)

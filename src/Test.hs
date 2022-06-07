@@ -1,6 +1,7 @@
 module Test (
     Test(..),
     TestStep(..),
+    SourceLine(..),
 
     ProcName(..), textProcName, unpackProcName,
     NodeName(..), textNodeName, unpackNodeName,
@@ -29,8 +30,10 @@ data Test = Test
 
 data TestStep = Spawn ProcName NodeName
               | Send ProcName (Expr Text)
-              | Expect ProcName (Expr Regex) [VarName]
+              | Expect SourceLine ProcName (Expr Regex) [VarName]
               | Wait
+
+newtype SourceLine = SourceLine Text
 
 newtype NodeName = NodeName Text
     deriving (Eq, Ord)
