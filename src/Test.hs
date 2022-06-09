@@ -31,6 +31,7 @@ data Test = Test
 data TestStep = Spawn ProcName NodeName
               | Send ProcName (Expr Text)
               | Expect SourceLine ProcName (Expr Regex) [VarName]
+              | Guard SourceLine (Expr Bool)
               | Wait
 
 newtype SourceLine = SourceLine Text
@@ -64,6 +65,7 @@ data Expr a where
     StringLit :: Text -> Expr Text
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Text] -> Expr Regex
+    BinOp :: (b -> c -> a) -> Expr b -> Expr c -> Expr a
 
 eval :: MonadEval m => Expr a -> m a
 eval (StringVar var) = lookupStringVar var
@@ -76,3 +78,4 @@ eval (Regex xs) = do
     case compile defaultCompOpt defaultExecOpt $ T.concat $ concat [[T.singleton '^'], parts, [T.singleton '$']] of
         Left err -> fail err
         Right re -> return re
+eval (BinOp f x y) = f <$> eval x <*> eval y

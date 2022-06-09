@@ -296,6 +296,13 @@ expect (SourceLine sline) p re vars = do
              outLine OutputMatchFail (Just $ procName p) $ T.pack "expect failed on " `T.append` sline
              throwError ()
 
+testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
+testStepGuard (SourceLine sline) expr = do
+    x <- eval expr
+    when (not x) $ do
+         outLine OutputMatchFail Nothing $ T.pack "guard failed on " `T.append` sline
+         throwError ()
+
 allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
 allM [] _ = return True
@@ -339,6 +346,9 @@ runTest out opts test = do
                 p <- getProcess net pname
                 regex <- eval expr
                 expect line p regex captures
+
+            Guard line expr -> do
+                testStepGuard line expr
 
             Wait -> do
                 outPrompt $ T.pack "Waiting..."

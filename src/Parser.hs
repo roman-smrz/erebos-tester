@@ -92,15 +92,20 @@ identifier :: TestParser Text
 identifier = do
     TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
 
+varName :: TestParser VarName
+varName = do
+    VarName . T.splitOn (T.singleton '.') . TL.toStrict <$>
+        takeWhile1P Nothing (\x -> isAlphaNum x || x == '_' || x == '.')
+
 varExpansion :: TestParser VarName
 varExpansion = do
     void $ char '$'
     choice
         [ VarName . (:[]) <$> identifier
         ,do void $ char '{'
-            name <- takeWhile1P Nothing (/='}')
+            name <- varName
             void $ char '}'
-            return $ VarName $ T.splitOn (T.singleton '.') (TL.toStrict name)
+            return name
         ]
 
 quotedString :: TestParser (Expr Text)
@@ -142,6 +147,24 @@ regex = label "regular expression" $ lexeme $ do
     expr <- Regex <$> inner
     _ <- eval expr -- test regex parsing with empty variables
     return expr
+
+stringExpr :: TestParser (Expr Text)
+stringExpr = choice
+    [ quotedString
+    , StringVar <$> varName
+    ]
+
+boolExpr :: TestParser (Expr Bool)
+boolExpr = do
+    x <- stringExpr
+    sc
+    op <- choice
+        [ symbol "==" >> return (==)
+        , symbol "/=" >> return (/=)
+        ]
+    y <- stringExpr
+    sc
+    return $ BinOp op x y
 
 
 class GInit f where ginit :: f x
@@ -247,6 +270,20 @@ testExpect = command "expect"
         <*> (maybe (return []) return $ b ^. expectBuilderCaptures)
 
 
+data GuardBuilder = GuardBuilder
+    { _guardBuilderExpr :: Maybe (Expr Bool)
+    }
+    deriving (Generic)
+
+makeLenses ''GuardBuilder
+
+testGuard :: TestParser [TestStep]
+testGuard = command "guard"
+    [ Param "" guardBuilderExpr boolExpr
+    ] $ \s b -> Guard s
+        <$> (maybe (fail "missing guard expression") return $ b ^. guardBuilderExpr)
+
+
 testWait :: TestParser [TestStep]
 testWait = do
     wsymbol "wait"
@@ -258,6 +295,7 @@ parseTestDefinition = label "test definition" $ toplevel $ do
         [ testSpawn
         , testSend
         , testExpect
+        , testGuard
         , testWait
         ]
     where header = do
