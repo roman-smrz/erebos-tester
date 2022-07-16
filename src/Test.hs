@@ -14,6 +14,7 @@ module Test (
 
 import Control.Monad
 
+import Data.Char
 import Data.List
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -74,7 +75,11 @@ eval (Concat xs) = T.concat <$> mapM eval xs
 eval (Regex xs) = do
     parts <- forM xs $ \case
         StringLit str -> return str
-        expr -> T.concatMap (\c -> T.pack ['\\', c]) <$> eval expr
+        expr -> T.concatMap escapeChar <$> eval expr
+          where
+            escapeChar c | isAlphaNum c = T.singleton c
+                         | c `elem` "`'<>" = T.singleton c
+                         | otherwise = T.pack ['\\', c]
     case compile defaultCompOpt defaultExecOpt $ T.concat $ concat [[T.singleton '^'], parts, [T.singleton '$']] of
         Left err -> fail err
         Right re -> return re
