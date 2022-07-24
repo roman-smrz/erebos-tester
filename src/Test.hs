@@ -8,7 +8,7 @@ module Test (
 
     MonadEval(..),
     VarName(..), textVarName, unpackVarName,
-    Expr(..), eval,
+    Expr(..), eval, gatherVars,
     Regex,
 ) where
 
@@ -23,6 +23,7 @@ import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
 import Process
+import Util
 
 data Test = Test
     { testName :: Text
@@ -84,3 +85,13 @@ eval (Regex xs) = do
         Left err -> fail err
         Right re -> return re
 eval (BinOp f x y) = f <$> eval x <*> eval y
+
+gatherVars :: forall a m. MonadEval m => Expr a -> m [(VarName, Text)]
+gatherVars = fmap (uniq . sort) . helper
+  where
+    helper :: forall b. Expr b -> m [(VarName, Text)]
+    helper (StringVar var) = (:[]) . (var,) <$> lookupStringVar var
+    helper (StringLit _) = return []
+    helper (Concat es) = concat <$> mapM helper es
+    helper (Regex es) = concat <$> mapM helper es
+    helper (BinOp _ e f) = (++) <$> helper e <*> helper f

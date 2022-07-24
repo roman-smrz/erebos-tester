@@ -267,8 +267,9 @@ tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexec re x = Just ((x,
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-expect :: SourceLine -> Process -> Regex -> [VarName] -> TestRun ()
-expect (SourceLine sline) p re vars = do
+expect :: SourceLine -> Process -> Expr Regex -> [VarName] -> TestRun ()
+expect (SourceLine sline) p expr vars = do
+    re <- eval expr
     timeout <- asks $ optTimeout . teOptions
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
@@ -294,6 +295,9 @@ expect (SourceLine sline) p re vars = do
              outLine OutputMatch (Just $ procName p) line
          Nothing -> do
              outLine OutputMatchFail (Just $ procName p) $ T.pack "expect failed on " `T.append` sline
+             exprVars <- gatherVars expr
+             forM_ exprVars $ \(name, value) ->
+                 outLine OutputMatchFail (Just $ procName p) $ T.concat [T.pack "  ", textVarName name, T.pack " = ", T.pack (show value)]
              throwError ()
 
 testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
@@ -344,8 +348,7 @@ runTest out opts test = do
 
             Expect line pname expr captures -> do
                 p <- getProcess net pname
-                regex <- eval expr
-                expect line p regex captures
+                expect line p expr captures
 
             Guard line expr -> do
                 testStepGuard line expr

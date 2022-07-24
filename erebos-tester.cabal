@@ -38,6 +38,7 @@ executable erebos-tester-core
                        Parser
                        Process
                        Test
+                       Util
   other-extensions:    TemplateHaskell
   default-extensions:  DeriveGeneric
                        ExistentialQuantification
@@ -49,6 +50,8 @@ executable erebos-tester-core
                        LambdaCase
                        MultiParamTypeClasses
                        RankNTypes
+                       ScopedTypeVariables
+                       TupleSections
                        TypeFamilies
                        TypeOperators
   build-depends:       base             >=4.13 && <5,
