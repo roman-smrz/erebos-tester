@@ -288,7 +288,7 @@ expect (SourceLine sline) p expr vars = do
              forM_ vars $ \name -> do
                  cur <- gets (lookup name . tsVars)
                  when (isJust cur) $ do
-                     outLine OutputMatchFail (Just $ procName p) $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+                     outLine OutputError (Just $ procName p) $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
                      throwError ()
 
              modify $ \s -> s { tsVars = zip vars capture ++ tsVars s }
@@ -336,6 +336,14 @@ runTest out opts test = do
         oldHandler <- liftIO $ installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
         flip catchError (const $ return ()) $ forM_ (testSteps test) $ \case
+            Let (SourceLine sline) name expr -> do
+                 cur <- gets (lookup name . tsVars)
+                 when (isJust cur) $ do
+                     outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+                     throwError ()
+                 value <- eval expr
+                 modify $ \s -> s { tsVars = (name, value) : tsVars s }
+
             Spawn pname nname -> do
                 node <- getNode net nname
                 void $ spawnOn (Right node) pname Nothing $

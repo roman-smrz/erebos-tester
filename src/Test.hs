@@ -30,7 +30,8 @@ data Test = Test
     , testSteps :: [TestStep]
     }
 
-data TestStep = Spawn ProcName NodeName
+data TestStep = Let SourceLine VarName (Expr Text)
+              | Spawn ProcName NodeName
               | Send ProcName (Expr Text)
               | Expect SourceLine ProcName (Expr Regex) [VarName]
               | Guard SourceLine (Expr Bool)

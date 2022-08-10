@@ -184,6 +184,18 @@ getSourceLine = do
         , TL.toStrict $ TL.takeWhile (/='\n') $ pstateInput pstate
         ]
 
+
+letStatement :: TestParser [TestStep]
+letStatement = do
+    line <- getSourceLine
+    wsymbol "let"
+    name <- VarName . (:[]) <$> identifier
+    sc
+    symbol "="
+    value <- stringExpr
+    return [Let line name value]
+
+
 command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (SourceLine -> b -> TestParser a) -> TestParser [a]
 command name params fin = do
     origline <- getSourceLine
@@ -292,7 +304,8 @@ testWait = do
 parseTestDefinition :: TestParser Test
 parseTestDefinition = label "test definition" $ toplevel $ do
     block (\name steps -> return $ Test name $ concat steps) header $ choice
-        [ testSpawn
+        [ letStatement
+        , testSpawn
         , testSend
         , testExpect
         , testGuard
