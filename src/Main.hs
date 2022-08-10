@@ -76,7 +76,7 @@ data TestEnv = TestEnv
     }
 
 data TestState = TestState
-    { tsVars :: [(VarName, Text)]
+    { tsVars :: [(VarName, SomeVarValue)]
     }
 
 newtype TestRun a = TestRun { fromTestRun :: ReaderT TestEnv (StateT TestState (ExceptT () IO)) a }
@@ -96,7 +96,7 @@ instance MonadError () TestRun where
     catchError (TestRun act) handler = TestRun $ catchError act $ fromTestRun . handler
 
 instance MonadEval TestRun where
-    lookupStringVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< gets (lookup name . tsVars)
+    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< gets (lookup name . tsVars)
 
 instance MonadOutput TestRun where
     getOutput = asks teOutput
@@ -203,7 +203,7 @@ getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> liftIO (rea
                 callOn node $ "ip link set dev lo up"
                 return $ (node : nodes, ip)
 
-        modify $ \s -> s { tsVars = (VarName [tnname, T.pack "ip"], T.pack ip) : tsVars s }
+        modify $ \s -> s { tsVars = (VarName [tnname, T.pack "ip"], SomeVarValue (T.pack ip)) : tsVars s }
         return node
 
 callOn :: Node -> String -> IO ()
@@ -291,13 +291,13 @@ expect (SourceLine sline) p expr vars = do
                      outLine OutputError (Just $ procName p) $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
                      throwError ()
 
-             modify $ \s -> s { tsVars = zip vars capture ++ tsVars s }
+             modify $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }
              outLine OutputMatch (Just $ procName p) line
          Nothing -> do
              outLine OutputMatchFail (Just $ procName p) $ T.pack "expect failed on " `T.append` sline
              exprVars <- gatherVars expr
              forM_ exprVars $ \(name, value) ->
-                 outLine OutputMatchFail (Just $ procName p) $ T.concat [T.pack "  ", textVarName name, T.pack " = ", T.pack (show value)]
+                 outLine OutputMatchFail (Just $ procName p) $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
              throwError ()
 
 testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
@@ -342,7 +342,7 @@ runTest out opts test = do
                      outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
                      throwError ()
                  value <- eval expr
-                 modify $ \s -> s { tsVars = (name, value) : tsVars s }
+                 modify $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s }
 
             Spawn pname nname -> do
                 node <- getNode net nname

@@ -16,6 +16,7 @@ import Data.Text (Text)
 import Data.Text qualified as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
+import Data.Typeable
 import Data.Void
 
 import Generics.Deriving.Base as G
@@ -28,12 +29,23 @@ import System.Exit
 
 import Test
 
-type TestParser = ParsecT Void TestStream (State (Set ProcName))
+type TestParser = ParsecT Void TestStream (State TestParserState)
 
 type TestStream = TL.Text
 
+data TestParserState = TestParserState
+    { testProcs :: Set ProcName
+    , testVars :: [(VarName, SomeExprType)]
+    }
+
+data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
+
+someEmptyVar :: SomeExprType -> SomeVarValue
+someEmptyVar (SomeExprType (Proxy :: Proxy a)) = SomeVarValue $ emptyVarValue @a
+
 instance MonadEval TestParser where
-    lookupStringVar _ = return T.empty
+    lookupVar (VarName [_, ip]) | ip == T.pack "ip" = return $ SomeVarValue T.empty
+    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") (return . someEmptyVar) =<< gets (lookup name . testVars)
 
 skipLineComment :: TestParser ()
 skipLineComment = L.skipLineComment $ TL.pack "#"
@@ -97,6 +109,19 @@ varName = do
     VarName . T.splitOn (T.singleton '.') . TL.toStrict <$>
         takeWhile1P Nothing (\x -> isAlphaNum x || x == '_' || x == '.')
 
+newVarName :: forall a proxy. ExprType a => proxy a -> TestParser VarName
+newVarName proxy = do
+    name <- VarName . (:[]) <$> identifier
+    addVarName proxy name
+    return name
+
+addVarName :: forall a proxy. ExprType a => proxy a -> VarName -> TestParser ()
+addVarName _ name = do
+    gets (lookup name . testVars) >>= \case
+        Just _ -> fail $ "variable '" ++ unpackVarName name ++ "' already exists"
+        Nothing -> return ()
+    modify $ \s -> s { testVars = (name, SomeExprType @a Proxy) : testVars s }
+
 varExpansion :: TestParser VarName
 varExpansion = do
     void $ char '$'
@@ -108,12 +133,15 @@ varExpansion = do
             return name
         ]
 
+integerLiteral :: TestParser (Expr Integer)
+integerLiteral = Literal . read . TL.unpack <$> takeWhile1P (Just "integer") isDigit
+
 quotedString :: TestParser (Expr Text)
 quotedString = label "string" $ lexeme $ do
     symbol "\""
     let inner = choice
             [ char '"' >> return []
-            , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (StringLit (TL.toStrict s):) <$> inner
+            , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (Literal (TL.toStrict s):) <$> inner
             ,do void $ char '\\'
                 c <- choice
                     [ char '\\' >> return '\\'
@@ -123,9 +151,9 @@ quotedString = label "string" $ lexeme $ do
                     , char 'r' >> return '\r'
                     , char 't' >> return '\t'
                     ]
-                (StringLit (T.singleton c) :) <$> inner
+                (Literal (T.singleton c) :) <$> inner
             ,do name <- varExpansion
-                (StringVar name :) <$> inner
+                (Variable name :) <$> inner
             ]
     Concat <$> inner
 
@@ -134,24 +162,36 @@ regex = label "regular expression" $ lexeme $ do
     symbol "/"
     let inner = choice
             [ char '/' >> return []
-            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (StringLit (TL.toStrict s) :) <$> inner
+            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Literal (TL.toStrict s) :) <$> inner
             ,do void $ char '\\'
                 s <- choice
-                    [ char '/' >> return (StringLit $ T.singleton '/')
-                    , anySingle >>= \c -> return (StringLit $ T.pack ['\\', c])
+                    [ char '/' >> return (Literal $ T.singleton '/')
+                    , anySingle >>= \c -> return (Literal $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
             ,do name <- varExpansion
-                (StringVar name :) <$> inner
+                (Variable name :) <$> inner
             ]
     expr <- Regex <$> inner
     _ <- eval expr -- test regex parsing with empty variables
     return expr
 
+integerExpr :: TestParser (Expr Integer)
+integerExpr = choice
+    [ integerLiteral
+    , try $ do
+        name <- varName
+        _ <- fromSomeVarValue @Integer name =<< lookupVar name
+        return $ Variable name
+    ]
+
 stringExpr :: TestParser (Expr Text)
 stringExpr = choice
     [ quotedString
-    , StringVar <$> varName
+    , try $ do
+        name <- varName
+        _ <- fromSomeVarValue @Text name =<< lookupVar name
+        return $ Variable name
     ]
 
 boolExpr :: TestParser (Expr Bool)
@@ -192,8 +232,16 @@ letStatement = do
     name <- VarName . (:[]) <$> identifier
     sc
     symbol "="
-    value <- stringExpr
-    return [Let line name value]
+    let finish :: forall a. ExprType a => TestParser (Expr a) -> TestParser [TestStep]
+        finish expr = do
+            value <- expr
+            addVarName @a Proxy name
+            return [Let line name value]
+
+    choice
+        [ finish integerExpr
+        , finish stringExpr
+        ]
 
 
 command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (SourceLine -> b -> TestParser a) -> TestParser [a]
@@ -275,7 +323,7 @@ testExpect :: TestParser [TestStep]
 testExpect = command "expect"
     [ Param "from" expectBuilderProc procName
     , Param "" expectBuilderRegex regex
-    , Param "capture" expectBuilderCaptures (listOf $ VarName . (:[]) <$> identifier)
+    , Param "capture" expectBuilderCaptures (listOf $ newVarName @Text Proxy)
     ] $ \s b -> Expect s
         <$> (maybe (fail "missing 'from' <proc>") return $ b ^. expectBuilderProc)
         <*> (maybe (fail "missing regex to match") return $ b ^. expectBuilderRegex)
@@ -324,6 +372,10 @@ parseTestDefinitions = do
 parseTestFile :: FilePath -> IO [Test]
 parseTestFile path = do
     content <- TL.readFile path
-    case evalState (runParserT parseTestDefinitions path content) S.empty of
+    let initState = TestParserState
+            { testProcs = S.empty
+            , testVars = []
+            }
+    case evalState (runParserT parseTestDefinitions path content) initState of
          Left err -> putStr (errorBundlePretty err) >> exitFailure
          Right tests -> return tests

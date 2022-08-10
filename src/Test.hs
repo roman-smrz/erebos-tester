@@ -8,6 +8,8 @@ module Test (
 
     MonadEval(..),
     VarName(..), textVarName, unpackVarName,
+    ExprType(..),
+    SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
     Expr(..), eval, gatherVars,
     Regex,
 ) where
@@ -18,6 +20,7 @@ import Data.Char
 import Data.List
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Typeable
 
 import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
@@ -30,7 +33,7 @@ data Test = Test
     , testSteps :: [TestStep]
     }
 
-data TestStep = Let SourceLine VarName (Expr Text)
+data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a)
               | Spawn ProcName NodeName
               | Send ProcName (Expr Text)
               | Expect SourceLine ProcName (Expr Regex) [VarName]
@@ -50,7 +53,7 @@ unpackNodeName (NodeName tname) = T.unpack tname
 
 
 class MonadFail m => MonadEval m where
-  lookupStringVar :: VarName -> m Text
+  lookupVar :: VarName -> m SomeVarValue
 
 
 data VarName = VarName [Text]
@@ -63,20 +66,46 @@ unpackVarName :: VarName -> String
 unpackVarName = T.unpack . textVarName
 
 
+class Typeable a => ExprType a where
+  textExprType :: proxy a -> Text
+  textExprValue :: a -> Text
+  emptyVarValue :: a
+
+instance ExprType Integer where
+  textExprType _ = T.pack "integer"
+  textExprValue x = T.pack (show x)
+  emptyVarValue = 0
+
+instance ExprType Text where
+  textExprType _ = T.pack "string"
+  textExprValue x = T.pack (show x)
+  emptyVarValue = T.empty
+
+data SomeVarValue = forall a. ExprType a => SomeVarValue a
+
+fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m a
+fromSomeVarValue name (SomeVarValue value) = maybe (fail err) return $ cast value
+  where err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has type ", textExprType (Just value) ]
+
+textSomeVarValue :: SomeVarValue -> Text
+textSomeVarValue (SomeVarValue value) = textExprValue value
+
+
 data Expr a where
-    StringVar :: VarName -> Expr Text
-    StringLit :: Text -> Expr Text
+    Variable :: ExprType a => VarName -> Expr a
+    Literal :: ExprType a => a -> Expr a
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Text] -> Expr Regex
     BinOp :: (b -> c -> a) -> Expr b -> Expr c -> Expr a
 
 eval :: MonadEval m => Expr a -> m a
-eval (StringVar var) = lookupStringVar var
-eval (StringLit str) = return str
+eval (Variable name) = fromSomeVarValue name =<< lookupVar name
+eval (Literal value) = return value
 eval (Concat xs) = T.concat <$> mapM eval xs
 eval (Regex xs) = do
     parts <- forM xs $ \case
-        StringLit str -> return str
+        Literal value | Just str <- cast value -> return str
+                      | otherwise -> fail $ "regex expansion not defined for " ++ T.unpack (textExprType $ Just value)
         expr -> T.concatMap escapeChar <$> eval expr
           where
             escapeChar c | isAlphaNum c = T.singleton c
@@ -87,12 +116,12 @@ eval (Regex xs) = do
         Right re -> return re
 eval (BinOp f x y) = f <$> eval x <*> eval y
 
-gatherVars :: forall a m. MonadEval m => Expr a -> m [(VarName, Text)]
-gatherVars = fmap (uniq . sort) . helper
+gatherVars :: forall a m. MonadEval m => Expr a -> m [(VarName, SomeVarValue)]
+gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
-    helper :: forall b. Expr b -> m [(VarName, Text)]
-    helper (StringVar var) = (:[]) . (var,) <$> lookupStringVar var
-    helper (StringLit _) = return []
+    helper :: forall b. Expr b -> m [(VarName, SomeVarValue)]
+    helper (Variable var) = (:[]) . (var,) <$> lookupVar var
+    helper (Literal _) = return []
     helper (Concat es) = concat <$> mapM helper es
     helper (Regex es) = concat <$> mapM helper es
     helper (BinOp _ e f) = (++) <$> helper e <*> helper f

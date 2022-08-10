@@ -52,6 +52,7 @@ executable erebos-tester-core
                        RankNTypes
                        ScopedTypeVariables
                        TupleSections
+                       TypeApplications
                        TypeFamilies
                        TypeOperators
   build-depends:       base             >=4.13 && <5,
