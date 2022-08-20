@@ -267,6 +267,14 @@ tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexec re x = Just ((x,
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
+exprFailed :: Text -> SourceLine -> Maybe ProcName -> Expr a -> TestRun ()
+exprFailed desc (SourceLine sline) pname expr = do
+    exprVars <- gatherVars expr
+    outLine OutputMatchFail pname $ T.concat [desc, T.pack " failed on ", sline]
+    forM_ exprVars $ \(name, value) ->
+        outLine OutputMatchFail pname $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
+    throwError ()
+
 expect :: SourceLine -> Process -> Expr Regex -> [VarName] -> TestRun ()
 expect (SourceLine sline) p expr vars = do
     re <- eval expr
@@ -293,19 +301,12 @@ expect (SourceLine sline) p expr vars = do
 
              modify $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }
              outLine OutputMatch (Just $ procName p) line
-         Nothing -> do
-             outLine OutputMatchFail (Just $ procName p) $ T.pack "expect failed on " `T.append` sline
-             exprVars <- gatherVars expr
-             forM_ exprVars $ \(name, value) ->
-                 outLine OutputMatchFail (Just $ procName p) $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
-             throwError ()
+         Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
 
 testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
-testStepGuard (SourceLine sline) expr = do
+testStepGuard sline expr = do
     x <- eval expr
-    when (not x) $ do
-         outLine OutputMatchFail Nothing $ T.pack "guard failed on " `T.append` sline
-         throwError ()
+    when (not x) $ exprFailed (T.pack "guard") sline Nothing expr
 
 allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
