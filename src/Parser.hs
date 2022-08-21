@@ -7,9 +7,11 @@ module Parser (
 ) where
 
 import Control.Lens (Lens', makeLenses, (^.), (.~))
+import Control.Monad.Combinators.Expr
 import Control.Monad.State
 
 import Data.Char
+import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Text (Text)
@@ -19,7 +21,8 @@ import qualified Data.Text.Lazy.IO as TL
 import Data.Typeable
 import Data.Void
 
-import Generics.Deriving.Base as G
+import Generics.Deriving.Base (Generic, Rep, U1(..), M1(..), K1(..), (:*:)(..))
+import Generics.Deriving.Base qualified as G
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
@@ -83,10 +86,8 @@ block merge header item = L.indentBlock scn $ do
 
 listOf :: TestParser a -> TestParser [a]
 listOf item = do
-    sc
     x <- item
-    sc
-    (x:) <$> choice [ char ',' >> listOf item, return [] ]
+    (x:) <$> choice [ symbol "," >> listOf item, return [] ]
 
 nodeName :: TestParser NodeName
 nodeName = label "network node name" $ lexeme $ do
@@ -102,10 +103,10 @@ procName = label "process name" $ lexeme $ do
 
 identifier :: TestParser Text
 identifier = do
-    TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+    lexeme $ TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
 
 varName :: TestParser VarName
-varName = do
+varName = lexeme $ do
     VarName . T.splitOn (T.singleton '.') . TL.toStrict <$>
         takeWhile1P Nothing (\x -> isAlphaNum x || x == '_' || x == '.')
 
@@ -126,7 +127,7 @@ varExpansion :: TestParser VarName
 varExpansion = do
     void $ char '$'
     choice
-        [ VarName . (:[]) <$> identifier
+        [ VarName . (:[]) . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
         ,do void $ char '{'
             name <- varName
             void $ char '}'
@@ -176,35 +177,91 @@ regex = label "regular expression" $ lexeme $ do
     _ <- eval expr -- test regex parsing with empty variables
     return expr
 
-integerExpr :: TestParser (Expr Integer)
-integerExpr = choice
-    [ integerLiteral
-    , try $ do
-        name <- varName
-        _ <- fromSomeVarValue @Integer name =<< lookupVar name
-        return $ Variable name
-    ]
-
 stringExpr :: TestParser (Expr Text)
-stringExpr = choice
-    [ quotedString
-    , try $ do
-        name <- varName
-        _ <- fromSomeVarValue @Text name =<< lookupVar name
-        return $ Variable name
-    ]
+stringExpr = label "string expression" $ do
+    SomeExpr e <- someExpr
+    maybe mzero return $ cast e
 
 boolExpr :: TestParser (Expr Bool)
 boolExpr = do
     x <- stringExpr
-    sc
     op <- choice
         [ symbol "==" >> return (==)
         , symbol "/=" >> return (/=)
         ]
     y <- stringExpr
-    sc
     return $ BinOp op x y
+
+data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
+
+data SomeUnOp = forall a b. (ExprType a, ExprType b) => SomeUnOp (a -> b)
+
+applyUnOp :: forall a b sa.
+    (ExprType a, ExprType b, ExprType sa) =>
+    (a -> b) -> Expr sa -> Maybe (Expr b)
+applyUnOp op x = do
+    Refl :: a :~: sa <- eqT
+    return $ UnOp op x
+
+data SomeBinOp = forall a b c. (ExprType a, ExprType b, ExprType c) => SomeBinOp (a -> b -> c)
+
+applyBinOp :: forall a b c sa sb.
+    (ExprType a, ExprType b, ExprType c, ExprType sa, ExprType sb) =>
+    (a -> b -> c) -> Expr sa -> Expr sb -> Maybe (Expr c)
+applyBinOp op x y = do
+    Refl :: a :~: sa <- eqT
+    Refl :: b :~: sb <- eqT
+    return $ BinOp op x y
+
+someExpr :: TestParser SomeExpr
+someExpr = join inner <?> "expression"
+  where
+    inner = makeExprParser term table
+
+    parens = between (symbol "(") (symbol ")")
+
+    term = parens inner <|> literal <|> variable <?> "term"
+
+    table = [ [ prefix "-" $ [ SomeUnOp (negate @Integer) ]
+              ]
+            , [ binary "*" $ [ SomeBinOp ((*) @Integer) ]
+              , binary "/" $ [ SomeBinOp (div @Integer) ]
+              ]
+            , [ binary "+" $ [ SomeBinOp ((+) @Integer) ]
+              , binary "-" $ [ SomeBinOp ((-) @Integer) ]
+              ]
+            ]
+
+    prefix :: String -> [SomeUnOp] -> Operator TestParser (TestParser SomeExpr)
+    prefix name ops = Prefix $ do
+        off <- stateOffset <$> getParserState
+        void $ symbol name
+        return $ \p -> do
+            SomeExpr e <- p
+            let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                    [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "'"]
+            maybe err return $ listToMaybe $ catMaybes $ map (\(SomeUnOp op) -> SomeExpr <$> applyUnOp op e) ops
+
+    binary :: String -> [SomeBinOp] -> Operator TestParser (TestParser SomeExpr)
+    binary name ops = InfixL $ do
+        off <- stateOffset <$> getParserState
+        void $ symbol name
+        return $ \p q -> do
+            SomeExpr e <- p
+            SomeExpr f <- q
+            let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                    [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "' and '", textExprType f, T.pack "'"]
+            maybe err return $ listToMaybe $ catMaybes $ map (\(SomeBinOp op) -> SomeExpr <$> applyBinOp op e f) ops
+
+    literal = label "literal" $ choice
+        [ return . SomeExpr <$> integerLiteral
+        , return . SomeExpr <$> quotedString
+        ]
+
+    variable = label "variable" $ do
+        name <- varName
+        SomeVarValue (_ :: a) <- lookupVar name
+        return $ return $ SomeExpr $ Variable @a name
 
 
 class GInit f where ginit :: f x
@@ -230,18 +287,12 @@ letStatement = do
     line <- getSourceLine
     wsymbol "let"
     name <- VarName . (:[]) <$> identifier
-    sc
     symbol "="
-    let finish :: forall a. ExprType a => TestParser (Expr a) -> TestParser [TestStep]
-        finish expr = do
-            value <- expr
-            addVarName @a Proxy name
-            return [Let line name value]
+    SomeExpr (e :: Expr a) <- someExpr
+    void $ eol
 
-    choice
-        [ finish integerExpr
-        , finish stringExpr
-        ]
+    addVarName @a Proxy name
+    return [Let line name e]
 
 
 command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (SourceLine -> b -> TestParser a) -> TestParser [a]
