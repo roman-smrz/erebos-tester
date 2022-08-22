@@ -81,6 +81,12 @@ instance ExprType Text where
   textExprValue x = T.pack (show x)
   emptyVarValue = T.empty
 
+instance ExprType Bool where
+  textExprType _ = T.pack "bool"
+  textExprValue True = T.pack "true"
+  textExprValue False = T.pack "false"
+  emptyVarValue = False
+
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m a

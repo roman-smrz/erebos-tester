@@ -177,21 +177,6 @@ regex = label "regular expression" $ lexeme $ do
     _ <- eval expr -- test regex parsing with empty variables
     return expr
 
-stringExpr :: TestParser (Expr Text)
-stringExpr = label "string expression" $ do
-    SomeExpr e <- someExpr
-    maybe mzero return $ cast e
-
-boolExpr :: TestParser (Expr Bool)
-boolExpr = do
-    x <- stringExpr
-    op <- choice
-        [ symbol "==" >> return (==)
-        , symbol "/=" >> return (/=)
-        ]
-    y <- stringExpr
-    return $ BinOp op x y
-
 data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
 
 data SomeUnOp = forall a b. (ExprType a, ExprType b) => SomeUnOp (a -> b)
@@ -230,6 +215,13 @@ someExpr = join inner <?> "expression"
             , [ binary "+" $ [ SomeBinOp ((+) @Integer) ]
               , binary "-" $ [ SomeBinOp ((-) @Integer) ]
               ]
+            , [ binary "==" $ [ SomeBinOp ((==) @Integer)
+                              , SomeBinOp ((==) @Text)
+                              ]
+              , binary "/=" $ [ SomeBinOp ((/=) @Integer)
+                              , SomeBinOp ((/=) @Text)
+                              ]
+              ]
             ]
 
     prefix :: String -> [SomeUnOp] -> Operator TestParser (TestParser SomeExpr)
@@ -262,6 +254,14 @@ someExpr = join inner <?> "expression"
         name <- varName
         SomeVarValue (_ :: a) <- lookupVar name
         return $ return $ SomeExpr $ Variable @a name
+
+typedExpr :: forall a. ExprType a => TestParser (Expr a)
+typedExpr = do
+    off <- stateOffset <$> getParserState
+    SomeExpr e <- someExpr
+    let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+            [ T.pack "expected '", textExprType @a Proxy, T.pack "', expression has type '", textExprType e, T.pack "'" ]
+    maybe err return $ cast e
 
 
 class GInit f where ginit :: f x
@@ -390,7 +390,7 @@ makeLenses ''GuardBuilder
 
 testGuard :: TestParser [TestStep]
 testGuard = command "guard"
-    [ Param "" guardBuilderExpr boolExpr
+    [ Param "" guardBuilderExpr typedExpr
     ] $ \s b -> Guard s
         <$> (maybe (fail "missing guard expression") return $ b ^. guardBuilderExpr)
 
