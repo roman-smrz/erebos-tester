@@ -123,15 +123,26 @@ addVarName _ name = do
         Nothing -> return ()
     modify $ \s -> s { testVars = (name, SomeExprType @a Proxy) : testVars s }
 
-varExpansion :: TestParser VarName
-varExpansion = do
+someExpansion :: TestParser SomeExpr
+someExpansion = do
     void $ char '$'
     choice
-        [ VarName . (:[]) . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
-        ,do void $ char '{'
-            name <- varName
-            void $ char '}'
-            return name
+        [do name <- VarName . (:[]) . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+            SomeVarValue (_ :: a) <- lookupVar name
+            return $ SomeExpr $ Variable @a name
+        , between (char '{') (char '}') someExpr
+        ]
+
+stringExpansion :: Text -> TestParser (Expr Text)
+stringExpansion tname = do
+    off <- stateOffset <$> getParserState
+    SomeExpr e <- someExpansion
+    let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+            [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
+
+    maybe err return $ listToMaybe $ catMaybes
+        [ cast e
+        , UnOp (T.pack . show @Integer) <$> cast e
         ]
 
 integerLiteral :: TestParser (Expr Integer)
@@ -139,7 +150,7 @@ integerLiteral = Literal . read . TL.unpack <$> takeWhile1P (Just "integer") isD
 
 quotedString :: TestParser (Expr Text)
 quotedString = label "string" $ lexeme $ do
-    symbol "\""
+    void $ char '"'
     let inner = choice
             [ char '"' >> return []
             , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (Literal (TL.toStrict s):) <$> inner
@@ -153,14 +164,14 @@ quotedString = label "string" $ lexeme $ do
                     , char 't' >> return '\t'
                     ]
                 (Literal (T.singleton c) :) <$> inner
-            ,do name <- varExpansion
-                (Variable name :) <$> inner
+            ,do e <- stringExpansion (T.pack "string")
+                (e:) <$> inner
             ]
     Concat <$> inner
 
 regex :: TestParser (Expr Regex)
 regex = label "regular expression" $ lexeme $ do
-    symbol "/"
+    void $ char '/'
     let inner = choice
             [ char '/' >> return []
             , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Literal (TL.toStrict s) :) <$> inner
@@ -170,8 +181,8 @@ regex = label "regular expression" $ lexeme $ do
                     , anySingle >>= \c -> return (Literal $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
-            ,do name <- varExpansion
-                (Variable name :) <$> inner
+            ,do e <- stringExpansion (T.pack "regex")
+                (e:) <$> inner
             ]
     expr <- Regex <$> inner
     _ <- eval expr -- test regex parsing with empty variables
