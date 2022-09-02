@@ -67,25 +67,30 @@ unpackVarName = T.unpack . textVarName
 
 
 class Typeable a => ExprType a where
-  textExprType :: proxy a -> Text
-  textExprValue :: a -> Text
-  emptyVarValue :: a
+    textExprType :: proxy a -> Text
+    textExprValue :: a -> Text
+    emptyVarValue :: a
 
 instance ExprType Integer where
-  textExprType _ = T.pack "integer"
-  textExprValue x = T.pack (show x)
-  emptyVarValue = 0
-
-instance ExprType Text where
-  textExprType _ = T.pack "string"
-  textExprValue x = T.pack (show x)
-  emptyVarValue = T.empty
+    textExprType _ = T.pack "integer"
+    textExprValue x = T.pack (show x)
+    emptyVarValue = 0
 
 instance ExprType Bool where
-  textExprType _ = T.pack "bool"
-  textExprValue True = T.pack "true"
-  textExprValue False = T.pack "false"
-  emptyVarValue = False
+    textExprType _ = T.pack "bool"
+    textExprValue True = T.pack "true"
+    textExprValue False = T.pack "false"
+    emptyVarValue = False
+
+instance ExprType Text where
+    textExprType _ = T.pack "string"
+    textExprValue x = T.pack (show x)
+    emptyVarValue = T.empty
+
+instance ExprType Regex where
+    textExprType _ = T.pack "regex"
+    textExprValue _ = T.pack "<regex>"
+    emptyVarValue = either error id $ compile defaultCompOpt defaultExecOpt T.empty
 
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
 

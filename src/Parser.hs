@@ -259,6 +259,7 @@ someExpr = join inner <?> "expression"
     literal = label "literal" $ choice
         [ return . SomeExpr <$> integerLiteral
         , return . SomeExpr <$> quotedString
+        , return . SomeExpr <$> regex
         ]
 
     variable = label "variable" $ do
