@@ -6,8 +6,8 @@ module Parser (
     parseTestFile,
 ) where
 
-import Control.Lens (Lens', makeLenses, (^.), (.~))
 import Control.Monad.Combinators.Expr
+import Control.Monad.Identity
 import Control.Monad.State
 
 import Data.Char
@@ -20,9 +20,6 @@ import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.IO as TL
 import Data.Typeable
 import Data.Void
-
-import Generics.Deriving.Base (Generic, Rep, U1(..), M1(..), K1(..), (:*:)(..))
-import Generics.Deriving.Base qualified as G
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
@@ -57,8 +54,7 @@ scn :: TestParser ()
 scn = L.space space1 skipLineComment empty
 
 sc :: TestParser ()
-sc = L.space (void $ takeWhile1P Nothing f) skipLineComment empty
-    where f x = x == ' ' || x == '\t'
+sc = L.space hspace1 skipLineComment empty
 
 wordChar :: TestParser (Token TestStream)
 wordChar = alphaNumChar <|> char '_'
@@ -276,14 +272,6 @@ typedExpr = do
     maybe err return $ cast e
 
 
-class GInit f where ginit :: f x
-instance GInit U1 where ginit = U1
-instance GInit (K1 i (Maybe a)) where ginit = K1 Nothing
-instance GInit f => GInit (M1 i c f) where ginit = M1 ginit
-instance (GInit f, GInit h) => GInit (f :*: h) where ginit = ginit :*: ginit
-
-data Param a = forall b. Param String (Lens' a (Maybe b)) (TestParser b)
-
 getSourceLine :: TestParser SourceLine
 getSourceLine = do
     pstate <- statePosState <$> getParserState
@@ -307,104 +295,120 @@ letStatement = do
     return [Let line name e]
 
 
-command :: (Generic b, GInit (Rep b)) => String -> [Param b] -> (SourceLine -> b -> TestParser a) -> TestParser [a]
-command name params fin = do
-    origline <- getSourceLine
-    wsymbol name
-    let blockHelper line prev cur = L.indentBlock scn $ helper line prev cur
-        helper line prev cur = choice $ concat
-            [[ do void $ eol
-                  L.IndentNone . (:[]) <$> fin line cur
-             ]
-            ,[ do void $ lexeme (char ':')
-                  return $ L.IndentSome Nothing (return . concat) $ do
-                      line' <- getSourceLine
-                      blockHelper line' prev cur
-             ]
-            , flip map params $ \(Param sym l p) -> do
-                x <- if null sym
-                    then do
-                        x <- p
-                        when (any null prev) $ do
-                            fail $ "multiple unnamed parameters"
-                        return x
-                    else do
-                        wsymbol sym
-                        when (any (== sym) prev) $ do
-                            fail $ "multiple '" ++ sym ++ "' parameters"
-                        p
-                helper line (sym:prev) (l .~ Just x $ cur)
-            ]
+class Typeable a => ParamType a where
+    parseParam :: TestParser a
+    showParamType :: proxy a -> String
 
-    blockHelper origline [] (G.to ginit)
+    paramDefault :: TestParser a
+    paramDefault = mzero
 
+instance ParamType SourceLine where
+    parseParam = mzero
+    showParamType _ = "<source line>"
 
-data SpawnBuilder = SpawnBuilder
-    { _spawnBuilderProc :: Maybe ProcName
-    , _spawnBuilderNode :: Maybe NodeName
-    }
-    deriving (Generic)
+instance ParamType NodeName where
+    parseParam = nodeName
+    showParamType _ = "<node>"
 
-makeLenses ''SpawnBuilder
+instance ParamType ProcName where
+    parseParam = procName
+    showParamType _ = "<proc>"
+
+instance ParamType VarName where
+    parseParam = newVarName @Text Proxy
+    showParamType _ = "<variable>"
+
+instance ExprType a => ParamType (Expr a) where
+    parseParam = typedExpr
+    showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
+
+instance ParamType a => ParamType [a] where
+    parseParam = listOf parseParam
+    showParamType _ = showParamType @a Proxy ++ " [, " ++ showParamType @a Proxy ++ " ...]"
+    paramDefault = return []
+
+data SomeParam f = forall a. ParamType a => SomeParam (f a)
+
+data CommandDef a = CommandDef [(String, SomeParam Proxy)] ([SomeParam Identity] -> a)
+
+instance Functor CommandDef where
+  fmap f (CommandDef types ctor) = CommandDef types (f . ctor)
+
+instance Applicative CommandDef where
+  pure x = CommandDef [] (\[] -> x)
+  CommandDef types1 ctor1 <*> CommandDef types2 ctor2 =
+      CommandDef (types1 ++ types2) $ \params ->
+          let (params1, params2) = splitAt (length types1) params
+           in ctor1 params1 $ ctor2 params2
+
+param :: forall a. ParamType a => String -> CommandDef a
+param name = CommandDef [(name, SomeParam (Proxy @a))] (\[SomeParam (Identity x)] -> fromJust $ cast x)
+
+cmdLine :: CommandDef SourceLine
+cmdLine = param ""
+
+command :: String -> CommandDef a -> TestParser [a]
+command name (CommandDef types ctor) = do
+    line <- getSourceLine
+    L.indentBlock scn $ do
+        wsymbol name
+        helper line $ map (fmap $ \(SomeParam (_ :: Proxy p)) -> SomeParam $ Nothing @p) types
+  where
+    helper line params = choice
+        [do void $ lookAhead eol
+            iparams <- forM params $ \case
+                (_, SomeParam (Nothing :: Maybe p))
+                    | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam $ Identity line
+                (sym, SomeParam (Nothing :: Maybe p)) -> choice
+                    [ SomeParam . Identity <$> paramDefault @p
+                    , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType @p Proxy
+                    ]
+                (_, SomeParam (Just x)) -> return $ SomeParam $ Identity x
+            return $ L.IndentNone [ctor iparams]
+
+        ,do symbol ":"
+            return $ L.IndentSome Nothing (return . concat) $ do
+                line' <- getSourceLine
+                L.indentBlock scn $ helper line' params
+
+        ,do tryParams line [] params
+        ]
+
+    tryParam sym (SomeParam (cur :: Maybe p)) = do
+        when (not $ null sym) $ wsymbol sym
+        when (isJust cur) $ do
+            fail $ "multiple " ++ (if null sym then "unnamed" else "'" ++ sym ++ "'") ++ " parameters"
+        SomeParam . Just <$> parseParam @p
+
+    tryParams line prev ((sym, p) : ps) = choice $
+        (if null sym then reverse else id) {- try unnamed parameter as last option -} $
+        [do p' <- tryParam sym p
+            helper line $ concat [reverse prev, [(sym, p')], ps]
+        ,do tryParams line ((sym, p) : prev) ps
+        ]
+    tryParams _ _ [] = mzero
 
 testSpawn :: TestParser [TestStep]
-testSpawn = command "spawn"
-    [ Param "on" spawnBuilderNode nodeName
-    , Param "as" spawnBuilderProc procName
-    ] $ \_ b -> Spawn
-        <$> (maybe (fail "missing 'as' <proc>") return $ b ^. spawnBuilderProc)
-        <*> (maybe (fail "missing 'on' <node>") return $ b ^. spawnBuilderNode)
-
-
-data SendBuilder = SendBuilder
-    { _sendBuilderProc :: Maybe ProcName
-    , _sendBuilderLine :: Maybe (Expr Text)
-    }
-    deriving (Generic)
-
-makeLenses ''SendBuilder
+testSpawn = command "spawn" $ Spawn
+    <$> param "as"
+    <*> param "on"
 
 testSend :: TestParser [TestStep]
-testSend = command "send"
-    [ Param "to" sendBuilderProc procName
-    , Param "" sendBuilderLine quotedString
-    ] $ \_ b -> Send
-        <$> (maybe (fail "missing 'to' <proc>") return $ b ^. sendBuilderProc)
-        <*> (maybe (fail "missing line to send") return $ b ^. sendBuilderLine)
-
-
-data ExpectBuilder = ExpectBuilder
-    { _expectBuilderProc :: Maybe ProcName
-    , _expectBuilderRegex :: Maybe (Expr Regex)
-    , _expectBuilderCaptures :: Maybe [VarName]
-    }
-    deriving (Generic)
-
-makeLenses ''ExpectBuilder
+testSend = command "send" $ Send
+    <$> param "to"
+    <*> param ""
 
 testExpect :: TestParser [TestStep]
-testExpect = command "expect"
-    [ Param "from" expectBuilderProc procName
-    , Param "" expectBuilderRegex regex
-    , Param "capture" expectBuilderCaptures (listOf $ newVarName @Text Proxy)
-    ] $ \s b -> Expect s
-        <$> (maybe (fail "missing 'from' <proc>") return $ b ^. expectBuilderProc)
-        <*> (maybe (fail "missing regex to match") return $ b ^. expectBuilderRegex)
-        <*> (maybe (return []) return $ b ^. expectBuilderCaptures)
-
-
-data GuardBuilder = GuardBuilder
-    { _guardBuilderExpr :: Maybe (Expr Bool)
-    }
-    deriving (Generic)
-
-makeLenses ''GuardBuilder
+testExpect = command "expect" $ Expect
+    <$> cmdLine
+    <*> param "from"
+    <*> param ""
+    <*> param "capture"
 
 testGuard :: TestParser [TestStep]
-testGuard = command "guard"
-    [ Param "" guardBuilderExpr typedExpr
-    ] $ \s b -> Guard s
-        <$> (maybe (fail "missing guard expression") return $ b ^. guardBuilderExpr)
+testGuard = command "guard" $ Guard
+    <$> cmdLine
+    <*> param ""
 
 
 testWait :: TestParser [TestStep]
