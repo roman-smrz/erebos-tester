@@ -33,10 +33,10 @@ data Test = Test
     , testSteps :: [TestStep]
     }
 
-data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a)
-              | Spawn ProcName NodeName
+data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
+              | Spawn ProcName NodeName [TestStep]
               | Send ProcName (Expr Text)
-              | Expect SourceLine ProcName (Expr Regex) [VarName]
+              | Expect SourceLine ProcName (Expr Regex) [VarName] [TestStep]
               | Guard SourceLine (Expr Bool)
               | Wait
 

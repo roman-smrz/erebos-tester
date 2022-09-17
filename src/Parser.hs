@@ -75,7 +75,7 @@ block :: (a -> [b] -> TestParser c) -> TestParser a -> TestParser b -> TestParse
 block merge header item = L.indentBlock scn $ do
     h <- header
     choice
-        [ do try $ void $ lexeme $ char ':'
+        [ do symbol ":"
              return $ L.IndentSome Nothing (merge h) item
         , L.IndentNone <$> merge h []
         ]
@@ -285,15 +285,19 @@ getSourceLine = do
 letStatement :: TestParser [TestStep]
 letStatement = do
     line <- getSourceLine
+    indent <- L.indentLevel
     wsymbol "let"
     name <- VarName . (:[]) <$> identifier
     symbol "="
     SomeExpr (e :: Expr a) <- someExpr
     void $ eol
 
+    s <- get
     addVarName @a Proxy name
-    return [Let line name e]
+    body <- testBlock indent
+    put s
 
+    return [Let line name e body]
 
 class Typeable a => ParamType a where
     parseParam :: TestParser a
@@ -347,32 +351,59 @@ param name = CommandDef [(name, SomeParam (Proxy @a))] (\[SomeParam (Identity x)
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
 
-command :: String -> CommandDef a -> TestParser [a]
+data InnerBlock
+
+instance ParamType InnerBlock where
+    parseParam = mzero
+    showParamType _ = "<code block>"
+
+instance ParamType TestStep where
+    parseParam = mzero
+    showParamType _ = "<code line>"
+
+innerBlock :: CommandDef [TestStep]
+innerBlock = CommandDef [("", SomeParam (Proxy @InnerBlock))] (\[SomeParam (Identity x)] -> fromJust $ cast x)
+
+command :: String -> CommandDef TestStep -> TestParser [TestStep]
 command name (CommandDef types ctor) = do
+    indent <- L.indentLevel
     line <- getSourceLine
-    L.indentBlock scn $ do
-        wsymbol name
-        helper line $ map (fmap $ \(SomeParam (_ :: Proxy p)) -> SomeParam $ Nothing @p) types
+    wsymbol name
+    restOfLine indent [] line $ map (fmap $ \(SomeParam (_ :: Proxy p)) -> SomeParam $ Nothing @p) types
   where
-    helper line params = choice
+    restOfLine :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> SourceLine -> [(String, SomeParam Maybe)] -> TestParser [TestStep]
+    restOfLine cmdi partials line params = choice
         [do void $ lookAhead eol
             iparams <- forM params $ \case
                 (_, SomeParam (Nothing :: Maybe p))
                     | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam $ Identity line
+                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam . Identity <$> restOfParts cmdi partials
                 (sym, SomeParam (Nothing :: Maybe p)) -> choice
                     [ SomeParam . Identity <$> paramDefault @p
                     , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType @p Proxy
                     ]
                 (_, SomeParam (Just x)) -> return $ SomeParam $ Identity x
-            return $ L.IndentNone [ctor iparams]
+            return [ctor iparams]
 
         ,do symbol ":"
-            return $ L.IndentSome Nothing (return . concat) $ do
-                line' <- getSourceLine
-                L.indentBlock scn $ helper line' params
+            scn
+            indent <- L.indentLevel
+            restOfParts cmdi ((indent, params) : partials)
 
-        ,do tryParams line [] params
+        ,do tryParams cmdi partials line [] params
         ]
+
+    restOfParts :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> TestParser [TestStep]
+    restOfParts cmdi [] = testBlock cmdi
+    restOfParts cmdi partials@((partIndent, params) : rest) = do
+        scn
+        pos <- L.indentLevel
+        line <- getSourceLine
+        optional eof >>= \case
+            Just _ -> return []
+            _ | pos <  partIndent -> restOfParts cmdi rest
+              | pos == partIndent -> (++) <$> restOfLine cmdi partials line params <*> restOfParts cmdi partials
+              | otherwise         -> L.incorrectIndent EQ partIndent pos
 
     tryParam sym (SomeParam (cur :: Maybe p)) = do
         when (not $ null sym) $ wsymbol sym
@@ -380,18 +411,19 @@ command name (CommandDef types ctor) = do
             fail $ "multiple " ++ (if null sym then "unnamed" else "'" ++ sym ++ "'") ++ " parameters"
         SomeParam . Just <$> parseParam @p
 
-    tryParams line prev ((sym, p) : ps) = choice $
+    tryParams cmdi partIndent line prev ((sym, p) : ps) = choice $
         (if null sym then reverse else id) {- try unnamed parameter as last option -} $
         [do p' <- tryParam sym p
-            helper line $ concat [reverse prev, [(sym, p')], ps]
-        ,do tryParams line ((sym, p) : prev) ps
+            restOfLine cmdi partIndent line $ concat [reverse prev, [(sym, p')], ps]
+        ,do tryParams cmdi partIndent line ((sym, p) : prev) ps
         ]
-    tryParams _ _ [] = mzero
+    tryParams _ _ _ _ [] = mzero
 
 testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
     <*> param "on"
+    <*> innerBlock
 
 testSend :: TestParser [TestStep]
 testSend = command "send" $ Send
@@ -404,6 +436,7 @@ testExpect = command "expect" $ Expect
     <*> param "from"
     <*> param ""
     <*> param "capture"
+    <*> innerBlock
 
 testGuard :: TestParser [TestStep]
 testGuard = command "guard" $ Guard
@@ -416,16 +449,31 @@ testWait = do
     wsymbol "wait"
     return [Wait]
 
+testBlock :: Pos -> TestParser [TestStep]
+testBlock indent = concat <$> go
+  where
+    go = do
+        scn
+        pos <- L.indentLevel
+        optional eof >>= \case
+            Just _ -> return []
+            _ | pos <  indent -> return []
+              | pos == indent -> (:) <$> testStep <*> go
+              | otherwise     -> L.incorrectIndent EQ indent pos
+
+testStep :: TestParser [TestStep]
+testStep = choice
+    [ letStatement
+    , testSpawn
+    , testSend
+    , testExpect
+    , testGuard
+    , testWait
+    ]
+
 parseTestDefinition :: TestParser Test
 parseTestDefinition = label "test definition" $ toplevel $ do
-    block (\name steps -> return $ Test name $ concat steps) header $ choice
-        [ letStatement
-        , testSpawn
-        , testSend
-        , testExpect
-        , testGuard
-        , testWait
-        ]
+    block (\name steps -> return $ Test name $ concat steps) header testStep
     where header = do
               wsymbol "test"
               lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')

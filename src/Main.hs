@@ -6,7 +6,6 @@ import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.State
 
 import Data.List
 import Data.Maybe
@@ -76,11 +75,12 @@ data TestEnv = TestEnv
     }
 
 data TestState = TestState
-    { tsVars :: [(VarName, SomeVarValue)]
+    { tsNetwork :: Network
+    , tsVars :: [(VarName, SomeVarValue)]
     }
 
-newtype TestRun a = TestRun { fromTestRun :: ReaderT TestEnv (StateT TestState (ExceptT () IO)) a }
-    deriving (Functor, Applicative, Monad, MonadReader TestEnv, MonadState TestState, MonadIO)
+newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT () IO) a }
+    deriving (Functor, Applicative, Monad, MonadReader (TestEnv, TestState), MonadIO)
 
 instance MonadFail TestRun where
     fail str = do
@@ -89,30 +89,29 @@ instance MonadFail TestRun where
 
 instance MonadError () TestRun where
     throwError () = do
-        failedVar <- asks teFailed
+        failedVar <- asks $ teFailed . fst
         liftIO $ atomically $ writeTVar failedVar True
         TestRun $ throwError ()
 
     catchError (TestRun act) handler = TestRun $ catchError act $ fromTestRun . handler
 
 instance MonadEval TestRun where
-    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< gets (lookup name . tsVars)
+    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< asks (lookup name . tsVars . snd)
 
 instance MonadOutput TestRun where
-    getOutput = asks teOutput
+    getOutput = asks $ teOutput . fst
 
 forkTest :: TestRun () -> TestRun ()
 forkTest act = do
     tenv <- ask
-    tstate <- get
     void $ liftIO $ forkIO $ do
-        runExceptT (flip evalStateT tstate $ flip runReaderT tenv $ fromTestRun act) >>= \case
-            Left () -> atomically $ writeTVar (teFailed tenv) True
+        runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
+            Left () -> atomically $ writeTVar (teFailed $ fst tenv) True
             Right () -> return ()
 
 atomicallyTest :: STM a -> TestRun a
 atomicallyTest act = do
-    failedVar <- asks teFailed
+    failedVar <- asks $ teFailed . fst
     res <- liftIO $ atomically $ do
         failed <- readTVar failedVar
         if failed then return $ Left ()
@@ -121,8 +120,8 @@ atomicallyTest act = do
         Left e -> throwError e
         Right x -> return x
 
-initNetwork :: TestRun Network
-initNetwork = do
+initNetwork :: (Network -> TestRun a) -> TestRun a
+initNetwork inner = do
     net <- liftIO $ do
         exists <- doesPathExist testDir
         when exists $ ioError $ userError $ testDir ++ " exists"
@@ -137,11 +136,11 @@ initNetwork = do
     void $ spawnOn (Left net) (ProcNameTcpdump) (Just softwareTermination) $
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
 
-    useGDB <- asks $ optGDB . teOptions
+    useGDB <- asks $ optGDB . teOptions . fst
     when useGDB $ do
         gdbInit =<< spawnOn (Left net) ProcNameGDB Nothing gdbCmd
 
-    return net
+    local (fmap $ \s -> s { tsNetwork = net }) $ inner net
 
 exitNetwork :: Network -> TestRun ()
 exitNetwork net = do
@@ -167,44 +166,51 @@ exitNetwork net = do
             ExitSuccess -> return ()
             ExitFailure code -> do
                 outLine OutputChildFail (Just $ procName p) $ T.pack $ "exit code: " ++ show code
-                liftIO . atomically . flip writeTVar False =<< asks teFailed
+                liftIO . atomically . flip writeTVar False =<< asks (teFailed . fst)
 
     liftIO $ do
         callCommand $ "ip -all netns del"
         callCommand $ "ip link del group 1"
 
-    failed <- liftIO . atomically . readTVar =<< asks teFailed
+    failed <- liftIO . atomically . readTVar =<< asks (teFailed . fst)
     liftIO $ if failed then exitFailure
                        else removeDirectoryRecursive $ netDir net
 
-getNode :: Network -> NodeName -> TestRun Node
-getNode net nname@(NodeName tnname) = (find ((nname==).nodeName) <$> liftIO (readMVar (netNodes net))) >>= \case
-    Just node -> return node
-    _ -> do
-        let name = T.unpack tnname
-            dir = netDir net </> ("erebos_" ++ name)
-            node = Node { nodeName = nname
-                        , nodeNetwork = net
-                        , nodeDir = dir
-                        }
+getNode :: NodeName -> (Node -> TestRun a) -> TestRun a
+getNode nname inner = do
+    net <- asks $ tsNetwork . snd
+    nodes <- liftIO (readMVar (netNodes net))
+    case find ((nname==).nodeName) nodes of
+        Just node -> inner node
+        _ -> createNode nname inner
 
-        ip <- liftIO $ do
-            exists <- doesPathExist dir
-            when exists $ ioError $ userError $ dir ++ " exists"
-            createDirectoryIfMissing True dir
+createNode :: NodeName -> (Node -> TestRun a) -> TestRun a
+createNode nname@(NodeName tnname) inner = do
+    net <- asks $ tsNetwork . snd
+    let name = T.unpack tnname
+        dir = netDir net </> ("erebos_" ++ name)
+        node = Node { nodeName = nname
+                    , nodeNetwork = net
+                    , nodeDir = dir
+                    }
 
-            modifyMVar (netNodes net) $ \nodes -> do
-                let ip = "192.168.0." ++ show (11 + length nodes)
-                callCommand $ "ip netns add \""++ name ++ "\""
-                callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
-                callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
-                callOn node $ "ip addr add " ++ ip ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
-                callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
-                callOn node $ "ip link set dev lo up"
-                return $ (node : nodes, ip)
+    ip <- liftIO $ do
+        exists <- doesPathExist dir
+        when exists $ ioError $ userError $ dir ++ " exists"
+        createDirectoryIfMissing True dir
 
-        modify $ \s -> s { tsVars = (VarName [tnname, T.pack "ip"], SomeVarValue (T.pack ip)) : tsVars s }
-        return node
+        modifyMVar (netNodes net) $ \nodes -> do
+            let ip = "192.168.0." ++ show (11 + length nodes)
+            callCommand $ "ip netns add \""++ name ++ "\""
+            callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
+            callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
+            callOn node $ "ip addr add " ++ ip ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
+            callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
+            callOn node $ "ip link set dev lo up"
+            return $ (node : nodes, ip)
+
+    local (fmap $ \s -> s { tsVars = (VarName [tnname, T.pack "ip"], SomeVarValue (T.pack ip)) : tsVars s }) $ do
+        inner node
 
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
@@ -257,9 +263,10 @@ spawnOn target pname killWith cmd = do
     liftIO $ modifyMVar_ (netProcesses net) $ return . (process:)
     return process
 
-getProcess :: Network -> ProcName -> TestRun Process
-getProcess net pname = liftIO $ do
-    Just p <- find ((pname==).procName) <$> readMVar (netProcesses net)
+getProcess :: ProcName -> TestRun Process
+getProcess pname = do
+    net <- asks $ tsNetwork . snd
+    Just p <- find ((pname==).procName) <$> liftIO (readMVar (netProcesses net))
     return p
 
 tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
@@ -275,10 +282,10 @@ exprFailed desc (SourceLine sline) pname expr = do
         outLine OutputMatchFail pname $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
     throwError ()
 
-expect :: SourceLine -> Process -> Expr Regex -> [VarName] -> TestRun ()
-expect (SourceLine sline) p expr vars = do
+expect :: SourceLine -> Process -> Expr Regex -> [VarName] -> TestRun () -> TestRun ()
+expect (SourceLine sline) p expr vars inner = do
     re <- eval expr
-    timeout <- asks $ optTimeout . teOptions
+    timeout <- asks $ optTimeout . teOptions . fst
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
         line <- readTVar (procOutput p)
@@ -294,13 +301,14 @@ expect (SourceLine sline) p expr vars = do
                  throwError ()
 
              forM_ vars $ \name -> do
-                 cur <- gets (lookup name . tsVars)
+                 cur <- asks (lookup name . tsVars . snd)
                  when (isJust cur) $ do
                      outLine OutputError (Just $ procName p) $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
                      throwError ()
 
-             modify $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }
              outLine OutputMatch (Just $ procName p) line
+             local (fmap $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }) inner
+
          Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
 
 testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
@@ -312,6 +320,41 @@ allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
 allM [] _ = return True
 
+evalSteps :: [TestStep] -> TestRun ()
+evalSteps = mapM_ $ \case
+    Let (SourceLine sline) name expr inner -> do
+        cur <- asks (lookup name . tsVars . snd)
+        when (isJust cur) $ do
+            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+            throwError ()
+        value <- eval expr
+        local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s }) $ do
+            evalSteps inner
+
+    Spawn pname nname inner -> do
+        getNode nname $ \node -> do
+            opts <- asks $ teOptions . fst
+            void $ spawnOn (Right node) pname Nothing $
+                fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
+            evalSteps inner
+
+    Send pname expr -> do
+        p <- getProcess pname
+        line <- eval expr
+        send p line
+
+    Expect line pname expr captures inner -> do
+        p <- getProcess pname
+        expect line p expr captures $ evalSteps inner
+
+    Guard line expr -> do
+        testStepGuard line expr
+
+    Wait -> do
+        outPrompt $ T.pack "Waiting..."
+        void $ liftIO $ getLine
+        outClearPrompt
+
 runTest :: Output -> Options -> Test -> IO Bool
 runTest out opts test = do
     tenv <- TestEnv
@@ -319,10 +362,9 @@ runTest out opts test = do
         <*> newTVarIO False
         <*> pure opts
     tstate <- TestState
-        <$> pure []
-    (fmap $ either (const False) id) $ runExceptT $ flip evalStateT tstate $ flip runReaderT tenv $ fromTestRun $ do
-        net <- initNetwork
-
+        <$> pure (error "network not initialized")
+        <*> pure []
+    (fmap $ either (const False) id) $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ initNetwork $ \net -> do
         let sigHandler SignalInfo { siginfoSpecific = chld } = do
                 processes <- readMVar (netProcesses net)
                 forM_ processes $ \p -> do
@@ -336,36 +378,7 @@ runTest out opts test = do
                              Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
         oldHandler <- liftIO $ installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
-        flip catchError (const $ return ()) $ forM_ (testSteps test) $ \case
-            Let (SourceLine sline) name expr -> do
-                 cur <- gets (lookup name . tsVars)
-                 when (isJust cur) $ do
-                     outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
-                     throwError ()
-                 value <- eval expr
-                 modify $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s }
-
-            Spawn pname nname -> do
-                node <- getNode net nname
-                void $ spawnOn (Right node) pname Nothing $
-                    fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-
-            Send pname expr -> do
-                p <- getProcess net pname
-                line <- eval expr
-                send p line
-
-            Expect line pname expr captures -> do
-                p <- getProcess net pname
-                expect line p expr captures
-
-            Guard line expr -> do
-                testStepGuard line expr
-
-            Wait -> do
-                outPrompt $ T.pack "Waiting..."
-                void $ liftIO $ getLine
-                outClearPrompt
+        flip catchError (const $ return ()) $ evalSteps $ testSteps test
 
         _ <- liftIO $ installHandler processStatusChanged oldHandler Nothing
         exitNetwork net
