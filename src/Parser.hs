@@ -419,6 +419,19 @@ command name (CommandDef types ctor) = do
         ]
     tryParams _ _ _ _ [] = mzero
 
+testLocal :: TestParser [TestStep]
+testLocal = do
+    ref <- L.indentLevel
+    wsymbol "local"
+    symbol ":"
+    void $ eol
+
+    indent <- L.indentGuard scn GT ref
+    s <- get
+    body <- testBlock indent
+    put s
+    return body
+
 testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
@@ -464,6 +477,7 @@ testBlock indent = concat <$> go
 testStep :: TestParser [TestStep]
 testStep = choice
     [ letStatement
+    , testLocal
     , testSpawn
     , testSend
     , testExpect
