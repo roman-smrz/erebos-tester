@@ -84,7 +84,7 @@ newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (Excep
 
 instance MonadFail TestRun where
     fail str = do
-        outLine OutputError Nothing $ T.pack str
+        outLine OutputError T.empty $ T.pack str
         throwError ()
 
 instance MonadError () TestRun where
@@ -145,28 +145,15 @@ initNetwork inner = do
 exitNetwork :: Network -> TestRun ()
 exitNetwork net = do
     processes <- liftIO $ readMVar (netProcesses net)
-    liftIO $ forM_ processes $ \p -> do
-        when (procName p /= ProcNameGDB) $ do
-            hClose (procStdin p)
-        case procKillWith p of
-             Nothing -> return ()
-             Just sig -> getPid (procHandle p) >>= \case
-                Nothing -> return ()
-                Just pid -> signalProcess sig pid
 
     forM_ processes $ \p -> do
         when (procName p == ProcNameGDB) $ do
             outPrompt $ T.pack "gdb> "
             gdbSession p
             outClearPrompt
-            liftIO $ hClose (procStdin p)
 
     forM_ processes $ \p -> do
-        liftIO (waitForProcess (procHandle p)) >>= \case
-            ExitSuccess -> return ()
-            ExitFailure code -> do
-                outLine OutputChildFail (Just $ procName p) $ T.pack $ "exit code: " ++ show code
-                liftIO . atomically . flip writeTVar False =<< asks (teFailed . fst)
+        closeProcess p `catchError` \_ -> return ()
 
     liftIO $ do
         callCommand $ "ip -all netns del"
@@ -224,24 +211,6 @@ spawnOn target pname killWith cmd = do
         }
     pout <- liftIO $ newTVarIO []
 
-    let readingLoop :: Handle -> (Text -> TestRun ()) -> TestRun ()
-        readingLoop h act =
-            liftIO (tryIOError (T.hGetLine h)) >>= \case
-                Left err
-                    | isEOFError err -> return ()
-                    | otherwise -> outLine OutputChildFail (Just pname) $ T.pack $ "IO error: " ++ show err
-                Right line -> do
-                    act line
-                    readingLoop h act
-
-    forkTest $ readingLoop hout $ \line -> do
-        outLine OutputChildStdout (Just pname) line
-        liftIO $ atomically $ modifyTVar pout (++[line])
-    forkTest $ readingLoop herr $ \line -> do
-        case pname of
-             ProcNameTcpdump -> return ()
-             _ -> outLine OutputChildStderr (Just pname) line
-
     let process = Process
             { procName = pname
             , procHandle = handle
@@ -249,6 +218,24 @@ spawnOn target pname killWith cmd = do
             , procOutput = pout
             , procKillWith = killWith
             }
+
+    let readingLoop :: Handle -> (Text -> TestRun ()) -> TestRun ()
+        readingLoop h act =
+            liftIO (tryIOError (T.hGetLine h)) >>= \case
+                Left err
+                    | isEOFError err -> return ()
+                    | otherwise -> outProc OutputChildFail process $ T.pack $ "IO error: " ++ show err
+                Right line -> do
+                    act line
+                    readingLoop h act
+
+    forkTest $ readingLoop hout $ \line -> do
+        outProc OutputChildStdout process line
+        liftIO $ atomically $ modifyTVar pout (++[line])
+    forkTest $ readingLoop herr $ \line -> do
+        case pname of
+             ProcNameTcpdump -> return ()
+             _ -> outProc OutputChildStderr process line
 
     let net = either id nodeNetwork target
     when (pname /= ProcNameGDB) $ liftIO $ do
@@ -276,10 +263,11 @@ tryMatch _ [] = Nothing
 
 exprFailed :: Text -> SourceLine -> Maybe ProcName -> Expr a -> TestRun ()
 exprFailed desc (SourceLine sline) pname expr = do
+    let prompt = maybe T.empty textProcName pname
     exprVars <- gatherVars expr
-    outLine OutputMatchFail pname $ T.concat [desc, T.pack " failed on ", sline]
+    outLine OutputMatchFail prompt $ T.concat [desc, T.pack " failed on ", sline]
     forM_ exprVars $ \(name, value) ->
-        outLine OutputMatchFail pname $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
+        outLine OutputMatchFail prompt $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
     throwError ()
 
 expect :: SourceLine -> Process -> Expr Regex -> [VarName] -> TestRun () -> TestRun ()
@@ -297,16 +285,16 @@ expect (SourceLine sline) p expr vars inner = do
     case mbmatch of
          Just (line, capture) -> do
              when (length vars /= length capture) $ do
-                 outLine OutputMatchFail (Just $ procName p) $ T.pack "mismatched number of capture variables on " `T.append` sline
+                 outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` sline
                  throwError ()
 
              forM_ vars $ \name -> do
                  cur <- asks (lookup name . tsVars . snd)
                  when (isJust cur) $ do
-                     outLine OutputError (Just $ procName p) $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+                     outProc OutputError p $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
                      throwError ()
 
-             outLine OutputMatch (Just $ procName p) line
+             outProc OutputMatch p line
              local (fmap $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }) inner
 
          Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
@@ -320,12 +308,18 @@ allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
 allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
 allM [] _ = return True
 
+finally :: MonadError e m => m a -> m b -> m a
+finally act handler = do
+    x <- act `catchError` \e -> handler >> throwError e
+    void handler
+    return x
+
 evalSteps :: [TestStep] -> TestRun ()
 evalSteps = mapM_ $ \case
     Let (SourceLine sline) name expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
-            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+            outLine OutputError T.empty $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
             throwError ()
         value <- eval expr
         local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s }) $ do
@@ -334,9 +328,13 @@ evalSteps = mapM_ $ \case
     Spawn pname nname inner -> do
         getNode nname $ \node -> do
             opts <- asks $ teOptions . fst
-            void $ spawnOn (Right node) pname Nothing $
+            p <- spawnOn (Right node) pname Nothing $
                 fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-            evalSteps inner
+            evalSteps inner `finally` do
+                net <- asks $ tsNetwork . snd
+                ps <- liftIO $ takeMVar (netProcesses net)
+                closeProcess p `finally` do
+                    liftIO $ putMVar (netProcesses net) $ filter (/=p) ps
 
     Send pname expr -> do
         p <- getProcess pname
@@ -370,9 +368,9 @@ runTest out opts test = do
                 forM_ processes $ \p -> do
                     mbpid <- getPid (procHandle p)
                     when (mbpid == Just (siginfoPid chld)) $ flip runReaderT out $ do
-                        let err detail = outLine OutputChildFail (Just $ procName p) detail
+                        let err detail = outProc OutputChildFail p detail
                         case siginfoStatus chld of
-                             Exited ExitSuccess -> outLine OutputChildInfo (Just $ procName p) $ T.pack $ "child exited successfully"
+                             Exited ExitSuccess -> outProc OutputChildInfo p $ T.pack $ "child exited successfully"
                              Exited (ExitFailure code) -> err $ T.pack $ "child process exited with status " ++ show code
                              Terminated sig _ -> err $ T.pack $ "child terminated with signal " ++ show sig
                              Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig

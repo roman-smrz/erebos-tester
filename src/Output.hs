@@ -18,8 +18,6 @@ import Data.Text.Lazy.IO qualified as TL
 
 import System.IO
 
-import Test
-
 data Output = Output
     { outState :: MVar OutputState
     , outConfig :: OutputConfig
@@ -91,14 +89,14 @@ showPrompt _ = return ()
 ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
 ioWithOutput act = liftIO . act =<< getOutput
 
-outLine :: MonadOutput m => OutputType -> Maybe ProcName -> Text -> m ()
-outLine otype mbproc line = ioWithOutput $ \out ->
+outLine :: MonadOutput m => OutputType -> Text -> Text -> m ()
+outLine otype prompt line = ioWithOutput $ \out ->
     when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
         withMVar (outState out) $ \st -> do
             clearPrompt st
             TL.putStrLn $ TL.fromChunks
                 [ T.pack "\ESC[", outColor otype, T.pack "m"
-                , maybe T.empty textProcName mbproc
+                , prompt
                 , outSign otype
                 , T.pack "> "
                 , line
