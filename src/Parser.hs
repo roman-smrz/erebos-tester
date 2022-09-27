@@ -62,11 +62,14 @@ wordChar = alphaNumChar <|> char '_'
 lexeme :: TestParser a -> TestParser a
 lexeme = L.lexeme sc
 
-symbol :: String -> TestParser ()
-symbol = void . L.symbol sc . TL.pack
+symbol, osymbol, wsymbol :: String -> TestParser ()
+symbol str  = void $       (string (TL.pack str)) <* sc
+osymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy operatorChar) <* sc
+wsymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy wordChar) <* sc
 
-wsymbol :: String -> TestParser ()
-wsymbol str = void $ lexeme $ string (TL.pack str) <* notFollowedBy wordChar
+operatorChar :: (MonadParsec e s m, Token s ~ Char) => m (Token s)
+operatorChar = satisfy $ (`elem` "+-*/=")
+{-# INLINE operatorChar #-}
 
 toplevel :: TestParser a -> TestParser a
 toplevel = L.nonIndented scn
@@ -234,7 +237,7 @@ someExpr = join inner <?> "expression"
     prefix :: String -> [SomeUnOp] -> Operator TestParser (TestParser SomeExpr)
     prefix name ops = Prefix $ do
         off <- stateOffset <$> getParserState
-        void $ symbol name
+        void $ osymbol name
         return $ \p -> do
             SomeExpr e <- p
             let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
@@ -244,7 +247,7 @@ someExpr = join inner <?> "expression"
     binary :: String -> [SomeBinOp] -> Operator TestParser (TestParser SomeExpr)
     binary name ops = InfixL $ do
         off <- stateOffset <$> getParserState
-        void $ symbol name
+        void $ osymbol name
         return $ \p q -> do
             SomeExpr e <- p
             SomeExpr f <- q
@@ -288,7 +291,7 @@ letStatement = do
     indent <- L.indentLevel
     wsymbol "let"
     name <- VarName . (:[]) <$> identifier
-    symbol "="
+    osymbol "="
     SomeExpr (e :: Expr a) <- someExpr
     void $ eol
 
