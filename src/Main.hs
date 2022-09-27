@@ -30,22 +30,11 @@ import System.Posix.Signals
 import System.Process
 
 import GDB
+import Network
 import Output
 import Parser
 import Process
 import Test
-
-data Network = Network
-    { netNodes :: MVar [Node]
-    , netProcesses :: MVar [Process]
-    , netDir :: FilePath
-    }
-
-data Node = Node
-    { nodeName :: NodeName
-    , nodeNetwork :: Network
-    , nodeDir :: FilePath
-    }
 
 data Options = Options
     { optDefaultTool :: String

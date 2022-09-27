@@ -27,6 +27,8 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 import System.Exit
 
+import Network (NodeName(..))
+import Process (ProcName(..))
 import Test
 
 type TestParser = ParsecT Void TestStream (State TestParserState)

@@ -3,9 +3,6 @@ module Test (
     TestStep(..),
     SourceLine(..),
 
-    ProcName(..), textProcName, unpackProcName,
-    NodeName(..), textNodeName, unpackNodeName,
-
     MonadEval(..),
     VarName(..), textVarName, unpackVarName,
     ExprType(..),
@@ -25,6 +22,7 @@ import Data.Typeable
 import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
+import Network
 import Process
 import Util
 
@@ -41,15 +39,6 @@ data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestSte
               | Wait
 
 newtype SourceLine = SourceLine Text
-
-newtype NodeName = NodeName Text
-    deriving (Eq, Ord)
-
-textNodeName :: NodeName -> Text
-textNodeName (NodeName name) = name
-
-unpackNodeName :: NodeName -> String
-unpackNodeName (NodeName tname) = T.unpack tname
 
 
 class MonadFail m => MonadEval m where
