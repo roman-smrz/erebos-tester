@@ -7,6 +7,7 @@ module Test (
     VarName(..), textVarName, unpackVarName,
     ExprType(..),
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
+    RecordSelector(..),
     Expr(..), eval, gatherVars,
     Regex,
 ) where
@@ -22,7 +23,7 @@ import Data.Typeable
 import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
-import Network
+import {-# SOURCE #-} Network
 import Process
 import Util
 
@@ -32,7 +33,7 @@ data Test = Test
     }
 
 data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
-              | Spawn ProcName NodeName [TestStep]
+              | Spawn ProcName (Either NodeName (Expr Node)) [TestStep]
               | Send ProcName (Expr Text)
               | Expect SourceLine ProcName (Expr Regex) [VarName] [TestStep]
               | Guard SourceLine (Expr Bool)
@@ -45,11 +46,11 @@ class MonadFail m => MonadEval m where
   lookupVar :: VarName -> m SomeVarValue
 
 
-data VarName = VarName [Text]
+newtype VarName = VarName Text
     deriving (Eq, Ord)
 
 textVarName :: VarName -> Text
-textVarName (VarName name) = T.concat $ intersperse (T.singleton '.') name
+textVarName (VarName name ) = name
 
 unpackVarName :: VarName -> String
 unpackVarName = T.unpack . textVarName
@@ -59,6 +60,9 @@ class Typeable a => ExprType a where
     textExprType :: proxy a -> Text
     textExprValue :: a -> Text
     emptyVarValue :: a
+
+    recordMembers :: [(Text, RecordSelector a)]
+    recordMembers = []
 
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
@@ -82,6 +86,8 @@ instance ExprType Regex where
     emptyVarValue = either error id $ compile defaultCompOpt defaultExecOpt T.empty
 
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
+
+data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
 
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m a
 fromSomeVarValue name (SomeVarValue value) = maybe (fail err) return $ cast value

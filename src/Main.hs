@@ -165,27 +165,29 @@ createNode nname@(NodeName tnname) inner = do
     net <- asks $ tsNetwork . snd
     let name = T.unpack tnname
         dir = netDir net </> ("erebos_" ++ name)
-        node = Node { nodeName = nname
-                    , nodeNetwork = net
-                    , nodeDir = dir
-                    }
 
-    ip <- liftIO $ do
+    node <- liftIO $ do
         exists <- doesPathExist dir
         when exists $ ioError $ userError $ dir ++ " exists"
         createDirectoryIfMissing True dir
 
         modifyMVar (netNodes net) $ \nodes -> do
             let ip = "192.168.0." ++ show (11 + length nodes)
+                node = Node { nodeName = nname
+                            , nodeIp = T.pack ip
+                            , nodeNetwork = net
+                            , nodeDir = dir
+                            }
+
             callCommand $ "ip netns add \""++ name ++ "\""
             callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
             callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
             callOn node $ "ip addr add " ++ ip ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
             callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
             callOn node $ "ip link set dev lo up"
-            return $ (node : nodes, ip)
+            return $ (node : nodes, node)
 
-    local (fmap $ \s -> s { tsVars = (VarName [tnname, T.pack "ip"], SomeVarValue (T.pack ip)) : tsVars s }) $ do
+    local (fmap $ \s -> s { tsVars = (VarName tnname, SomeVarValue node) : tsVars s }) $ do
         inner node
 
 callOn :: Node -> String -> IO ()
@@ -315,7 +317,7 @@ evalSteps = mapM_ $ \case
             evalSteps inner
 
     Spawn pname nname inner -> do
-        getNode nname $ \node -> do
+        either getNode ((>>=) . eval) nname $ \node -> do
             opts <- asks $ teOptions . fst
             p <- spawnOn (Right node) pname Nothing $
                 fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)

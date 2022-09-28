@@ -27,7 +27,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 import System.Exit
 
-import Network (NodeName(..))
+import Network (Node, NodeName(..))
 import Process (ProcName(..))
 import Test
 
@@ -46,7 +46,6 @@ someEmptyVar :: SomeExprType -> SomeVarValue
 someEmptyVar (SomeExprType (Proxy :: Proxy a)) = SomeVarValue $ emptyVarValue @a
 
 instance MonadEval TestParser where
-    lookupVar (VarName [_, ip]) | ip == T.pack "ip" = return $ SomeVarValue T.empty
     lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") (return . someEmptyVar) =<< gets (lookup name . testVars)
 
 skipLineComment :: TestParser ()
@@ -90,12 +89,6 @@ listOf item = do
     x <- item
     (x:) <$> choice [ symbol "," >> listOf item, return [] ]
 
-nodeName :: TestParser NodeName
-nodeName = label "network node name" $ lexeme $ do
-    c <- lowerChar
-    cs <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_' || x == '-')
-    return $ NodeName $ TL.toStrict (c `TL.cons` cs)
-
 procName :: TestParser ProcName
 procName = label "process name" $ lexeme $ do
     c <- lowerChar
@@ -107,13 +100,11 @@ identifier = do
     lexeme $ TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
 
 varName :: TestParser VarName
-varName = lexeme $ do
-    VarName . T.splitOn (T.singleton '.') . TL.toStrict <$>
-        takeWhile1P Nothing (\x -> isAlphaNum x || x == '_' || x == '.')
+varName = VarName <$> identifier
 
 newVarName :: forall a proxy. ExprType a => proxy a -> TestParser VarName
 newVarName proxy = do
-    name <- VarName . (:[]) <$> identifier
+    name <- varName
     addVarName proxy name
     return name
 
@@ -128,7 +119,7 @@ someExpansion :: TestParser SomeExpr
 someExpansion = do
     void $ char '$'
     choice
-        [do name <- VarName . (:[]) . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+        [do name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
             SomeVarValue (_ :: a) <- lookupVar name
             return $ SomeExpr $ Variable @a name
         , between (char '{') (char '}') someExpr
@@ -219,7 +210,9 @@ someExpr = join inner <?> "expression"
 
     term = parens inner <|> literal <|> variable <?> "term"
 
-    table = [ [ prefix "-" $ [ SomeUnOp (negate @Integer) ]
+    table = [ [ recordSelector
+              ]
+            , [ prefix "-" $ [ SomeUnOp (negate @Integer) ]
               ]
             , [ binary "*" $ [ SomeBinOp ((*) @Integer) ]
               , binary "/" $ [ SomeBinOp (div @Integer) ]
@@ -257,6 +250,20 @@ someExpr = join inner <?> "expression"
                     [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "' and '", textExprType f, T.pack "'"]
             maybe err return $ listToMaybe $ catMaybes $ map (\(SomeBinOp op) -> SomeExpr <$> applyBinOp op e f) ops
 
+    recordSelector :: Operator TestParser (TestParser SomeExpr)
+    recordSelector = Postfix $ do
+        void $ osymbol "."
+        off <- stateOffset <$> getParserState
+        VarName m <- varName
+        return $ \p -> do
+            SomeExpr e <- p
+            let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                    [ T.pack "value of type ", textExprType e, T.pack " does not have member '", m, T.pack "'" ]
+            maybe err return $ applyRecordSelector e <$> lookup m recordMembers
+
+    applyRecordSelector :: ExprType a => Expr a -> RecordSelector a -> SomeExpr
+    applyRecordSelector e (RecordSelector f) = SomeExpr $ UnOp f e
+
     literal = label "literal" $ choice
         [ return . SomeExpr <$> integerLiteral
         , return . SomeExpr <$> quotedString
@@ -292,7 +299,7 @@ letStatement = do
     line <- getSourceLine
     indent <- L.indentLevel
     wsymbol "let"
-    name <- VarName . (:[]) <$> identifier
+    name <- varName
     osymbol "="
     SomeExpr (e :: Expr a) <- someExpr
     void $ eol
@@ -316,7 +323,7 @@ instance ParamType SourceLine where
     showParamType _ = "<source line>"
 
 instance ParamType NodeName where
-    parseParam = nodeName
+    parseParam = NodeName . textVarName <$> newVarName @Node Proxy
     showParamType _ = "<node>"
 
 instance ParamType ProcName where
@@ -335,6 +342,10 @@ instance ParamType a => ParamType [a] where
     parseParam = listOf parseParam
     showParamType _ = showParamType @a Proxy ++ " [, " ++ showParamType @a Proxy ++ " ...]"
     paramDefault = return []
+
+instance (ParamType a, ParamType b) => ParamType (Either a b) where
+    parseParam = try (Left <$> parseParam) <|> (Right <$> parseParam)
+    showParamType _ = showParamType @a Proxy ++ " or " ++ showParamType @b Proxy
 
 data SomeParam f = forall a. ParamType a => SomeParam (f a)
 
