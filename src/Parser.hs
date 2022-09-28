@@ -104,14 +104,16 @@ varName = VarName <$> identifier
 
 newVarName :: forall a proxy. ExprType a => proxy a -> TestParser VarName
 newVarName proxy = do
+    off <- stateOffset <$> getParserState
     name <- varName
-    addVarName proxy name
+    addVarName off proxy name
     return name
 
-addVarName :: forall a proxy. ExprType a => proxy a -> VarName -> TestParser ()
-addVarName _ name = do
+addVarName :: forall a proxy. ExprType a => Int -> proxy a -> VarName -> TestParser ()
+addVarName off _ name = do
     gets (lookup name . testVars) >>= \case
-        Just _ -> fail $ "variable '" ++ unpackVarName name ++ "' already exists"
+        Just _ -> parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+            T.pack "variable '" <> textVarName name <> T.pack "' already exists"
         Nothing -> return ()
     modify $ \s -> s { testVars = (name, SomeExprType @a Proxy) : testVars s }
 
@@ -299,13 +301,14 @@ letStatement = do
     line <- getSourceLine
     indent <- L.indentLevel
     wsymbol "let"
+    off <- stateOffset <$> getParserState
     name <- varName
     osymbol "="
     SomeExpr (e :: Expr a) <- someExpr
-    void $ eol
 
     s <- get
-    addVarName @a Proxy name
+    addVarName @a off Proxy name
+    void $ eol
     body <- testBlock indent
     put s
 
