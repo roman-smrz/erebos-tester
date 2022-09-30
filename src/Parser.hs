@@ -12,7 +12,6 @@ import Control.Monad.State
 
 import Data.Char
 import Data.Maybe
-import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -36,8 +35,7 @@ type TestParser = ParsecT Void TestStream (State TestParserState)
 type TestStream = TL.Text
 
 data TestParserState = TestParserState
-    { testProcs :: Set ProcName
-    , testVars :: [(VarName, SomeExprType)]
+    { testVars :: [(VarName, SomeExprType)]
     }
 
 data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
@@ -71,6 +69,13 @@ wsymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy wordChar) <* s
 operatorChar :: (MonadParsec e s m, Token s ~ Char) => m (Token s)
 operatorChar = satisfy $ (`elem` "+-*/=")
 {-# INLINE operatorChar #-}
+
+localState :: TestParser a -> TestParser a
+localState inner = do
+    s <- get
+    x <- inner
+    put s
+    return x
 
 toplevel :: TestParser a -> TestParser a
 toplevel = L.nonIndented scn
@@ -306,13 +311,11 @@ letStatement = do
     osymbol "="
     SomeExpr (e :: Expr a) <- someExpr
 
-    s <- get
-    addVarName @a off Proxy name
-    void $ eol
-    body <- testBlock indent
-    put s
-
-    return [Let line name e body]
+    localState $ do
+        addVarName @a off Proxy name
+        void $ eol
+        body <- testBlock indent
+        return [Let line name e body]
 
 class Typeable a => ParamType a where
     parseParam :: TestParser a
@@ -388,7 +391,8 @@ command name (CommandDef types ctor) = do
     indent <- L.indentLevel
     line <- getSourceLine
     wsymbol name
-    restOfLine indent [] line $ map (fmap $ \(SomeParam (_ :: Proxy p)) -> SomeParam $ Nothing @p) types
+    localState $ do
+        restOfLine indent [] line $ map (fmap $ \(SomeParam (_ :: Proxy p)) -> SomeParam $ Nothing @p) types
   where
     restOfLine :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> SourceLine -> [(String, SomeParam Maybe)] -> TestParser [TestStep]
     restOfLine cmdi partials line params = choice
@@ -446,10 +450,7 @@ testLocal = do
     void $ eol
 
     indent <- L.indentGuard scn GT ref
-    s <- get
-    body <- testBlock indent
-    put s
-    return body
+    localState $ testBlock indent
 
 testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn" $ Spawn
@@ -521,8 +522,7 @@ parseTestFile :: FilePath -> IO [Test]
 parseTestFile path = do
     content <- TL.readFile path
     let initState = TestParserState
-            { testProcs = S.empty
-            , testVars = []
+            { testVars = []
             }
     case evalState (runParserT parseTestDefinitions path content) initState of
          Left err -> putStr (errorBundlePretty err) >> exitFailure
