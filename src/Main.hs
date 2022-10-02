@@ -152,42 +152,36 @@ exitNetwork net = do
     liftIO $ if failed then exitFailure
                        else removeDirectoryRecursive $ netDir net
 
-getNode :: NodeName -> (Node -> TestRun a) -> TestRun a
-getNode nname inner = do
+createNode :: TypedVarName Node -> (Node -> TestRun a) -> TestRun a
+createNode (TypedVarName vname) inner = do
     net <- asks $ tsNetwork . snd
-    nodes <- liftIO (readMVar (netNodes net))
-    case find ((nname==).nodeName) nodes of
-        Just node -> inner node
-        _ -> createNode nname inner
-
-createNode :: NodeName -> (Node -> TestRun a) -> TestRun a
-createNode nname@(NodeName tnname) inner = do
-    net <- asks $ tsNetwork . snd
-    let name = T.unpack tnname
-        dir = netDir net </> ("erebos_" ++ name)
-
     node <- liftIO $ do
+        node <- modifyMVar (netNodes net) $ \nodes -> do
+            let nname = nextNodeName vname $ map nodeName nodes
+                ip = "192.168.0." ++ show (11 + length nodes)
+                node = Node { nodeName = nname
+                            , nodeIp = T.pack ip
+                            , nodeNetwork = net
+                            , nodeDir = netDir net </> ("erebos_" ++ unpackNodeName nname)
+                            }
+            return $ (node : nodes, node)
+
+        let name = unpackNodeName $ nodeName node
+            dir = nodeDir node
+
         exists <- doesPathExist dir
         when exists $ ioError $ userError $ dir ++ " exists"
         createDirectoryIfMissing True dir
 
-        modifyMVar (netNodes net) $ \nodes -> do
-            let ip = "192.168.0." ++ show (11 + length nodes)
-                node = Node { nodeName = nname
-                            , nodeIp = T.pack ip
-                            , nodeNetwork = net
-                            , nodeDir = dir
-                            }
+        callCommand $ "ip netns add \""++ name ++ "\""
+        callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
+        callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
+        callOn node $ "ip addr add " ++ T.unpack (nodeIp node) ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
+        callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
+        callOn node $ "ip link set dev lo up"
+        return node
 
-            callCommand $ "ip netns add \""++ name ++ "\""
-            callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
-            callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
-            callOn node $ "ip addr add " ++ ip ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
-            callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
-            callOn node $ "ip link set dev lo up"
-            return $ (node : nodes, node)
-
-    local (fmap $ \s -> s { tsVars = (VarName tnname, SomeVarValue node) : tsVars s }) $ do
+    local (fmap $ \s -> s { tsVars = (vname, SomeVarValue node) : tsVars s }) $ do
         inner node
 
 callOn :: Node -> String -> IO ()
@@ -261,8 +255,8 @@ exprFailed desc (SourceLine sline) pname expr = do
         outLine OutputMatchFail prompt $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
     throwError ()
 
-expect :: SourceLine -> Process -> Expr Regex -> [VarName] -> TestRun () -> TestRun ()
-expect (SourceLine sline) p expr vars inner = do
+expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
+expect (SourceLine sline) p expr tvars inner = do
     re <- eval expr
     timeout <- asks $ optTimeout . teOptions . fst
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
@@ -275,6 +269,8 @@ expect (SourceLine sline) p expr vars inner = do
                  return $ Just m
     case mbmatch of
          Just (line, capture) -> do
+             let vars = map (\(TypedVarName n) -> n) tvars
+
              when (length vars /= length capture) $ do
                  outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` sline
                  throwError ()
@@ -317,7 +313,7 @@ evalSteps = mapM_ $ \case
             evalSteps inner
 
     Spawn pname nname inner -> do
-        either getNode ((>>=) . eval) nname $ \node -> do
+        either createNode ((>>=) . eval) nname $ \node -> do
             opts <- asks $ teOptions . fst
             p <- spawnOn (Right node) pname Nothing $
                 fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)

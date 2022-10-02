@@ -4,7 +4,7 @@ module Test (
     SourceLine(..),
 
     MonadEval(..),
-    VarName(..), textVarName, unpackVarName,
+    VarName(..), TypedVarName(..), textVarName, unpackVarName,
     ExprType(..),
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
     RecordSelector(..),
@@ -33,9 +33,9 @@ data Test = Test
     }
 
 data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
-              | Spawn ProcName (Either NodeName (Expr Node)) [TestStep]
+              | Spawn ProcName (Either (TypedVarName Node) (Expr Node)) [TestStep]
               | Send ProcName (Expr Text)
-              | Expect SourceLine ProcName (Expr Regex) [VarName] [TestStep]
+              | Expect SourceLine ProcName (Expr Regex) [TypedVarName Text] [TestStep]
               | Guard SourceLine (Expr Bool)
               | Wait
 
@@ -47,6 +47,9 @@ class MonadFail m => MonadEval m where
 
 
 newtype VarName = VarName Text
+    deriving (Eq, Ord)
+
+newtype TypedVarName a = TypedVarName VarName
     deriving (Eq, Ord)
 
 textVarName :: VarName -> Text

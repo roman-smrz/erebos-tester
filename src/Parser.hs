@@ -26,7 +26,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 import System.Exit
 
-import Network (Node, NodeName(..))
+import Network ()
 import Process (ProcName(..))
 import Test
 
@@ -107,15 +107,15 @@ identifier = do
 varName :: TestParser VarName
 varName = VarName <$> identifier
 
-newVarName :: forall a proxy. ExprType a => proxy a -> TestParser VarName
-newVarName proxy = do
+newVarName :: forall a. ExprType a => TestParser (TypedVarName a)
+newVarName = do
     off <- stateOffset <$> getParserState
-    name <- varName
-    addVarName off proxy name
+    name <- TypedVarName <$> varName
+    addVarName off name
     return name
 
-addVarName :: forall a proxy. ExprType a => Int -> proxy a -> VarName -> TestParser ()
-addVarName off _ name = do
+addVarName :: forall a. ExprType a => Int -> TypedVarName a -> TestParser ()
+addVarName off (TypedVarName name) = do
     gets (lookup name . testVars) >>= \case
         Just _ -> parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             T.pack "variable '" <> textVarName name <> T.pack "' already exists"
@@ -312,7 +312,7 @@ letStatement = do
     SomeExpr (e :: Expr a) <- someExpr
 
     localState $ do
-        addVarName @a off Proxy name
+        addVarName off $ TypedVarName @a name
         void $ eol
         body <- testBlock indent
         return [Let line name e body]
@@ -328,16 +328,12 @@ instance ParamType SourceLine where
     parseParam = mzero
     showParamType _ = "<source line>"
 
-instance ParamType NodeName where
-    parseParam = NodeName . textVarName <$> newVarName @Node Proxy
-    showParamType _ = "<node>"
-
 instance ParamType ProcName where
     parseParam = procName
     showParamType _ = "<proc>"
 
-instance ParamType VarName where
-    parseParam = newVarName @Text Proxy
+instance ExprType a => ParamType (TypedVarName a) where
+    parseParam = newVarName
     showParamType _ = "<variable>"
 
 instance ExprType a => ParamType (Expr a) where
