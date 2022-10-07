@@ -1,4 +1,4 @@
-module Main where
+module Main (main) where
 
 import Control.Applicative
 import Control.Concurrent
@@ -300,10 +300,6 @@ testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
 testStepGuard sline expr = do
     x <- eval expr
     when (not x) $ exprFailed (T.pack "guard") sline Nothing expr
-
-allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
-allM (x:xs) p = p x >>= \case True -> allM xs p; False -> return False
-allM [] _ = return True
 
 finally :: MonadError e m => m a -> m b -> m a
 finally act handler = do
