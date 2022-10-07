@@ -260,10 +260,10 @@ someExpr = join inner <?> "expression"
             maybe err return $ listToMaybe $ catMaybes $ map (\(SomeBinOp op) -> SomeExpr <$> applyBinOp op e f) ops
 
     recordSelector :: Operator TestParser (TestParser SomeExpr)
-    recordSelector = Postfix $ do
+    recordSelector = Postfix $ fmap (foldl1 (flip (.))) $ some $ do
         void $ osymbol "."
         off <- stateOffset <$> getParserState
-        VarName m <- varName
+        m <- identifier
         return $ \p -> do
             SomeExpr e <- p
             let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
