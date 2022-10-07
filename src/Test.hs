@@ -15,6 +15,7 @@ module Test (
 
 import Data.Char
 import Data.List
+import Data.Scientific
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable
@@ -68,6 +69,11 @@ class Typeable a => ExprType a where
 
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
+    textExprValue x = T.pack (show x)
+    emptyVarValue = 0
+
+instance ExprType Scientific where
+    textExprType _ = T.pack "number"
     textExprValue x = T.pack (show x)
     emptyVarValue = 0
 

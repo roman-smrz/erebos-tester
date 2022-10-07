@@ -12,6 +12,7 @@ import Control.Monad.State
 
 import Data.Char
 import Data.Maybe
+import Data.Scientific
 import qualified Data.Set as S
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -141,8 +142,15 @@ stringExpansion tname conv = do
 
     maybe err return $ listToMaybe $ catMaybes $ conv e
 
-integerLiteral :: TestParser (Expr Integer)
-integerLiteral = Literal . read . TL.unpack <$> takeWhile1P (Just "integer") isDigit
+numberLiteral :: TestParser SomeExpr
+numberLiteral = label "number" $ lexeme $ do
+    x <- L.scientific
+    choice
+        [ return (SomeExpr $ Literal (x / 100)) <* void (char ('%'))
+        , if base10Exponent x == 0
+             then return $ SomeExpr $ Literal (coefficient x)
+             else return $ SomeExpr $ Literal x
+        ]
 
 quotedString :: TestParser (Expr Text)
 quotedString = label "string" $ lexeme $ do
@@ -163,6 +171,7 @@ quotedString = label "string" $ lexeme $ do
             ,do e <- stringExpansion (T.pack "string") $ \e ->
                     [ cast e
                     , UnOp (T.pack . show @Integer) <$> cast e
+                    , UnOp (T.pack . show @Scientific) <$> cast e
                     ]
                 (e:) <$> inner
             ]
@@ -184,6 +193,7 @@ regex = label "regular expression" $ lexeme $ do
                     [ cast e
                     , UnOp RegexString <$> cast e
                     , UnOp (RegexString . T.pack . show @Integer) <$> cast e
+                    , UnOp (RegexString . T.pack . show @Scientific) <$> cast e
                     ]
                 (e:) <$> inner
             ]
@@ -223,20 +233,32 @@ someExpr = join inner <?> "expression"
 
     table = [ [ recordSelector
               ]
-            , [ prefix "-" $ [ SomeUnOp (negate @Integer) ]
+            , [ prefix "-" $ [ SomeUnOp (negate @Integer)
+                             , SomeUnOp (negate @Scientific)
+                             ]
               ]
-            , [ binary "*" $ [ SomeBinOp ((*) @Integer) ]
+            , [ binary "*" $ [ SomeBinOp ((*) @Integer)
+                             , SomeBinOp ((*) @Scientific)
+                             ]
               {- TODO: parsing issues with regular expressions
-              , binary "/" $ [ SomeBinOp (div @Integer) ]
+              , binary "/" $ [ SomeBinOp (div @Integer)
+                             , SomeBinOp ((/) @Scientific)
+                             ]
               -}
               ]
-            , [ binary "+" $ [ SomeBinOp ((+) @Integer) ]
-              , binary "-" $ [ SomeBinOp ((-) @Integer) ]
+            , [ binary "+" $ [ SomeBinOp ((+) @Integer)
+                             , SomeBinOp ((+) @Scientific)
+                             ]
+              , binary "-" $ [ SomeBinOp ((-) @Integer)
+                             , SomeBinOp ((-) @Scientific)
+                             ]
               ]
             , [ binary "==" $ [ SomeBinOp ((==) @Integer)
+                              , SomeBinOp ((==) @Scientific)
                               , SomeBinOp ((==) @Text)
                               ]
               , binary "/=" $ [ SomeBinOp ((/=) @Integer)
+                              , SomeBinOp ((/=) @Scientific)
                               , SomeBinOp ((/=) @Text)
                               ]
               ]
@@ -278,7 +300,7 @@ someExpr = join inner <?> "expression"
     applyRecordSelector e (RecordSelector f) = SomeExpr $ UnOp f e
 
     literal = label "literal" $ choice
-        [ return . SomeExpr <$> integerLiteral
+        [ return <$> numberLiteral
         , return . SomeExpr <$> quotedString
         , return . SomeExpr <$> regex
         ]
