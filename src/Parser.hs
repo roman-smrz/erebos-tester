@@ -500,6 +500,12 @@ testGuard = command "guard" $ Guard
     <$> cmdLine
     <*> param ""
 
+testPacketLoss :: TestParser [TestStep]
+testPacketLoss = command "packet_loss" $ PacketLoss
+    <$> param ""
+    <*> param "on"
+    <*> innerBlock
+
 
 testWait :: TestParser [TestStep]
 testWait = do
@@ -526,6 +532,7 @@ testStep = choice
     , testSend
     , testExpect
     , testGuard
+    , testPacketLoss
     , testWait
     ]
 

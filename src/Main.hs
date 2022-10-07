@@ -7,6 +7,8 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 
+import Data.Map (Map)
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
@@ -63,6 +65,7 @@ data TestEnv = TestEnv
 data TestState = TestState
     { tsNetwork :: Network
     , tsVars :: [(VarName, SomeVarValue)]
+    , tsNodePacketLoss :: Map NodeName Scientific
     }
 
 newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT () IO) a }
@@ -89,6 +92,19 @@ instance MonadOutput TestRun where
 
 withVar :: ExprType e => VarName -> e -> TestRun a -> TestRun a
 withVar name value = local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s })
+
+withNodePacketLoss :: Node -> Scientific -> TestRun a -> TestRun a
+withNodePacketLoss node loss inner = do
+    x <- local (fmap $ \s -> s { tsNodePacketLoss = M.insertWith (\l l' -> 1 - (1 - l) * (1 - l')) (nodeName node) loss $ tsNodePacketLoss s }) $ do
+        resetLoss
+        inner
+    resetLoss
+    return x
+  where
+    resetLoss = do
+        tl <- asks $ fromMaybe 0 . M.lookup (nodeName node) . tsNodePacketLoss . snd
+        liftIO $ callOn node $ "tc qdisc replace dev veth0 root netem loss " ++ show (tl * 100) ++ "%"
+        liftIO $ putStrLn $ "tc qdisc replace dev veth0 root netem loss " ++ show (tl * 100) ++ "%"
 
 forkTest :: TestRun () -> TestRun ()
 forkTest act = do
@@ -174,10 +190,10 @@ createNode (TypedVarName vname) inner = do
         createDirectoryIfMissing True dir
 
         callCommand $ "ip netns add \""++ name ++ "\""
-        callCommand $ "ip link add \"veth_" ++ name ++ ".0\" group 1 type veth peer name \"veth_" ++ name ++ ".1\" netns \"" ++ name ++ "\""
-        callCommand $ "ip link set dev \"veth_" ++ name ++ ".0\" master br0 up"
-        callOn node $ "ip addr add " ++ T.unpack (nodeIp node) ++ "/24 broadcast 192.168.0.255 dev \"veth_" ++ name ++ ".1\""
-        callOn node $ "ip link set dev \"veth_" ++ name++ ".1\" up"
+        callCommand $ "ip link add \"veth_" ++ name ++ "\" group 1 type veth peer name veth0 netns \"" ++ name ++ "\""
+        callCommand $ "ip link set dev \"veth_" ++ name ++ "\" master br0 up"
+        callOn node $ "ip addr add " ++ T.unpack (nodeIp node) ++ "/24 broadcast 192.168.0.255 dev veth0"
+        callOn node $ "ip link set dev veth0 up"
         callOn node $ "ip link set dev lo up"
         return node
 
@@ -329,6 +345,11 @@ evalSteps = mapM_ $ \case
     Guard line expr -> do
         testStepGuard line expr
 
+    PacketLoss loss node inner -> do
+        l <- eval loss
+        n <- eval node
+        withNodePacketLoss n l $ evalSteps inner
+
     Wait -> do
         outPrompt $ T.pack "Waiting..."
         void $ liftIO $ getLine
@@ -343,6 +364,7 @@ runTest out opts test = do
     tstate <- TestState
         <$> pure (error "network not initialized")
         <*> pure []
+        <*> pure M.empty
     (fmap $ either (const False) id) $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ initNetwork $ \net -> do
         let sigHandler SignalInfo { siginfoSpecific = chld } = do
                 processes <- readMVar (netProcesses net)

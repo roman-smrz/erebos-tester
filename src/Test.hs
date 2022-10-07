@@ -37,6 +37,7 @@ data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestSte
               | Send (Expr Process) (Expr Text)
               | Expect SourceLine (Expr Process) (Expr Regex) [TypedVarName Text] [TestStep]
               | Guard SourceLine (Expr Bool)
+              | PacketLoss (Expr Scientific) (Expr Node) [TestStep]
               | Wait
 
 newtype SourceLine = SourceLine Text
