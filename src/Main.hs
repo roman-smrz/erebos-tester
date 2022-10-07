@@ -7,7 +7,6 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 
-import Data.List
 import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
@@ -89,6 +88,9 @@ instance MonadEval TestRun where
 
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
+
+withVar :: ExprType e => VarName -> e -> TestRun a -> TestRun a
+withVar name value = local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s })
 
 forkTest :: TestRun () -> TestRun ()
 forkTest act = do
@@ -181,8 +183,7 @@ createNode (TypedVarName vname) inner = do
         callOn node $ "ip link set dev lo up"
         return node
 
-    local (fmap $ \s -> s { tsVars = (vname, SomeVarValue node) : tsVars s }) $ do
-        inner node
+    withVar vname node $ inner node
 
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
@@ -234,12 +235,6 @@ spawnOn target pname killWith cmd = do
 
     liftIO $ modifyMVar_ (netProcesses net) $ return . (process:)
     return process
-
-getProcess :: ProcName -> TestRun Process
-getProcess pname = do
-    net <- asks $ tsNetwork . snd
-    Just p <- find ((pname==).procName) <$> liftIO (readMVar (netProcesses net))
-    return p
 
 tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
 tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexec re x = Just ((x, capture), xs)
@@ -309,27 +304,27 @@ evalSteps = mapM_ $ \case
             outLine OutputError T.empty $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
             throwError ()
         value <- eval expr
-        local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s }) $ do
-            evalSteps inner
+        withVar name value $ evalSteps inner
 
-    Spawn pname nname inner -> do
+    Spawn (TypedVarName vname@(VarName tname)) nname inner -> do
         either createNode ((>>=) . eval) nname $ \node -> do
+            let pname = ProcName tname
             opts <- asks $ teOptions . fst
             p <- spawnOn (Right node) pname Nothing $
                 fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-            evalSteps inner `finally` do
+            withVar vname p (evalSteps inner) `finally` do
                 net <- asks $ tsNetwork . snd
                 ps <- liftIO $ takeMVar (netProcesses net)
                 closeProcess p `finally` do
                     liftIO $ putMVar (netProcesses net) $ filter (/=p) ps
 
     Send pname expr -> do
-        p <- getProcess pname
+        p <- eval pname
         line <- eval expr
         send p line
 
     Expect line pname expr captures inner -> do
-        p <- getProcess pname
+        p <- eval pname
         expect line p expr captures $ evalSteps inner
 
     Guard line expr -> do

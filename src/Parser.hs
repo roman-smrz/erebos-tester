@@ -222,7 +222,9 @@ someExpr = join inner <?> "expression"
             , [ prefix "-" $ [ SomeUnOp (negate @Integer) ]
               ]
             , [ binary "*" $ [ SomeBinOp ((*) @Integer) ]
+              {- TODO: parsing issues with regular expressions
               , binary "/" $ [ SomeBinOp (div @Integer) ]
+              -}
               ]
             , [ binary "+" $ [ SomeBinOp ((+) @Integer) ]
               , binary "-" $ [ SomeBinOp ((-) @Integer) ]

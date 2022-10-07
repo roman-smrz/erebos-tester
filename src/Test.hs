@@ -24,7 +24,7 @@ import Text.Regex.TDFA
 import Text.Regex.TDFA.Text
 
 import {-# SOURCE #-} Network
-import Process
+import {-# SOURCE #-} Process
 import Util
 
 data Test = Test
@@ -33,9 +33,9 @@ data Test = Test
     }
 
 data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
-              | Spawn ProcName (Either (TypedVarName Node) (Expr Node)) [TestStep]
-              | Send ProcName (Expr Text)
-              | Expect SourceLine ProcName (Expr Regex) [TypedVarName Text] [TestStep]
+              | Spawn (TypedVarName Process) (Either (TypedVarName Node) (Expr Node)) [TestStep]
+              | Send (Expr Process) (Expr Text)
+              | Expect SourceLine (Expr Process) (Expr Regex) [TypedVarName Text] [TestStep]
               | Guard SourceLine (Expr Bool)
               | Wait
 

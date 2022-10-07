@@ -21,6 +21,7 @@ import System.Posix.Signals
 import System.Process
 
 import Output
+import Test
 
 data Process = Process
     { procName :: ProcName
@@ -32,6 +33,12 @@ data Process = Process
 
 instance Eq Process where
     (==) = (==) `on` procStdin
+
+instance ExprType Process where
+    textExprType _ = T.pack "proc"
+    textExprValue n = T.pack "p:" <> textProcName (procName n)
+    emptyVarValue = Process (ProcName T.empty) undefined undefined undefined undefined
+
 
 data ProcName = ProcName Text
               | ProcNameTcpdump
