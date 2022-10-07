@@ -7,6 +7,7 @@ module Process (
     closeProcess,
 ) where
 
+import Control.Arrow
 import Control.Concurrent.STM
 import Control.Monad.Except
 
@@ -20,6 +21,7 @@ import System.IO
 import System.Posix.Signals
 import System.Process
 
+import Network
 import Output
 import Test
 
@@ -29,6 +31,7 @@ data Process = Process
     , procStdin :: Handle
     , procOutput :: TVar [Text]
     , procKillWith :: Maybe Signal
+    , procNode :: Node
     }
 
 instance Eq Process where
@@ -37,7 +40,11 @@ instance Eq Process where
 instance ExprType Process where
     textExprType _ = T.pack "proc"
     textExprValue n = T.pack "p:" <> textProcName (procName n)
-    emptyVarValue = Process (ProcName T.empty) undefined undefined undefined undefined
+    emptyVarValue = Process (ProcName T.empty) undefined undefined undefined undefined emptyVarValue
+
+    recordMembers = map (first T.pack)
+        [ ("node", RecordSelector $ procNode)
+        ]
 
 
 data ProcName = ProcName Text

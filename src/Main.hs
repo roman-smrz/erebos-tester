@@ -203,6 +203,7 @@ spawnOn target pname killWith cmd = do
             , procStdin = hin
             , procOutput = pout
             , procKillWith = killWith
+            , procNode = either (const undefined) id target
             }
 
     let readingLoop :: Handle -> (Text -> TestRun ()) -> TestRun ()

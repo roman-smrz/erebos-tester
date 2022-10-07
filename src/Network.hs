@@ -11,7 +11,7 @@ import Control.Concurrent
 import Data.Text (Text)
 import Data.Text qualified as T
 
-import Process
+import {-# SOURCE #-} Process
 import Test
 
 data Network = Network
