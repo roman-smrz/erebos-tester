@@ -14,8 +14,6 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import Text.Read (readMaybe)
-import Text.Regex.TDFA
-import Text.Regex.TDFA.Text
 
 import System.Console.GetOpt
 import System.Directory
@@ -238,7 +236,7 @@ spawnOn target pname killWith cmd = do
     return process
 
 tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
-tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexec re x = Just ((x, capture), xs)
+tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just ((x, capture), xs)
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 

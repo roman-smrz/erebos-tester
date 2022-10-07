@@ -132,17 +132,14 @@ someExpansion = do
         , between (char '{') (char '}') someExpr
         ]
 
-stringExpansion :: Text -> TestParser (Expr Text)
-stringExpansion tname = do
+stringExpansion :: ExprType a => Text -> (forall b. ExprType b => Expr b -> [Maybe (Expr a)]) -> TestParser (Expr a)
+stringExpansion tname conv = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpansion
     let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
             [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
 
-    maybe err return $ listToMaybe $ catMaybes
-        [ cast e
-        , UnOp (T.pack . show @Integer) <$> cast e
-        ]
+    maybe err return $ listToMaybe $ catMaybes $ conv e
 
 integerLiteral :: TestParser (Expr Integer)
 integerLiteral = Literal . read . TL.unpack <$> takeWhile1P (Just "integer") isDigit
@@ -163,7 +160,10 @@ quotedString = label "string" $ lexeme $ do
                     , char 't' >> return '\t'
                     ]
                 (Literal (T.singleton c) :) <$> inner
-            ,do e <- stringExpansion (T.pack "string")
+            ,do e <- stringExpansion (T.pack "string") $ \e ->
+                    [ cast e
+                    , UnOp (T.pack . show @Integer) <$> cast e
+                    ]
                 (e:) <$> inner
             ]
     Concat <$> inner
@@ -173,14 +173,18 @@ regex = label "regular expression" $ lexeme $ do
     void $ char '/'
     let inner = choice
             [ char '/' >> return []
-            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Literal (TL.toStrict s) :) <$> inner
+            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Literal (RegexPart (TL.toStrict s)) :) <$> inner
             ,do void $ char '\\'
                 s <- choice
-                    [ char '/' >> return (Literal $ T.singleton '/')
-                    , anySingle >>= \c -> return (Literal $ T.pack ['\\', c])
+                    [ char '/' >> return (Literal $ RegexPart $ T.singleton '/')
+                    , anySingle >>= \c -> return (Literal $ RegexPart $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
-            ,do e <- stringExpansion (T.pack "regex")
+            ,do e <- stringExpansion (T.pack "regex") $ \e ->
+                    [ cast e
+                    , UnOp RegexString <$> cast e
+                    , UnOp (RegexString . T.pack . show @Integer) <$> cast e
+                    ]
                 (e:) <$> inner
             ]
     expr <- Regex <$> inner

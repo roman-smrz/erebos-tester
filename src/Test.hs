@@ -9,10 +9,9 @@ module Test (
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
     RecordSelector(..),
     Expr(..), eval, gatherVars,
-    Regex,
-) where
 
-import Control.Monad
+    Regex(RegexPart, RegexString), regexMatch,
+) where
 
 import Data.Char
 import Data.List
@@ -20,8 +19,8 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable
 
-import Text.Regex.TDFA
-import Text.Regex.TDFA.Text
+import Text.Regex.TDFA qualified as RE
+import Text.Regex.TDFA.Text qualified as RE
 
 import {-# SOURCE #-} Network
 import {-# SOURCE #-} Process
@@ -86,7 +85,7 @@ instance ExprType Text where
 instance ExprType Regex where
     textExprType _ = T.pack "regex"
     textExprValue _ = T.pack "<regex>"
-    emptyVarValue = either error id $ compile defaultCompOpt defaultExecOpt T.empty
+    emptyVarValue = either error id $ regexCompile T.empty
 
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
@@ -104,7 +103,7 @@ data Expr a where
     Variable :: ExprType a => VarName -> Expr a
     Literal :: ExprType a => a -> Expr a
     Concat :: [Expr Text] -> Expr Text
-    Regex :: [Expr Text] -> Expr Regex
+    Regex :: [Expr Regex] -> Expr Regex
     UnOp :: (b -> a) -> Expr b -> Expr a
     BinOp :: (b -> c -> a) -> Expr b -> Expr c -> Expr a
 
@@ -112,16 +111,9 @@ eval :: MonadEval m => Expr a -> m a
 eval (Variable name) = fromSomeVarValue name =<< lookupVar name
 eval (Literal value) = return value
 eval (Concat xs) = T.concat <$> mapM eval xs
-eval (Regex xs) = do
-    parts <- forM xs $ \case
-        Literal value | Just str <- cast value -> return str
-                      | otherwise -> fail $ "regex expansion not defined for " ++ T.unpack (textExprType $ Just value)
-        expr -> T.concatMap escapeChar <$> eval expr
-          where
-            escapeChar c | isAlphaNum c = T.singleton c
-                         | c `elem` "`'<>" = T.singleton c
-                         | otherwise = T.pack ['\\', c]
-    case compile defaultCompOpt defaultExecOpt $ T.concat $ concat [[T.singleton '^'], parts, [T.singleton '$']] of
+eval (Regex xs) = mapM eval xs >>= \case
+    [re@RegexCompiled {}] -> return re
+    parts -> case regexCompile $ T.concat $ map regexSource parts of
         Left err -> fail err
         Right re -> return re
 eval (UnOp f x) = f <$> eval x
@@ -137,3 +129,25 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
     helper (Regex es) = concat <$> mapM helper es
     helper (UnOp _ e) = helper e
     helper (BinOp _ e f) = (++) <$> helper e <*> helper f
+
+
+data Regex = RegexCompiled Text RE.Regex
+           | RegexPart Text
+           | RegexString Text
+
+regexCompile :: Text -> Either String Regex
+regexCompile src = either Left (Right . RegexCompiled src) $ RE.compile RE.defaultCompOpt RE.defaultExecOpt $
+    T.singleton '^' <> src <> T.singleton '$'
+
+regexMatch :: Regex -> Text -> Either String (Maybe (Text, Text, Text, [Text]))
+regexMatch (RegexCompiled _ re) text = RE.regexec re text
+regexMatch _ _ = Left "regex not compiled"
+
+regexSource :: Regex -> Text
+regexSource (RegexCompiled src _) = src
+regexSource (RegexPart src) = src
+regexSource (RegexString str) = T.concatMap escapeChar str
+  where
+    escapeChar c | isAlphaNum c = T.singleton c
+                 | c `elem` "`'<>" = T.singleton c
+                 | otherwise = T.pack ['\\', c]
