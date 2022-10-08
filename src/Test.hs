@@ -33,6 +33,7 @@ data Test = Test
     }
 
 data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
+              | DeclNode (TypedVarName Node) [TestStep]
               | Spawn (TypedVarName Process) (Either (TypedVarName Node) (Expr Node)) [TestStep]
               | Send (Expr Process) (Expr Text)
               | Expect SourceLine (Expr Process) (Expr Regex) [TypedVarName Text] [TestStep]

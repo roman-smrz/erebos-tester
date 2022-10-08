@@ -317,6 +317,10 @@ evalSteps = mapM_ $ \case
         value <- eval expr
         withVar name value $ evalSteps inner
 
+    DeclNode name@(TypedVarName vname) inner -> do
+        createNode name $ \node -> do
+            withVar vname node $ evalSteps inner
+
     Spawn (TypedVarName vname@(VarName tname)) nname inner -> do
         either createNode ((>>=) . eval) nname $ \node -> do
             let pname = ProcName tname

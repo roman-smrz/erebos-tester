@@ -476,6 +476,11 @@ testLocal = do
     indent <- L.indentGuard scn GT ref
     localState $ testBlock indent
 
+testNode :: TestParser [TestStep]
+testNode = command "node" $ DeclNode
+    <$> param ""
+    <*> innerBlock
+
 testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
@@ -528,6 +533,7 @@ testStep :: TestParser [TestStep]
 testStep = choice
     [ letStatement
     , testLocal
+    , testNode
     , testSpawn
     , testSend
     , testExpect
