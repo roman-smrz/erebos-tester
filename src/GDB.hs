@@ -1,10 +1,16 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module GDB (
-    gdbCmd, gdbInit,
+    GDB, gdbProcess,
+    gdbStart,
     addInferior,
     gdbSession,
 ) where
 
+import Control.Concurrent
+import Control.Concurrent.STM
 import Control.Monad.IO.Class
+import Control.Monad.Reader
 
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -15,29 +21,61 @@ import System.Process
 import Output
 import Process
 
+data GDB = GDB
+    { gdbProcess_ :: Process
+    }
+
+gdbProcess :: GDB -> Process
+gdbProcess = gdbProcess_
+
 gdbCmd :: String
 gdbCmd = "gdb --quiet --interpreter=mi3"
 
-gdbInit :: MonadIO m => Process -> m ()
-gdbInit gdb = do
-    send gdb $ T.pack "-gdb-set schedule-multiple on"
-    send gdb $ T.pack "-gdb-set mi-async on"
-    send gdb $ T.pack "-gdb-set print symbol-loading off"
+gdbStart :: (MonadOutput m, MonadFail m) => m GDB
+gdbStart = do
+    (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell gdbCmd)
+        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
+        }
+    pout <- liftIO $ newTVarIO []
 
-addInferior :: MonadIO m => Process -> Int -> Pid -> m ()
-addInferior gdb i pid = do
-    send gdb $ T.pack $ "-add-inferior"
-    send gdb $ T.pack $ "-target-attach --thread-group i" ++ show i ++ " " ++ show pid
-    send gdb $ T.pack $ "-exec-continue --thread-group i" ++ show i
+    let process = Process
+            { procName = ProcNameGDB
+            , procHandle = handle
+            , procStdin = hin
+            , procOutput = pout
+            , procKillWith = Nothing
+            , procNode = undefined
+            }
+        gdb = GDB
+            { gdbProcess_ = process
+            }
 
-gdbSession :: MonadOutput m => Process -> m ()
+    out <- getOutput
+    liftIO $ void $ forkIO $ flip runReaderT out $
+        lineReadingLoop process hout $ outProc OutputChildStdout process
+    liftIO $ void $ forkIO $ flip runReaderT out $
+        lineReadingLoop process herr $ outProc OutputChildStderr process
+
+    send process "-gdb-set schedule-multiple on"
+    send process "-gdb-set mi-async on"
+    send process "-gdb-set print symbol-loading off"
+
+    return gdb
+
+addInferior :: MonadIO m => GDB -> Int -> Pid -> m ()
+addInferior GDB { gdbProcess_ = process } i pid = do
+    send process $ "-add-inferior"
+    send process $ "-target-attach --thread-group i" <> T.pack (show i) <> " " <> T.pack (show pid)
+    send process $ "-exec-continue --thread-group i" <> T.pack (show i)
+
+gdbSession :: MonadOutput m => GDB -> m ()
 gdbSession gdb = do
-    outPrompt $ T.pack "gdb> "
+    outPrompt "gdb> "
     liftIO loop
     outClearPrompt
   where
     loop = catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
         Just line -> do
-            send gdb (T.pack "-interpreter-exec console \"" `T.append` line `T.append` T.pack "\"")
+            send (gdbProcess gdb) ("-interpreter-exec console \"" <> line <> "\"")
             loop
         Nothing -> return ()

@@ -14,7 +14,6 @@ import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Text.IO as T
 
 import Text.Read (readMaybe)
 
@@ -23,8 +22,6 @@ import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
-import System.IO
-import System.IO.Error
 import System.Posix.Process
 import System.Posix.Signals
 import System.Process
@@ -61,7 +58,7 @@ data TestEnv = TestEnv
     { teOutput :: Output
     , teFailed :: TVar (Maybe Failed)
     , teOptions :: Options
-    , teGDB :: Maybe (MVar Process)
+    , teGDB :: Maybe (MVar GDB)
     }
 
 data TestState = TestState
@@ -153,8 +150,8 @@ initNetwork inner = do
     useGDB <- asks $ optGDB . teOptions . fst
     mgdb <- if useGDB
         then do
-            gdb <- spawnOn (Left net) ProcNameGDB Nothing gdbCmd
-            gdbInit gdb
+            gdb <- gdbStart
+            liftIO $ modifyMVar_ (netProcesses net) $ return . (gdbProcess gdb:)
             Just <$> liftIO (newMVar gdb)
         else return Nothing
 
@@ -226,20 +223,10 @@ spawnOn target pname killWith cmd = do
             , procNode = either (const undefined) id target
             }
 
-    let readingLoop :: Handle -> (Text -> TestRun ()) -> TestRun ()
-        readingLoop h act =
-            liftIO (tryIOError (T.hGetLine h)) >>= \case
-                Left err
-                    | isEOFError err -> return ()
-                    | otherwise -> outProc OutputChildFail process $ T.pack $ "IO error: " ++ show err
-                Right line -> do
-                    act line
-                    readingLoop h act
-
-    forkTest $ readingLoop hout $ \line -> do
+    forkTest $ lineReadingLoop process hout $ \line -> do
         outProc OutputChildStdout process line
         liftIO $ atomically $ modifyTVar pout (++[line])
-    forkTest $ readingLoop herr $ \line -> do
+    forkTest $ lineReadingLoop process herr $ \line -> do
         case pname of
              ProcNameTcpdump -> return ()
              _ -> outProc OutputChildStderr process line

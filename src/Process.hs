@@ -4,6 +4,7 @@ module Process (
     textProcName, unpackProcName,
     send,
     outProc,
+    lineReadingLoop,
     closeProcess,
 ) where
 
@@ -18,6 +19,7 @@ import qualified Data.Text.IO as T
 
 import System.Exit
 import System.IO
+import System.IO.Error
 import System.Posix.Signals
 import System.Process
 
@@ -67,6 +69,16 @@ send p line = liftIO $ do
 
 outProc :: MonadOutput m => OutputType -> Process -> Text -> m ()
 outProc otype p line = outLine otype (textProcName $ procName p) line
+
+lineReadingLoop :: MonadOutput m => Process -> Handle -> (Text -> m ()) -> m ()
+lineReadingLoop process h act =
+    liftIO (tryIOError (T.hGetLine h)) >>= \case
+        Left err
+            | isEOFError err -> return ()
+            | otherwise -> outProc OutputChildFail process $ T.pack $ "IO error: " ++ show err
+        Right line -> do
+            act line
+            lineReadingLoop process h act
 
 closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Process -> m ()
 closeProcess p = do

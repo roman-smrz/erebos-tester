@@ -41,6 +41,7 @@ executable erebos-tester-core
                        Test
                        Util
   other-extensions:    TemplateHaskell
+                       OverloadedStrings
   default-extensions:  ExistentialQuantification
                        FlexibleContexts
                        FlexibleInstances
