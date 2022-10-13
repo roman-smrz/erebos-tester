@@ -12,6 +12,7 @@ import Data.Text.IO qualified as T
 import System.IO.Error
 import System.Process
 
+import Output
 import Process
 
 gdbCmd :: String
@@ -29,10 +30,14 @@ addInferior gdb i pid = do
     send gdb $ T.pack $ "-target-attach --thread-group i" ++ show i ++ " " ++ show pid
     send gdb $ T.pack $ "-exec-continue --thread-group i" ++ show i
 
-gdbSession :: MonadIO m => Process -> m ()
-gdbSession gdb = liftIO $ do
-    catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
+gdbSession :: MonadOutput m => Process -> m ()
+gdbSession gdb = do
+    outPrompt $ T.pack "gdb> "
+    liftIO loop
+    outClearPrompt
+  where
+    loop = catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
         Just line -> do
             send gdb (T.pack "-interpreter-exec console \"" `T.append` line `T.append` T.pack "\"")
-            gdbSession gdb
+            loop
         Nothing -> return ()

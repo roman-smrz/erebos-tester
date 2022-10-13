@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Control.Arrow
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -58,8 +59,9 @@ testDir = "./.test"
 
 data TestEnv = TestEnv
     { teOutput :: Output
-    , teFailed :: TVar Bool
+    , teFailed :: TVar (Maybe Failed)
     , teOptions :: Options
+    , teGDB :: Maybe (MVar Process)
     }
 
 data TestState = TestState
@@ -68,19 +70,26 @@ data TestState = TestState
     , tsNodePacketLoss :: Map NodeName Scientific
     }
 
-newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT () IO) a }
+newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT Failed IO) a }
     deriving (Functor, Applicative, Monad, MonadReader (TestEnv, TestState), MonadIO)
 
 instance MonadFail TestRun where
     fail str = do
         outLine OutputError T.empty $ T.pack str
-        throwError ()
+        throwError Failed
 
-instance MonadError () TestRun where
-    throwError () = do
+instance MonadError Failed TestRun where
+    throwError failed = do
         failedVar <- asks $ teFailed . fst
-        liftIO $ atomically $ writeTVar failedVar True
-        TestRun $ throwError ()
+        liftIO $ atomically $ modifyTVar failedVar (`mplus` Just failed)
+
+        te <- asks fst
+        case failed of
+            ProcessCrashed _ | Just mgdb <- teGDB te -> do
+                maybe (return ()) gdbSession =<< liftIO (tryTakeMVar mgdb)
+            _ -> return ()
+
+        TestRun $ throwError failed
 
     catchError (TestRun act) handler = TestRun $ catchError act $ fromTestRun . handler
 
@@ -111,16 +120,16 @@ forkTest act = do
     tenv <- ask
     void $ liftIO $ forkIO $ do
         runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
-            Left () -> atomically $ writeTVar (teFailed $ fst tenv) True
+            Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
             Right () -> return ()
 
 atomicallyTest :: STM a -> TestRun a
 atomicallyTest act = do
     failedVar <- asks $ teFailed . fst
     res <- liftIO $ atomically $ do
-        failed <- readTVar failedVar
-        if failed then return $ Left ()
-                  else Right <$> act
+        readTVar failedVar >>= \case
+            Just e  -> return $ Left e
+            Nothing -> Right <$> act
     case res of
         Left e -> throwError e
         Right x -> return x
@@ -142,21 +151,18 @@ initNetwork inner = do
         "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
 
     useGDB <- asks $ optGDB . teOptions . fst
-    when useGDB $ do
-        gdbInit =<< spawnOn (Left net) ProcNameGDB Nothing gdbCmd
+    mgdb <- if useGDB
+        then do
+            gdb <- spawnOn (Left net) ProcNameGDB Nothing gdbCmd
+            gdbInit gdb
+            Just <$> liftIO (newMVar gdb)
+        else return Nothing
 
-    local (fmap $ \s -> s { tsNetwork = net }) $ inner net
+    local ((\te -> te { teGDB = mgdb }) *** (\s -> s { tsNetwork = net })) $ inner net
 
 exitNetwork :: Network -> TestRun ()
 exitNetwork net = do
     processes <- liftIO $ readMVar (netProcesses net)
-
-    forM_ processes $ \p -> do
-        when (procName p == ProcNameGDB) $ do
-            outPrompt $ T.pack "gdb> "
-            gdbSession p
-            outClearPrompt
-
     forM_ processes $ \p -> do
         closeProcess p `catchError` \_ -> return ()
 
@@ -164,7 +170,7 @@ exitNetwork net = do
         callCommand $ "ip -all netns del"
         callCommand $ "ip link del group 1"
 
-    failed <- liftIO . atomically . readTVar =<< asks (teFailed . fst)
+    failed <- return . isJust =<< liftIO . atomically . readTVar =<< asks (teFailed . fst)
     liftIO $ if failed then exitFailure
                        else removeDirectoryRecursive $ netDir net
 
@@ -239,14 +245,13 @@ spawnOn target pname killWith cmd = do
              _ -> outProc OutputChildStderr process line
 
     let net = either id nodeNetwork target
-    when (pname /= ProcNameGDB) $ liftIO $ do
-        getPid handle >>= \case
-            Just pid -> void $ do
+    asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= liftIO . \case
+        Just gdb -> getPid handle >>= \case
+            Just pid -> do
                 ps <- readMVar (netProcesses net)
-                forM_ ps $ \gdb -> do
-                    when (procName gdb == ProcNameGDB) $ do
-                        addInferior gdb (length ps) pid
+                addInferior gdb (length ps) pid
             Nothing -> return ()
+        Nothing -> return ()
 
     liftIO $ modifyMVar_ (netProcesses net) $ return . (process:)
     return process
@@ -263,7 +268,7 @@ exprFailed desc (SourceLine sline) pname expr = do
     outLine OutputMatchFail prompt $ T.concat [desc, T.pack " failed on ", sline]
     forM_ exprVars $ \(name, value) ->
         outLine OutputMatchFail prompt $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
-    throwError ()
+    throwError Failed
 
 expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
 expect (SourceLine sline) p expr tvars inner = do
@@ -283,13 +288,13 @@ expect (SourceLine sline) p expr tvars inner = do
 
              when (length vars /= length capture) $ do
                  outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` sline
-                 throwError ()
+                 throwError Failed
 
              forM_ vars $ \name -> do
                  cur <- asks (lookup name . tsVars . snd)
                  when (isJust cur) $ do
                      outProc OutputError p $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
-                     throwError ()
+                     throwError Failed
 
              outProc OutputMatch p line
              local (fmap $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }) inner
@@ -313,7 +318,7 @@ evalSteps = mapM_ $ \case
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
             outLine OutputError T.empty $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
-            throwError ()
+            throwError Failed
         value <- eval expr
         withVar name value $ evalSteps inner
 
@@ -359,8 +364,9 @@ runTest :: Output -> Options -> Test -> IO Bool
 runTest out opts test = do
     tenv <- TestEnv
         <$> pure out
-        <*> newTVarIO False
+        <*> newTVarIO Nothing
         <*> pure opts
+        <*> pure Nothing
     tstate <- TestState
         <$> pure (error "network not initialized")
         <*> pure []
@@ -374,8 +380,12 @@ runTest out opts test = do
                         let err detail = outProc OutputChildFail p detail
                         case siginfoStatus chld of
                              Exited ExitSuccess -> outProc OutputChildInfo p $ T.pack $ "child exited successfully"
-                             Exited (ExitFailure code) -> err $ T.pack $ "child process exited with status " ++ show code
-                             Terminated sig _ -> err $ T.pack $ "child terminated with signal " ++ show sig
+                             Exited (ExitFailure code) -> do
+                                 err $ T.pack $ "child process exited with status " ++ show code
+                                 liftIO $ atomically $ writeTVar (teFailed tenv) $ Just Failed
+                             Terminated sig _ -> do
+                                 err $ T.pack $ "child terminated with signal " ++ show sig
+                                 liftIO $ atomically $ writeTVar (teFailed tenv) $ Just $ ProcessCrashed p
                              Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
         oldHandler <- liftIO $ installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 

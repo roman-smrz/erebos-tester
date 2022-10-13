@@ -68,7 +68,7 @@ send p line = liftIO $ do
 outProc :: MonadOutput m => OutputType -> Process -> Text -> m ()
 outProc otype p line = outLine otype (textProcName $ procName p) line
 
-closeProcess :: (MonadIO m, MonadOutput m, MonadError () m) => Process -> m ()
+closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Process -> m ()
 closeProcess p = do
     liftIO $ hClose $ procStdin p
     case procKillWith p of
@@ -81,4 +81,4 @@ closeProcess p = do
         ExitSuccess -> return ()
         ExitFailure code -> do
             outProc OutputChildFail p $ T.pack $ "exit code: " ++ show code
-            throwError ()
+            throwError Failed

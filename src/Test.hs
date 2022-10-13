@@ -1,6 +1,7 @@
 module Test (
     Test(..),
     TestStep(..),
+    Failed(..),
     SourceLine(..),
 
     MonadEval(..),
@@ -40,6 +41,9 @@ data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestSte
               | Guard SourceLine (Expr Bool)
               | PacketLoss (Expr Scientific) (Expr Node) [TestStep]
               | Wait
+
+data Failed = Failed
+            | ProcessCrashed Process
 
 newtype SourceLine = SourceLine Text
 
