@@ -232,10 +232,10 @@ spawnOn target pname killWith cmd = do
              _ -> outProc OutputChildStderr process line
 
     let net = either id nodeNetwork target
-    asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= liftIO . \case
-        Just gdb -> getPid handle >>= \case
+    asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= \case
+        Just gdb -> liftIO (getPid handle) >>= \case
             Just pid -> do
-                ps <- readMVar (netProcesses net)
+                ps <- liftIO $ readMVar (netProcesses net)
                 addInferior gdb (length ps) pid
             Nothing -> return ()
         Nothing -> return ()

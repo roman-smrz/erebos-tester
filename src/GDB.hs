@@ -10,10 +10,17 @@ module GDB (
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad.IO.Class
+import Control.Monad.Identity
 import Control.Monad.Reader
 
+import Data.Char
+import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Data.Void
+
+import Text.Megaparsec hiding (State)
+import Text.Megaparsec.Char
 
 import System.IO.Error
 import System.Process
@@ -23,10 +30,29 @@ import Process
 
 data GDB = GDB
     { gdbProcess_ :: Process
+    , gdbResult :: MVar (ResultClass, [(Text, MiValue)])
     }
 
 gdbProcess :: GDB -> Process
 gdbProcess = gdbProcess_
+
+data MiRecord = ResultRecord ResultClass [(Text, MiValue)]
+              | ExecAsyncOutput Text [(Text, MiValue)]
+              | StatusAsyncOutput Text [(Text, MiValue)]
+              | NotifyAsyncOutput Text [(Text, MiValue)]
+              | ConsoleStreamOutput Text
+              | TargetStreamOutput Text
+              | LogStreamOutput Text
+    deriving (Show)
+
+data ResultClass = Done | Connected | Error | Exit
+    deriving (Show)
+
+data MiValue = MiString Text
+             | MiTuple [(Text, MiValue)]
+             | MiList [MiValue]
+    deriving (Show)
+
 
 gdbCmd :: String
 gdbCmd = "gdb --quiet --interpreter=mi3"
@@ -46,36 +72,148 @@ gdbStart = do
             , procKillWith = Nothing
             , procNode = undefined
             }
-        gdb = GDB
-            { gdbProcess_ = process
-            }
+    gdb <- GDB
+        <$> pure process
+        <*> liftIO newEmptyMVar
 
     out <- getOutput
     liftIO $ void $ forkIO $ flip runReaderT out $
-        lineReadingLoop process hout $ outProc OutputChildStdout process
+        lineReadingLoop process hout $ gdbLine gdb
     liftIO $ void $ forkIO $ flip runReaderT out $
         lineReadingLoop process herr $ outProc OutputChildStderr process
 
-    send process "-gdb-set schedule-multiple on"
-    send process "-gdb-set mi-async on"
-    send process "-gdb-set print symbol-loading off"
+    gdbCommand gdb "-gdb-set schedule-multiple on"
+    gdbCommand gdb "-gdb-set mi-async on"
+    gdbCommand gdb "-gdb-set print symbol-loading off"
 
     return gdb
 
-addInferior :: MonadIO m => GDB -> Int -> Pid -> m ()
-addInferior GDB { gdbProcess_ = process } i pid = do
-    send process $ "-add-inferior"
-    send process $ "-target-attach --thread-group i" <> T.pack (show i) <> " " <> T.pack (show pid)
-    send process $ "-exec-continue --thread-group i" <> T.pack (show i)
+gdbLine :: GDB -> Text -> ReaderT Output IO ()
+gdbLine _ "(gdb)" = return ()
+gdbLine _ "(gdb) " = return ()
+gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . errorBundlePretty) go $
+    runParser miOutputRecord "" rline
+  where
+    go = \case
+        ResultRecord cls params -> liftIO $ putMVar (gdbResult gdb) (cls, params)
+        ExecAsyncOutput cls params -> outProc OutputChildInfo (gdbProcess gdb) $ "exec: " <> cls <> " " <> T.pack (show params)
+        StatusAsyncOutput cls params -> outProc OutputChildInfo (gdbProcess gdb) $ "status: " <> cls <> " " <> T.pack (show params)
+        NotifyAsyncOutput cls params -> case cls of
+            "library-loaded" -> return ()
+            "library-unloaded" -> return ()
+            "cmd-param-changed" -> return ()
+            "thread-group-added" -> return ()
+            "thread-group-started" -> return ()
+            "thread-created" -> return ()
+            "thread-selected" -> return ()
+            _ -> outProc OutputChildInfo (gdbProcess gdb) $ "notify: " <> cls <> " " <> T.pack (show params)
+        ConsoleStreamOutput line -> mapM_ (outProc OutputChildStdout (gdbProcess gdb)) (T.lines line)
+        TargetStreamOutput line -> mapM_ (outProc OutputChildStderr (gdbProcess gdb) . ("target-stream: " <>)) (T.lines line)
+        LogStreamOutput line -> mapM_ (outProc OutputChildInfo (gdbProcess gdb) . ("log: " <>)) (T.lines line)
+
+addInferior :: MonadOutput m => GDB -> Int -> Pid -> m ()
+addInferior gdb i pid = do
+    gdbCommand gdb $ "-add-inferior"
+    gdbCommand gdb $ "-target-attach --thread-group i" <> T.pack (show i) <> " " <> T.pack (show pid)
+    gdbCommand gdb $ "-exec-continue --thread-group i" <> T.pack (show i)
+
+gdbCommand :: MonadOutput m => GDB -> Text -> m ()
+gdbCommand gdb cmd = do
+    send (gdbProcess gdb) cmd
+    liftIO (takeMVar (gdbResult gdb)) >>= \case
+        (Done, _) -> return ()
+        (Connected, _) -> outProc OutputChildInfo (gdbProcess gdb) "result connected"
+        (Error, _) -> outProc OutputError (gdbProcess gdb) $ "command error: " <> cmd
+        (Exit, _) -> outProc OutputError (gdbProcess gdb) "result exit"
 
 gdbSession :: MonadOutput m => GDB -> m ()
 gdbSession gdb = do
     outPrompt "gdb> "
-    liftIO loop
+    loop
     outClearPrompt
   where
-    loop = catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e) >>= \case
+    loop = liftIO (catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e)) >>= \case
         Just line -> do
-            send (gdbProcess gdb) ("-interpreter-exec console \"" <> line <> "\"")
+            gdbCommand gdb ("-interpreter-exec console \"" <> line <> "\"")
             loop
         Nothing -> return ()
+
+
+type MiParser = ParsecT Void MiStream Identity
+
+type MiStream = Text
+
+miOutputRecord :: MiParser MiRecord
+miOutputRecord = choice
+    [ miResultRecord
+    , miExecAsync
+    , miStatusAsync
+    , miNotifyAsync
+    , miConsoleStream
+    , miTargetStream
+    , miLogStream
+    ]
+
+miResultRecord :: MiParser MiRecord
+miResultRecord = char '^' >> ResultRecord <$> resultClass <*> many result
+
+miExecAsync, miStatusAsync, miNotifyAsync :: MiParser MiRecord
+miExecAsync = char '*' >> ExecAsyncOutput <$> miString <*> many (char ',' *> result)
+miStatusAsync = char '+' >> StatusAsyncOutput <$> miString <*> many (char ',' *> result)
+miNotifyAsync = char '=' >> NotifyAsyncOutput <$> miString <*> many (char ',' *> result)
+
+miConsoleStream, miTargetStream, miLogStream :: MiParser MiRecord
+miConsoleStream = char '~' >> ConsoleStreamOutput <$> miCString
+miTargetStream = char '@' >> TargetStreamOutput <$> miCString
+miLogStream = char '&' >> LogStreamOutput <$> miCString
+
+resultClass :: MiParser ResultClass
+resultClass = label "result-class" $ choice
+    [ return Done <* string "done"
+    , return Done <* string "running" -- equivalent to "done" per documentation
+    , return Connected <* string "connected"
+    , return Error <* string "error"
+    , return Exit <* string "exit"
+    ]
+
+result :: MiParser (Text, MiValue)
+result = (,) <$> miString <* char '=' <*> miValue
+
+miString :: MiParser Text
+miString = label "string" $ takeWhile1P Nothing (\x -> isAlphaNum x || x == '_' || x == '-')
+
+miCString :: MiParser Text
+miCString = label "c-string" $ do
+    void $ char '"'
+    let go = choice
+            [ char '"' >> return []
+            , takeWhile1P Nothing (`notElem` ['\"', '\\']) >>= \s -> (s:) <$> go
+            ,do void $ char '\\'
+                c <- choice
+                    [ char '\\' >> return '\\'
+                    , char '"' >> return '"'
+                    , char 'n' >> return '\n'
+                    , char 'r' >> return '\r'
+                    , char 't' >> return '\t'
+                    ]
+                ((T.singleton c) :) <$> go
+            ]
+    T.concat <$> go
+
+listOf :: MiParser a -> MiParser [a]
+listOf item = do
+    x <- item
+    (x:) <$> choice [ char ',' >> listOf item, return [] ]
+
+miTuple :: MiParser [(Text, MiValue)]
+miTuple = between (char '{') (char '}') $ listOf result <|> return []
+
+miList :: MiParser [MiValue]
+miList = between (char '[') (char ']') $ listOf miValue <|> return []
+
+miValue :: MiParser MiValue
+miValue = choice
+    [ MiString <$> miCString
+    , MiTuple <$> miTuple
+    , MiList <$> miList
+    ]
