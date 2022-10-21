@@ -31,10 +31,18 @@ import Process
 data GDB = GDB
     { gdbProcess_ :: Process
     , gdbResult :: MVar (ResultClass, [(Text, MiValue)])
+    , gdbInferiors :: MVar [Inferior]
+    , gdbThreadGroups :: TChan Text
     }
 
 gdbProcess :: GDB -> Process
 gdbProcess = gdbProcess_
+
+data Inferior = Inferior
+    { infProcess :: Process
+    , infPid :: Pid
+    , infThreadGroup :: Text
+    }
 
 data MiRecord = ResultRecord ResultClass [(Text, MiValue)]
               | ExecAsyncOutput Text [(Text, MiValue)]
@@ -75,6 +83,8 @@ gdbStart = do
     gdb <- GDB
         <$> pure process
         <*> liftIO newEmptyMVar
+        <*> liftIO (newMVar [])
+        <*> liftIO newTChanIO
 
     out <- getOutput
     liftIO $ void $ forkIO $ flip runReaderT out $
@@ -102,7 +112,8 @@ gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . erro
             "library-loaded" -> return ()
             "library-unloaded" -> return ()
             "cmd-param-changed" -> return ()
-            "thread-group-added" -> return ()
+            "thread-group-added" | Just (MiString tgid) <- lookup "id" params -> do
+                liftIO $ atomically $ writeTChan (gdbThreadGroups gdb) tgid
             "thread-group-started" -> return ()
             "thread-created" -> return ()
             "thread-selected" -> return ()
@@ -111,11 +122,25 @@ gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . erro
         TargetStreamOutput line -> mapM_ (outProc OutputChildStderr (gdbProcess gdb) . ("target-stream: " <>)) (T.lines line)
         LogStreamOutput line -> mapM_ (outProc OutputChildInfo (gdbProcess gdb) . ("log: " <>)) (T.lines line)
 
-addInferior :: MonadOutput m => GDB -> Int -> Pid -> m ()
-addInferior gdb i pid = do
-    gdbCommand gdb $ "-add-inferior"
-    gdbCommand gdb $ "-target-attach --thread-group i" <> T.pack (show i) <> " " <> T.pack (show pid)
-    gdbCommand gdb $ "-exec-continue --thread-group i" <> T.pack (show i)
+addInferior :: MonadOutput m => GDB -> Process -> m ()
+addInferior gdb process = do
+    liftIO (getPid $ procHandle process) >>= \case
+        Nothing -> outProc OutputError process $ "failed to get PID"
+        Just pid -> do
+            tgid <- liftIO (atomically $ tryReadTChan $ gdbThreadGroups gdb) >>= \case
+                Just tgid -> return tgid
+                Nothing -> do
+                    gdbCommand gdb $ "-add-inferior"
+                    liftIO $ atomically $ readTChan $ gdbThreadGroups gdb
+
+            gdbCommand gdb $ "-target-attach --thread-group " <> tgid <> " " <> T.pack (show pid)
+            gdbCommand gdb $ "-exec-continue --thread-group " <> tgid
+
+            liftIO $ modifyMVar_ (gdbInferiors gdb) $ return . (:) Inferior
+                { infProcess = process
+                , infPid = pid
+                , infThreadGroup = tgid
+                }
 
 gdbCommand :: MonadOutput m => GDB -> Text -> m ()
 gdbCommand gdb cmd = do
