@@ -150,7 +150,8 @@ initNetwork inner = do
     useGDB <- asks $ optGDB . teOptions . fst
     mgdb <- if useGDB
         then do
-            gdb <- gdbStart
+            failedVar <- asks $ teFailed . fst
+            gdb <- gdbStart $ atomically . writeTVar failedVar . Just . ProcessCrashed
             liftIO $ modifyMVar_ (netProcesses net) $ return . (gdbProcess gdb:)
             Just <$> liftIO (newMVar gdb)
         else return Nothing

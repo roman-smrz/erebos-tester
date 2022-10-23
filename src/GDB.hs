@@ -14,6 +14,7 @@ import Control.Monad.Identity
 import Control.Monad.Reader
 
 import Data.Char
+import Data.List
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -33,6 +34,7 @@ data GDB = GDB
     , gdbResult :: MVar (ResultClass, [(Text, MiValue)])
     , gdbInferiors :: MVar [Inferior]
     , gdbThreadGroups :: TChan Text
+    , gdbOnCrash :: Process -> IO ()
     }
 
 gdbProcess :: GDB -> Process
@@ -42,6 +44,7 @@ data Inferior = Inferior
     { infProcess :: Process
     , infPid :: Pid
     , infThreadGroup :: Text
+    , infThreads :: [Text]
     }
 
 data MiRecord = ResultRecord ResultClass [(Text, MiValue)]
@@ -65,8 +68,8 @@ data MiValue = MiString Text
 gdbCmd :: String
 gdbCmd = "gdb --quiet --interpreter=mi3"
 
-gdbStart :: (MonadOutput m, MonadFail m) => m GDB
-gdbStart = do
+gdbStart :: (MonadOutput m, MonadFail m) => (Process -> IO ()) -> m GDB
+gdbStart onCrash = do
     (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell gdbCmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
         }
@@ -85,6 +88,7 @@ gdbStart = do
         <*> liftIO newEmptyMVar
         <*> liftIO (newMVar [])
         <*> liftIO newTChanIO
+        <*> pure onCrash
 
     out <- getOutput
     liftIO $ void $ forkIO $ flip runReaderT out $
@@ -106,18 +110,28 @@ gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . erro
   where
     go = \case
         ResultRecord cls params -> liftIO $ putMVar (gdbResult gdb) (cls, params)
-        ExecAsyncOutput cls params -> outProc OutputChildInfo (gdbProcess gdb) $ "exec: " <> cls <> " " <> T.pack (show params)
+        ExecAsyncOutput cls params -> (cls,) <$> liftIO (readMVar (gdbInferiors gdb)) >>= \case
+            ("stopped", infs)
+                | Just (MiString "signal-received") <- lookup "reason" params
+                , Just (MiString tid) <- lookup "thread-id" params
+                , Just inf <- find (elem tid . infThreads) infs
+                -> liftIO $ gdbOnCrash gdb $ infProcess inf
+            _ -> return ()
         StatusAsyncOutput cls params -> outProc OutputChildInfo (gdbProcess gdb) $ "status: " <> cls <> " " <> T.pack (show params)
         NotifyAsyncOutput cls params -> case cls of
-            "library-loaded" -> return ()
-            "library-unloaded" -> return ()
-            "cmd-param-changed" -> return ()
             "thread-group-added" | Just (MiString tgid) <- lookup "id" params -> do
                 liftIO $ atomically $ writeTChan (gdbThreadGroups gdb) tgid
-            "thread-group-started" -> return ()
-            "thread-created" -> return ()
-            "thread-selected" -> return ()
-            _ -> outProc OutputChildInfo (gdbProcess gdb) $ "notify: " <> cls <> " " <> T.pack (show params)
+            "thread-group-exited" | Just (MiString tgid) <- lookup "id" params -> do
+                liftIO $ modifyMVar_ (gdbInferiors gdb) $ return . filter ((/=tgid) . infThreadGroup)
+            "thread-created"
+                | Just (MiString tid) <- lookup "id" params
+                , Just (MiString tgid) <- lookup "group-id" params
+                -> liftIO $ modifyMVar_ (gdbInferiors gdb) $ return . map (\inf -> if infThreadGroup inf == tgid then inf { infThreads = tid : infThreads inf } else inf)
+            "thread-exited"
+                | Just (MiString tid) <- lookup "id" params
+                , Just (MiString tgid) <- lookup "group-id" params
+                -> liftIO $ modifyMVar_ (gdbInferiors gdb) $ return . map (\inf -> if infThreadGroup inf == tgid then inf { infThreads = filter (/=tid) $ infThreads inf } else inf)
+            _ -> return ()
         ConsoleStreamOutput line -> mapM_ (outProc OutputChildStdout (gdbProcess gdb)) (T.lines line)
         TargetStreamOutput line -> mapM_ (outProc OutputChildStderr (gdbProcess gdb) . ("target-stream: " <>)) (T.lines line)
         LogStreamOutput line -> mapM_ (outProc OutputChildInfo (gdbProcess gdb) . ("log: " <>)) (T.lines line)
@@ -133,14 +147,15 @@ addInferior gdb process = do
                     gdbCommand gdb $ "-add-inferior"
                     liftIO $ atomically $ readTChan $ gdbThreadGroups gdb
 
-            gdbCommand gdb $ "-target-attach --thread-group " <> tgid <> " " <> T.pack (show pid)
-            gdbCommand gdb $ "-exec-continue --thread-group " <> tgid
-
             liftIO $ modifyMVar_ (gdbInferiors gdb) $ return . (:) Inferior
                 { infProcess = process
                 , infPid = pid
                 , infThreadGroup = tgid
+                , infThreads = []
                 }
+
+            gdbCommand gdb $ "-target-attach --thread-group " <> tgid <> " " <> T.pack (show pid)
+            gdbCommand gdb $ "-exec-continue --thread-group " <> tgid
 
 gdbCommand :: MonadOutput m => GDB -> Text -> m ()
 gdbCommand gdb cmd = do
