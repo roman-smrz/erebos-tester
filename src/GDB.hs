@@ -132,7 +132,7 @@ gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . erro
                 , Just (MiString tgid) <- lookup "group-id" params
                 -> liftIO $ modifyMVar_ (gdbInferiors gdb) $ return . map (\inf -> if infThreadGroup inf == tgid then inf { infThreads = filter (/=tid) $ infThreads inf } else inf)
             _ -> return ()
-        ConsoleStreamOutput line -> mapM_ (outProc OutputChildStdout (gdbProcess gdb)) (T.lines line)
+        ConsoleStreamOutput line -> mapM_ (outLine OutputAlways Nothing) (T.lines line)
         TargetStreamOutput line -> mapM_ (outProc OutputChildStderr (gdbProcess gdb) . ("target-stream: " <>)) (T.lines line)
         LogStreamOutput line -> mapM_ (outProc OutputChildInfo (gdbProcess gdb) . ("log: " <>)) (T.lines line)
 

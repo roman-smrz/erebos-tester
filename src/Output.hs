@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Output (
     Output, OutputType(..),
     MonadOutput(..),
@@ -38,6 +40,7 @@ data OutputType = OutputChildStdout
                 | OutputMatch
                 | OutputMatchFail
                 | OutputError
+                | OutputAlways
 
 class MonadIO m => MonadOutput m where
     getOutput :: m Output
@@ -58,6 +61,7 @@ outColor OutputChildFail = T.pack "31"
 outColor OutputMatch = T.pack "32"
 outColor OutputMatchFail = T.pack "31"
 outColor OutputError = T.pack "31"
+outColor OutputAlways = "0"
 
 outSign :: OutputType -> Text
 outSign OutputChildStdout = T.empty
@@ -67,6 +71,7 @@ outSign OutputChildFail = T.pack "!!"
 outSign OutputMatch = T.pack "+"
 outSign OutputMatchFail = T.pack "/"
 outSign OutputError = T.pack "!!"
+outSign OutputAlways = T.empty
 
 printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
@@ -77,6 +82,7 @@ printWhenQuiet = \case
     OutputMatch -> False
     OutputMatchFail -> True
     OutputError -> True
+    OutputAlways -> True
 
 clearPrompt :: OutputState -> IO ()
 clearPrompt OutputState { outCurPrompt = Just _ } = T.putStr $ T.pack "\ESC[2K\r"
@@ -89,16 +95,14 @@ showPrompt _ = return ()
 ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
 ioWithOutput act = liftIO . act =<< getOutput
 
-outLine :: MonadOutput m => OutputType -> Text -> Text -> m ()
+outLine :: MonadOutput m => OutputType -> Maybe Text -> Text -> m ()
 outLine otype prompt line = ioWithOutput $ \out ->
     when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
         withMVar (outState out) $ \st -> do
             clearPrompt st
             TL.putStrLn $ TL.fromChunks
                 [ T.pack "\ESC[", outColor otype, T.pack "m"
-                , prompt
-                , outSign otype
-                , T.pack "> "
+                , maybe "" (<> outSign otype <> "> ") prompt
                 , line
                 , T.pack "\ESC[0m"
                 ]

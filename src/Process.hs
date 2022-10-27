@@ -68,7 +68,7 @@ send p line = liftIO $ do
     hFlush (procStdin p)
 
 outProc :: MonadOutput m => OutputType -> Process -> Text -> m ()
-outProc otype p line = outLine otype (textProcName $ procName p) line
+outProc otype p line = outLine otype (Just $ textProcName $ procName p) line
 
 lineReadingLoop :: MonadOutput m => Process -> Handle -> (Text -> m ()) -> m ()
 lineReadingLoop process h act =

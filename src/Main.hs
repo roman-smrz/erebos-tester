@@ -72,7 +72,7 @@ newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (Excep
 
 instance MonadFail TestRun where
     fail str = do
-        outLine OutputError T.empty $ T.pack str
+        outLine OutputError Nothing $ T.pack str
         throwError Failed
 
 instance MonadError Failed TestRun where
@@ -249,9 +249,9 @@ exprFailed :: Text -> SourceLine -> Maybe ProcName -> Expr a -> TestRun ()
 exprFailed desc (SourceLine sline) pname expr = do
     let prompt = maybe T.empty textProcName pname
     exprVars <- gatherVars expr
-    outLine OutputMatchFail prompt $ T.concat [desc, T.pack " failed on ", sline]
+    outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", sline]
     forM_ exprVars $ \(name, value) ->
-        outLine OutputMatchFail prompt $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
+        outLine OutputMatchFail (Just prompt) $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
     throwError Failed
 
 expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
@@ -301,7 +301,7 @@ evalSteps = mapM_ $ \case
     Let (SourceLine sline) name expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
-            outLine OutputError T.empty $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
             throwError Failed
         value <- eval expr
         withVar name value $ evalSteps inner
