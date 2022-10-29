@@ -35,6 +35,7 @@ data OutputState = OutputState
 
 data OutputType = OutputChildStdout
                 | OutputChildStderr
+                | OutputChildStdin
                 | OutputChildInfo
                 | OutputChildFail
                 | OutputMatch
@@ -56,6 +57,7 @@ startOutput verbose = Output
 outColor :: OutputType -> Text
 outColor OutputChildStdout = T.pack "0"
 outColor OutputChildStderr = T.pack "31"
+outColor OutputChildStdin = T.pack "0"
 outColor OutputChildInfo = T.pack "0"
 outColor OutputChildFail = T.pack "31"
 outColor OutputMatch = T.pack "32"
@@ -66,6 +68,7 @@ outColor OutputAlways = "0"
 outSign :: OutputType -> Text
 outSign OutputChildStdout = T.empty
 outSign OutputChildStderr = T.pack "!"
+outSign OutputChildStdin = T.empty
 outSign OutputChildInfo = T.pack "."
 outSign OutputChildFail = T.pack "!!"
 outSign OutputMatch = T.pack "+"
@@ -73,16 +76,18 @@ outSign OutputMatchFail = T.pack "/"
 outSign OutputError = T.pack "!!"
 outSign OutputAlways = T.empty
 
+outArr :: OutputType -> Text
+outArr OutputChildStdin = "<"
+outArr _ = ">"
+
 printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
-    OutputChildStdout -> False
     OutputChildStderr -> True
-    OutputChildInfo -> False
     OutputChildFail -> True
-    OutputMatch -> False
     OutputMatchFail -> True
     OutputError -> True
     OutputAlways -> True
+    _ -> False
 
 clearPrompt :: OutputState -> IO ()
 clearPrompt OutputState { outCurPrompt = Just _ } = T.putStr $ T.pack "\ESC[2K\r"
@@ -102,7 +107,7 @@ outLine otype prompt line = ioWithOutput $ \out ->
             clearPrompt st
             TL.putStrLn $ TL.fromChunks
                 [ T.pack "\ESC[", outColor otype, T.pack "m"
-                , maybe "" (<> outSign otype <> "> ") prompt
+                , maybe "" (<> outSign otype <> outArr otype <> " ") prompt
                 , line
                 , T.pack "\ESC[0m"
                 ]

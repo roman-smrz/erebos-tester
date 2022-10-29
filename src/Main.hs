@@ -325,6 +325,7 @@ evalSteps = mapM_ $ \case
     Send pname expr -> do
         p <- eval pname
         line <- eval expr
+        outProc OutputChildStdin p line
         send p line
 
     Expect line pname expr captures inner -> do
