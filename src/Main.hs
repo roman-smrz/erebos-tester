@@ -22,6 +22,7 @@ import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
+import System.IO.Error
 import System.Posix.Process
 import System.Posix.Signals
 import System.Process
@@ -39,6 +40,7 @@ data Options = Options
     , optVerbose :: Bool
     , optTimeout :: Scientific
     , optGDB :: Bool
+    , optForce :: Bool
     }
 
 defaultOptions :: Options
@@ -48,6 +50,7 @@ defaultOptions = Options
     , optVerbose = False
     , optTimeout = 1
     , optGDB = False
+    , optForce = False
     }
 
 testDir :: FilePath
@@ -356,6 +359,10 @@ runTest out opts test = do
         <$> pure (error "network not initialized")
         <*> pure []
         <*> pure M.empty
+
+    when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
+        if isDoesNotExistError e then return () else ioError e
+
     (fmap $ either (const False) id) $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ initNetwork $ \net -> do
         let sigHandler SignalInfo { siginfoSpecific = chld } = do
                 processes <- readMVar (netProcesses net)
@@ -401,6 +408,9 @@ options =
     , Option ['g'] ["gdb"]
         (NoArg (\opts -> opts { optGDB = True }))
         "run GDB and attach spawned processes"
+    , Option ['f'] ["force"]
+        (NoArg (\opts -> opts { optForce = True }))
+        "remove test directory if it exists instead of stopping"
     ]
 
 main :: IO ()
