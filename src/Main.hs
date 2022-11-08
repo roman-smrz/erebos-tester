@@ -33,6 +33,7 @@ import Output
 import Parser
 import Process
 import Test
+import Util
 
 data Options = Options
     { optDefaultTool :: String
@@ -134,13 +135,9 @@ atomicallyTest act = do
         Left e -> throwError e
         Right x -> return x
 
-initNetwork :: (Network -> TestRun a) -> TestRun a
-initNetwork inner = do
+withNetwork :: (Network -> TestRun a) -> TestRun a
+withNetwork inner = do
     net <- liftIO $ do
-        exists <- doesPathExist testDir
-        when exists $ ioError $ userError $ testDir ++ " exists"
-        createDirectoryIfMissing True testDir
-
         callCommand "ip link add name br0 group 1 type bridge"
         callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
         callCommand "ip link set dev br0 up"
@@ -159,10 +156,8 @@ initNetwork inner = do
             Just <$> liftIO (newMVar gdb)
         else return Nothing
 
-    local ((\te -> te { teGDB = mgdb }) *** (\s -> s { tsNetwork = net })) $ inner net
+    res <- local ((\te -> te { teGDB = mgdb }) *** (\s -> s { tsNetwork = net })) $ inner net
 
-exitNetwork :: Network -> TestRun ()
-exitNetwork net = do
     processes <- liftIO $ readMVar (netProcesses net)
     forM_ processes $ \p -> do
         closeProcess p `catchError` \_ -> return ()
@@ -171,9 +166,7 @@ exitNetwork net = do
         callCommand $ "ip -all netns del"
         callCommand $ "ip link del group 1"
 
-    failed <- return . isJust =<< liftIO . atomically . readTVar =<< asks (teFailed . fst)
-    liftIO $ if failed then exitFailure
-                       else removeDirectoryRecursive $ netDir net
+    return res
 
 createNode :: TypedVarName Node -> (Node -> TestRun a) -> TestRun a
 createNode (TypedVarName vname) inner = do
@@ -362,8 +355,11 @@ runTest out opts test = do
 
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
+    exists <- doesPathExist testDir
+    when exists $ ioError $ userError $ testDir ++ " exists"
+    createDirectoryIfMissing True testDir
 
-    (fmap $ either (const False) id) $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ initNetwork $ \net -> do
+    res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ withNetwork $ \net -> do
         let sigHandler SignalInfo { siginfoSpecific = chld } = do
                 processes <- readMVar (netProcesses net)
                 forM_ processes $ \p -> do
@@ -381,12 +377,15 @@ runTest out opts test = do
                              Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
         oldHandler <- liftIO $ installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
-        flip catchError (const $ return ()) $ evalSteps $ testSteps test
+        evalSteps (testSteps test) `finally` do
+            void $ liftIO $ installHandler processStatusChanged oldHandler Nothing
 
-        _ <- liftIO $ installHandler processStatusChanged oldHandler Nothing
-        exitNetwork net
-
-        atomicallyTest $ return True
+    failed <- atomically $ readTVar (teFailed tenv)
+    case (res, failed) of
+        (Right (), Nothing) -> do
+            removeDirectoryRecursive testDir
+            return True
+        _ -> return False
 
 
 options :: [OptDescr (Options -> Options)]
@@ -425,4 +424,5 @@ main = do
     optDefaultTool opts `seq` return ()
 
     out <- startOutput $ optVerbose opts
-    forM_ files $ mapM_ (runTest out opts) <=< parseTestFile
+    ok <- flip allM files $ allM (runTest out opts) <=< parseTestFile
+    when (not ok) exitFailure
