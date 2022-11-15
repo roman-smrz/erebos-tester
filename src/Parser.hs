@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
 {-# OPTIONS_GHC -Wno-orphans #-}
@@ -11,6 +12,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 
 import Data.Char
+import Data.Kind
 import Data.Maybe
 import Data.Scientific
 import qualified Data.Set as S
@@ -27,9 +29,10 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 import System.Exit
 
-import Network ()
-import Process (ProcName(..))
+import Network (Node)
+import Process (Process, ProcName(..))
 import Test
+import Util
 
 type TestParser = ParsecT Void TestStream (State TestParserState)
 
@@ -37,12 +40,16 @@ type TestStream = TL.Text
 
 data TestParserState = TestParserState
     { testVars :: [(VarName, SomeExprType)]
+    , testContext :: Maybe SomeExpr
     }
 
 data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
 
 someEmptyVar :: SomeExprType -> SomeVarValue
 someEmptyVar (SomeExprType (Proxy :: Proxy a)) = SomeVarValue $ emptyVarValue @a
+
+textSomeExprType :: SomeExprType -> Text
+textSomeExprType (SomeExprType p) = textExprType p
 
 instance MonadEval TestParser where
     lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") (return . someEmptyVar) =<< gets (lookup name . testVars)
@@ -68,7 +75,7 @@ osymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy operatorChar) 
 wsymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy wordChar) <* sc
 
 operatorChar :: (MonadParsec e s m, Token s ~ Char) => m (Token s)
-operatorChar = satisfy $ (`elem` "+-*/=")
+operatorChar = satisfy $ (`elem` ['+', '-', '*', '/', '='])
 {-# INLINE operatorChar #-}
 
 localState :: TestParser a -> TestParser a
@@ -157,7 +164,7 @@ quotedString = label "string" $ lexeme $ do
     void $ char '"'
     let inner = choice
             [ char '"' >> return []
-            , takeWhile1P Nothing (`notElem` "\"\\$") >>= \s -> (Literal (TL.toStrict s):) <$> inner
+            , takeWhile1P Nothing (`notElem` ['\"', '\\', '$']) >>= \s -> (Literal (TL.toStrict s):) <$> inner
             ,do void $ char '\\'
                 c <- choice
                     [ char '\\' >> return '\\'
@@ -182,7 +189,7 @@ regex = label "regular expression" $ lexeme $ do
     void $ char '/'
     let inner = choice
             [ char '/' >> return []
-            , takeWhile1P Nothing (`notElem` "/\\$") >>= \s -> (Literal (RegexPart (TL.toStrict s)) :) <$> inner
+            , takeWhile1P Nothing (`notElem` ['/', '\\', '$']) >>= \s -> (Literal (RegexPart (TL.toStrict s)) :) <$> inner
             ,do void $ char '\\'
                 s <- choice
                     [ char '/' >> return (Literal $ RegexPart $ T.singleton '/')
@@ -345,39 +352,49 @@ letStatement = do
         body <- testBlock indent
         return [Let line name e body]
 
-class Typeable a => ParamType a where
-    parseParam :: TestParser a
+class (Typeable a, Typeable (ParamRep a)) => ParamType a where
+    type ParamRep a :: Type
+    type ParamRep a = a
+
+    parseParam :: proxy a -> TestParser (ParamRep a)
     showParamType :: proxy a -> String
 
-    paramDefault :: TestParser a
-    paramDefault = mzero
+    paramDefault :: proxy a -> TestParser (ParamRep a)
+    paramDefault _ = mzero
+
+    paramFromSomeExpr :: proxy a -> SomeExpr -> Maybe (ParamRep a)
+    paramFromSomeExpr _ (SomeExpr e) = cast e
 
 instance ParamType SourceLine where
-    parseParam = mzero
+    parseParam _ = mzero
     showParamType _ = "<source line>"
 
 instance ParamType ProcName where
-    parseParam = procName
+    parseParam _ = procName
     showParamType _ = "<proc>"
 
 instance ExprType a => ParamType (TypedVarName a) where
-    parseParam = newVarName
+    parseParam _ = newVarName
     showParamType _ = "<variable>"
 
 instance ExprType a => ParamType (Expr a) where
-    parseParam = typedExpr
+    parseParam _ = typedExpr
     showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
 
 instance ParamType a => ParamType [a] where
-    parseParam = listOf parseParam
+    type ParamRep [a] = [ParamRep a]
+    parseParam _ = listOf (parseParam @a Proxy)
     showParamType _ = showParamType @a Proxy ++ " [, " ++ showParamType @a Proxy ++ " ...]"
-    paramDefault = return []
+    paramDefault _ = return []
+    paramFromSomeExpr _ (SomeExpr e) = cast e <|> ((:[]) <$> cast e)
 
 instance (ParamType a, ParamType b) => ParamType (Either a b) where
-    parseParam = try (Left <$> parseParam) <|> (Right <$> parseParam)
+    type ParamRep (Either a b) = Either (ParamRep a) (ParamRep b)
+    parseParam _ = try (Left <$> parseParam @a Proxy) <|> (Right <$> parseParam @b Proxy)
     showParamType _ = showParamType @a Proxy ++ " or " ++ showParamType @b Proxy
+    paramFromSomeExpr _ (SomeExpr e) = (Left <$> cast e) <|> (Right <$> cast e)
 
-data SomeParam f = forall a. ParamType a => SomeParam (f a)
+data SomeParam f = forall a. ParamType a => SomeParam (Proxy a) (f (ParamRep a))
 
 data CommandDef a = CommandDef [(String, SomeParam Proxy)] ([SomeParam Identity] -> a)
 
@@ -392,7 +409,20 @@ instance Applicative CommandDef where
            in ctor1 params1 $ ctor2 params2
 
 param :: forall a. ParamType a => String -> CommandDef a
-param name = CommandDef [(name, SomeParam (Proxy @a))] (\[SomeParam (Identity x)] -> fromJust $ cast x)
+param name = CommandDef [(name, SomeParam (Proxy @a) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
+
+data ParamOrContext a
+
+instance ParamType a => ParamType (ParamOrContext a) where
+    type ParamRep (ParamOrContext a) = ParamRep a
+    parseParam _ = parseParam @a Proxy
+    showParamType _ = showParamType @a Proxy
+    paramDefault _ = gets testContext >>= \case
+        Just se | Just e <- paramFromSomeExpr @a Proxy se -> return e
+        _ -> fail $ showParamType @a Proxy <> " not available from context"
+
+paramOrContext :: forall a. ParamType a => String -> CommandDef a
+paramOrContext name = CommandDef [(name, SomeParam (Proxy @(ParamOrContext a)) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
 
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
@@ -400,15 +430,16 @@ cmdLine = param ""
 data InnerBlock
 
 instance ParamType InnerBlock where
-    parseParam = mzero
+    type ParamRep InnerBlock = [TestStep]
+    parseParam _ = mzero
     showParamType _ = "<code block>"
 
 instance ParamType TestStep where
-    parseParam = mzero
+    parseParam _ = mzero
     showParamType _ = "<code line>"
 
 innerBlock :: CommandDef [TestStep]
-innerBlock = CommandDef [("", SomeParam (Proxy @InnerBlock))] (\[SomeParam (Identity x)] -> fromJust $ cast x)
+innerBlock = CommandDef [("", SomeParam (Proxy @InnerBlock) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
 
 command :: String -> CommandDef TestStep -> TestParser [TestStep]
 command name (CommandDef types ctor) = do
@@ -416,20 +447,20 @@ command name (CommandDef types ctor) = do
     line <- getSourceLine
     wsymbol name
     localState $ do
-        restOfLine indent [] line $ map (fmap $ \(SomeParam (_ :: Proxy p)) -> SomeParam $ Nothing @p) types
+        restOfLine indent [] line $ map (fmap $ \(SomeParam p@(_ :: Proxy p) Proxy) -> SomeParam p $ Nothing @(ParamRep p)) types
   where
     restOfLine :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> SourceLine -> [(String, SomeParam Maybe)] -> TestParser [TestStep]
     restOfLine cmdi partials line params = choice
         [do void $ lookAhead eol
             iparams <- forM params $ \case
-                (_, SomeParam (Nothing :: Maybe p))
-                    | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam $ Identity line
-                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam . Identity <$> restOfParts cmdi partials
-                (sym, SomeParam (Nothing :: Maybe p)) -> choice
-                    [ SomeParam . Identity <$> paramDefault @p
-                    , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType @p Proxy
+                (_, SomeParam (p :: Proxy p) Nothing)
+                    | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam p $ Identity line
+                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam p . Identity <$> restOfParts cmdi partials
+                (sym, SomeParam p Nothing) -> choice
+                    [ SomeParam p . Identity <$> paramDefault p
+                    , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType p
                     ]
-                (_, SomeParam (Just x)) -> return $ SomeParam $ Identity x
+                (_, SomeParam (p :: Proxy p) (Just x)) -> return $ SomeParam p $ Identity x
             return [ctor iparams]
 
         ,do symbol ":"
@@ -452,11 +483,11 @@ command name (CommandDef types ctor) = do
               | pos == partIndent -> (++) <$> restOfLine cmdi partials line params <*> restOfParts cmdi partials
               | otherwise         -> L.incorrectIndent EQ partIndent pos
 
-    tryParam sym (SomeParam (cur :: Maybe p)) = do
+    tryParam sym (SomeParam (p :: Proxy p) cur) = do
         when (not $ null sym) $ wsymbol sym
         when (isJust cur) $ do
             fail $ "multiple " ++ (if null sym then "unnamed" else "'" ++ sym ++ "'") ++ " parameters"
-        SomeParam . Just <$> parseParam @p
+        SomeParam p . Just <$> parseParam @p Proxy
 
     tryParams cmdi partIndent line prev ((sym, p) : ps) = choice $
         (if null sym then reverse else id) {- try unnamed parameter as last option -} $
@@ -476,6 +507,31 @@ testLocal = do
     indent <- L.indentGuard scn GT ref
     localState $ testBlock indent
 
+testWith :: TestParser [TestStep]
+testWith = do
+    ref <- L.indentLevel
+    wsymbol "with"
+
+    off <- stateOffset <$> getParserState
+    ctx@(SomeExpr (_ :: Expr ctxe)) <- someExpr
+    let expected =
+            [ SomeExprType @Node Proxy
+            , SomeExprType @Process Proxy
+            ]
+    notAllowed <- flip allM expected $ \case
+        SomeExprType (Proxy :: Proxy a) | Just (Refl :: ctxe :~: a) <- eqT -> return False
+        _ -> return True
+    when notAllowed $ parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+        "expected " <> T.intercalate ", " (map (("'"<>) . (<>"'") . textSomeExprType) expected) <> ", expression has type '" <> textExprType @ctxe Proxy <> "'"
+
+    symbol ":"
+    void $ eol
+
+    indent <- L.indentGuard scn GT ref
+    localState $ do
+        modify $ \s -> s { testContext = Just ctx }
+        testBlock indent
+
 testNode :: TestParser [TestStep]
 testNode = command "node" $ DeclNode
     <$> param ""
@@ -484,18 +540,18 @@ testNode = command "node" $ DeclNode
 testSpawn :: TestParser [TestStep]
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
-    <*> param "on"
+    <*> paramOrContext "on"
     <*> innerBlock
 
 testSend :: TestParser [TestStep]
 testSend = command "send" $ Send
-    <$> param "to"
+    <$> paramOrContext "to"
     <*> param ""
 
 testExpect :: TestParser [TestStep]
 testExpect = command "expect" $ Expect
     <$> cmdLine
-    <*> param "from"
+    <*> paramOrContext "from"
     <*> param ""
     <*> param "capture"
     <*> innerBlock
@@ -508,7 +564,7 @@ testGuard = command "guard" $ Guard
 testPacketLoss :: TestParser [TestStep]
 testPacketLoss = command "packet_loss" $ PacketLoss
     <$> param ""
-    <*> param "on"
+    <*> paramOrContext "on"
     <*> innerBlock
 
 
@@ -533,6 +589,7 @@ testStep :: TestParser [TestStep]
 testStep = choice
     [ letStatement
     , testLocal
+    , testWith
     , testNode
     , testSpawn
     , testSend
@@ -560,6 +617,7 @@ parseTestFile path = do
     content <- TL.readFile path
     let initState = TestParserState
             { testVars = []
+            , testContext = Nothing
             }
     case evalState (runParserT parseTestDefinitions path content) initState of
          Left err -> putStr (errorBundlePretty err) >> exitFailure
