@@ -424,5 +424,5 @@ main = do
     optDefaultTool opts `seq` return ()
 
     out <- startOutput $ optVerbose opts
-    ok <- flip allM files $ allM (runTest out opts) <=< parseTestFile
+    ok <- allM (runTest out opts) . concat =<< mapM parseTestFile files
     when (not ok) exitFailure
