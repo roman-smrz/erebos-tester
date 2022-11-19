@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main (main) where
 
 import Control.Arrow
@@ -96,6 +98,7 @@ instance MonadError Failed TestRun where
 
 instance MonadEval TestRun where
     lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< asks (lookup name . tsVars . snd)
+    rootNetwork = asks $ tsNetwork . snd
 
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
@@ -168,12 +171,13 @@ withNetwork inner = do
 
     return res
 
-createNode :: TypedVarName Node -> (Node -> TestRun a) -> TestRun a
-createNode (TypedVarName vname) inner = do
-    net <- asks $ tsNetwork . snd
+createNode :: Expr Network -> Maybe (TypedVarName Node) -> (Node -> TestRun a) -> TestRun a
+createNode netexpr tvname inner = do
+    let vname = fromTypedVarName <$> tvname
+    net <- eval netexpr
     node <- liftIO $ do
         node <- modifyMVar (netNodes net) $ \nodes -> do
-            let nname = nextNodeName vname $ map nodeName nodes
+            let nname = nextNodeName (fromMaybe (VarName "node") vname) $ map nodeName nodes
                 ip = "192.168.0." ++ show (11 + length nodes)
                 node = Node { nodeName = nname
                             , nodeIp = T.pack ip
@@ -197,7 +201,7 @@ createNode (TypedVarName vname) inner = do
         callOn node $ "ip link set dev lo up"
         return node
 
-    withVar vname node $ inner node
+    maybe id (flip withVar node) vname $ inner node
 
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
@@ -302,12 +306,17 @@ evalSteps = mapM_ $ \case
         value <- eval expr
         withVar name value $ evalSteps inner
 
-    DeclNode name@(TypedVarName vname) inner -> do
-        createNode name $ \node -> do
+    DeclNode name@(TypedVarName vname) net inner -> do
+        createNode net (Just name) $ \node -> do
             withVar vname node $ evalSteps inner
 
-    Spawn (TypedVarName vname@(VarName tname)) nname inner -> do
-        either createNode ((>>=) . eval) nname $ \node -> do
+    Spawn (TypedVarName vname@(VarName tname)) target inner -> do
+        case target of
+            Left nname -> createNode RootNetwork (Just nname) go
+            Right (Left net) -> createNode net Nothing go
+            Right (Right node) -> go =<< eval node
+      where
+        go node = do
             let pname = ProcName tname
             opts <- asks $ teOptions . fst
             p <- spawnOn (Right node) pname Nothing $

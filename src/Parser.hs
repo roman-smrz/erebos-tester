@@ -29,7 +29,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 import System.Exit
 
-import Network (Node)
+import Network (Network, Node)
 import Process (Process, ProcName(..))
 import Test
 import Util
@@ -40,7 +40,7 @@ type TestStream = TL.Text
 
 data TestParserState = TestParserState
     { testVars :: [(VarName, SomeExprType)]
-    , testContext :: Maybe SomeExpr
+    , testContext :: SomeExpr
     }
 
 data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
@@ -53,6 +53,7 @@ textSomeExprType (SomeExprType p) = textExprType p
 
 instance MonadEval TestParser where
     lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") (return . someEmptyVar) =<< gets (lookup name . testVars)
+    rootNetwork = return emptyVarValue
 
 skipLineComment :: TestParser ()
 skipLineComment = L.skipLineComment $ TL.pack "#"
@@ -386,13 +387,13 @@ instance ParamType a => ParamType [a] where
     parseParam _ = listOf (parseParam @a Proxy)
     showParamType _ = showParamType @a Proxy ++ " [, " ++ showParamType @a Proxy ++ " ...]"
     paramDefault _ = return []
-    paramFromSomeExpr _ (SomeExpr e) = cast e <|> ((:[]) <$> cast e)
+    paramFromSomeExpr _ se@(SomeExpr e) = cast e <|> ((:[]) <$> paramFromSomeExpr @a Proxy se)
 
 instance (ParamType a, ParamType b) => ParamType (Either a b) where
     type ParamRep (Either a b) = Either (ParamRep a) (ParamRep b)
     parseParam _ = try (Left <$> parseParam @a Proxy) <|> (Right <$> parseParam @b Proxy)
     showParamType _ = showParamType @a Proxy ++ " or " ++ showParamType @b Proxy
-    paramFromSomeExpr _ (SomeExpr e) = (Left <$> cast e) <|> (Right <$> cast e)
+    paramFromSomeExpr _ se = (Left <$> paramFromSomeExpr @a Proxy se) <|> (Right <$> paramFromSomeExpr @b Proxy se)
 
 data SomeParam f = forall a. ParamType a => SomeParam (Proxy a) (f (ParamRep a))
 
@@ -418,8 +419,9 @@ instance ParamType a => ParamType (ParamOrContext a) where
     parseParam _ = parseParam @a Proxy
     showParamType _ = showParamType @a Proxy
     paramDefault _ = gets testContext >>= \case
-        Just se | Just e <- paramFromSomeExpr @a Proxy se -> return e
-        _ -> fail $ showParamType @a Proxy <> " not available from context"
+        se@(SomeExpr ctx)
+            | Just e <- paramFromSomeExpr @a Proxy se -> return e
+            | otherwise -> fail $ showParamType @a Proxy <> " not available from context type '" <> T.unpack (textExprType ctx) <> "'"
 
 paramOrContext :: forall a. ParamType a => String -> CommandDef a
 paramOrContext name = CommandDef [(name, SomeParam (Proxy @(ParamOrContext a)) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
@@ -515,7 +517,8 @@ testWith = do
     off <- stateOffset <$> getParserState
     ctx@(SomeExpr (_ :: Expr ctxe)) <- someExpr
     let expected =
-            [ SomeExprType @Node Proxy
+            [ SomeExprType @Network Proxy
+            , SomeExprType @Node Proxy
             , SomeExprType @Process Proxy
             ]
     notAllowed <- flip allM expected $ \case
@@ -529,12 +532,13 @@ testWith = do
 
     indent <- L.indentGuard scn GT ref
     localState $ do
-        modify $ \s -> s { testContext = Just ctx }
+        modify $ \s -> s { testContext = ctx }
         testBlock indent
 
 testNode :: TestParser [TestStep]
 testNode = command "node" $ DeclNode
     <$> param ""
+    <*> paramOrContext "on"
     <*> innerBlock
 
 testSpawn :: TestParser [TestStep]
@@ -617,7 +621,7 @@ parseTestFile path = do
     content <- TL.readFile path
     let initState = TestParserState
             { testVars = []
-            , testContext = Nothing
+            , testContext = SomeExpr RootNetwork
             }
     case evalState (runParserT parseTestDefinitions path content) initState of
          Left err -> putStr (errorBundlePretty err) >> exitFailure

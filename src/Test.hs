@@ -34,8 +34,8 @@ data Test = Test
     }
 
 data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
-              | DeclNode (TypedVarName Node) [TestStep]
-              | Spawn (TypedVarName Process) (Either (TypedVarName Node) (Expr Node)) [TestStep]
+              | DeclNode (TypedVarName Node) (Expr Network) [TestStep]
+              | Spawn (TypedVarName Process) (Either (TypedVarName Node) (Either (Expr Network) (Expr Node))) [TestStep]
               | Send (Expr Process) (Expr Text)
               | Expect SourceLine (Expr Process) (Expr Regex) [TypedVarName Text] [TestStep]
               | Guard SourceLine (Expr Bool)
@@ -50,12 +50,13 @@ newtype SourceLine = SourceLine Text
 
 class MonadFail m => MonadEval m where
   lookupVar :: VarName -> m SomeVarValue
+  rootNetwork :: m Network
 
 
 newtype VarName = VarName Text
     deriving (Eq, Ord)
 
-newtype TypedVarName a = TypedVarName VarName
+newtype TypedVarName a = TypedVarName { fromTypedVarName :: VarName }
     deriving (Eq, Ord)
 
 textVarName :: VarName -> Text
@@ -118,6 +119,7 @@ data Expr a where
     Regex :: [Expr Regex] -> Expr Regex
     UnOp :: (b -> a) -> Expr b -> Expr a
     BinOp :: (b -> c -> a) -> Expr b -> Expr c -> Expr a
+    RootNetwork :: Expr Network
 
 eval :: MonadEval m => Expr a -> m a
 eval (Variable name) = fromSomeVarValue name =<< lookupVar name
@@ -130,6 +132,7 @@ eval (Regex xs) = mapM eval xs >>= \case
         Right re -> return re
 eval (UnOp f x) = f <$> eval x
 eval (BinOp f x y) = f <$> eval x <*> eval y
+eval (RootNetwork) = rootNetwork
 
 gatherVars :: forall a m. MonadEval m => Expr a -> m [(VarName, SomeVarValue)]
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
@@ -141,6 +144,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
     helper (Regex es) = concat <$> mapM helper es
     helper (UnOp _ e) = helper e
     helper (BinOp _ e f) = (++) <$> helper e <*> helper f
+    helper (RootNetwork) = return []
 
 
 data Regex = RegexCompiled Text RE.Regex

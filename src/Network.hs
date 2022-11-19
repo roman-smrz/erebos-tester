@@ -45,6 +45,11 @@ nextNodeName (VarName tname) = go 0
                                   | otherwise       = go n ns
 
 
+instance ExprType Network where
+    textExprType _ = T.pack "network"
+    textExprValue _ = T.pack "s:0"
+    emptyVarValue = Network undefined undefined undefined
+
 instance ExprType Node where
     textExprType _ = T.pack "node"
     textExprValue n = T.pack "n:" <> textNodeName (nodeName n)
