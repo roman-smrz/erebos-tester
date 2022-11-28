@@ -2,7 +2,6 @@
 
 module Main (main) where
 
-import Control.Arrow
 import Control.Applicative
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -64,6 +63,7 @@ data TestEnv = TestEnv
     { teOutput :: Output
     , teFailed :: TVar (Maybe Failed)
     , teOptions :: Options
+    , teProcesses :: MVar [Process]
     , teGDB :: Maybe (MVar GDB)
     }
 
@@ -145,25 +145,11 @@ withNetwork inner = do
         callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
         callCommand "ip link set dev br0 up"
         callCommand "ip link set dev lo up"
-        Network <$> newMVar [] <*> newMVar [] <*> pure testDir
+        Network <$> newMVar [] <*> pure testDir
 
-    void $ spawnOn (Left net) (ProcNameTcpdump) (Just softwareTermination) $
-        "tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root"
-
-    useGDB <- asks $ optGDB . teOptions . fst
-    mgdb <- if useGDB
-        then do
-            failedVar <- asks $ teFailed . fst
-            gdb <- gdbStart $ atomically . writeTVar failedVar . Just . ProcessCrashed
-            liftIO $ modifyMVar_ (netProcesses net) $ return . (gdbProcess gdb:)
-            Just <$> liftIO (newMVar gdb)
-        else return Nothing
-
-    res <- local ((\te -> te { teGDB = mgdb }) *** (\s -> s { tsNetwork = net })) $ inner net
-
-    processes <- liftIO $ readMVar (netProcesses net)
-    forM_ processes $ \p -> do
-        closeProcess p `catchError` \_ -> return ()
+    res <- spawnOn (Left net) (ProcNameTcpdump) (Just softwareTermination)
+        ("tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root") $ \_ -> do
+        local (fmap $ \s -> s { tsNetwork = net }) $ inner net
 
     liftIO $ do
         callCommand $ "ip -all netns del"
@@ -206,8 +192,8 @@ createNode netexpr tvname inner = do
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
 
-spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
-spawnOn target pname killWith cmd = do
+spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> (Process -> TestRun a) -> TestRun a
+spawnOn target pname killWith cmd inner = do
     let prefix = either (const "") (\node -> "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" ") target
     (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
@@ -232,13 +218,17 @@ spawnOn target pname killWith cmd = do
              ProcNameTcpdump -> return ()
              _ -> outProc OutputChildStderr process line
 
-    let net = either id nodeNetwork target
     asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= \case
-        Just gdb -> addInferior gdb process
-        Nothing -> return ()
+        Just gdb | ProcName _ <- pname -> addInferior gdb process
+        _ -> return ()
 
-    liftIO $ modifyMVar_ (netProcesses net) $ return . (process:)
-    return process
+    procVar <- asks $ teProcesses . fst
+    liftIO $ modifyMVar_ procVar $ return . (process:)
+
+    inner process `finally` do
+        ps <- liftIO $ takeMVar procVar
+        closeProcess process `finally` do
+            liftIO $ putMVar procVar $ filter (/=process) ps
 
 tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
 tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just ((x, capture), xs)
@@ -317,15 +307,11 @@ evalSteps = mapM_ $ \case
             Right (Right node) -> go =<< eval node
       where
         go node = do
-            let pname = ProcName tname
             opts <- asks $ teOptions . fst
-            p <- spawnOn (Right node) pname Nothing $
-                fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-            withVar vname p (evalSteps inner) `finally` do
-                net <- asks $ tsNetwork . snd
-                ps <- liftIO $ takeMVar (netProcesses net)
-                closeProcess p `finally` do
-                    liftIO $ putMVar (netProcesses net) $ filter (/=p) ps
+            let pname = ProcName tname
+                tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
+            spawnOn (Right node) pname Nothing tool $ \p -> do
+                withVar vname p (evalSteps inner)
 
     Send pname expr -> do
         p <- eval pname
@@ -352,42 +338,59 @@ evalSteps = mapM_ $ \case
 
 runTest :: Output -> Options -> Test -> IO Bool
 runTest out opts test = do
-    tenv <- TestEnv
-        <$> pure out
-        <*> newTVarIO Nothing
-        <*> pure opts
-        <*> pure Nothing
-    tstate <- TestState
-        <$> pure (error "network not initialized")
-        <*> pure []
-        <*> pure M.empty
-
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
     exists <- doesPathExist testDir
     when exists $ ioError $ userError $ testDir ++ " exists"
     createDirectoryIfMissing True testDir
 
-    res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ withNetwork $ \net -> do
-        let sigHandler SignalInfo { siginfoSpecific = chld } = do
-                processes <- readMVar (netProcesses net)
-                forM_ processes $ \p -> do
-                    mbpid <- getPid (procHandle p)
-                    when (mbpid == Just (siginfoPid chld)) $ flip runReaderT out $ do
-                        let err detail = outProc OutputChildFail p detail
-                        case siginfoStatus chld of
-                             Exited ExitSuccess -> outProc OutputChildInfo p $ T.pack $ "child exited successfully"
-                             Exited (ExitFailure code) -> do
-                                 err $ T.pack $ "child process exited with status " ++ show code
-                                 liftIO $ atomically $ writeTVar (teFailed tenv) $ Just Failed
-                             Terminated sig _ -> do
-                                 err $ T.pack $ "child terminated with signal " ++ show sig
-                                 liftIO $ atomically $ writeTVar (teFailed tenv) $ Just $ ProcessCrashed p
-                             Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
-        oldHandler <- liftIO $ installHandler processStatusChanged (CatchInfo sigHandler) Nothing
+    failedVar <- newTVarIO Nothing
+    procVar <- newMVar []
 
-        evalSteps (testSteps test) `finally` do
-            void $ liftIO $ installHandler processStatusChanged oldHandler Nothing
+    mgdb <- if optGDB opts
+        then flip runReaderT out $ do
+            gdb <- gdbStart $ atomically . writeTVar failedVar . Just . ProcessCrashed
+            Just . (, gdbProcess gdb) <$> liftIO (newMVar gdb)
+        else return Nothing
+
+    let tenv = TestEnv
+            { teOutput = out
+            , teFailed = failedVar
+            , teOptions = opts
+            , teProcesses = procVar
+            , teGDB = fst <$> mgdb
+            }
+        tstate = TestState
+            { tsNetwork = error "network not initialized"
+            , tsVars = []
+            , tsNodePacketLoss = M.empty
+            }
+
+    let sigHandler SignalInfo { siginfoSpecific = chld } = do
+            processes <- readMVar procVar
+            forM_ processes $ \p -> do
+                mbpid <- getPid (procHandle p)
+                when (mbpid == Just (siginfoPid chld)) $ flip runReaderT out $ do
+                    let err detail = outProc OutputChildFail p detail
+                    case siginfoStatus chld of
+                        Exited ExitSuccess -> outProc OutputChildInfo p $ T.pack $ "child exited successfully"
+                        Exited (ExitFailure code) -> do
+                            err $ T.pack $ "child process exited with status " ++ show code
+                            liftIO $ atomically $ writeTVar (teFailed tenv) $ Just Failed
+                        Terminated sig _ -> do
+                            err $ T.pack $ "child terminated with signal " ++ show sig
+                            liftIO $ atomically $ writeTVar (teFailed tenv) $ Just $ ProcessCrashed p
+                        Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
+    oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
+
+    res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
+        withNetwork $ \_ -> evalSteps (testSteps test)
+
+    void $ installHandler processStatusChanged oldHandler Nothing
+
+    Right () <- runExceptT $ flip runReaderT out $ do
+        maybe (return ()) (closeProcess . snd) mgdb
+    [] <- readMVar procVar
 
     failed <- atomically $ readTVar (teFailed tenv)
     case (res, failed) of

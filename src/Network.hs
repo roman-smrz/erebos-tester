@@ -11,12 +11,10 @@ import Control.Concurrent
 import Data.Text (Text)
 import Data.Text qualified as T
 
-import {-# SOURCE #-} Process
 import Test
 
 data Network = Network
     { netNodes :: MVar [Node]
-    , netProcesses :: MVar [Process]
     , netDir :: FilePath
     }
 
@@ -48,7 +46,7 @@ nextNodeName (VarName tname) = go 0
 instance ExprType Network where
     textExprType _ = T.pack "network"
     textExprValue _ = T.pack "s:0"
-    emptyVarValue = Network undefined undefined undefined
+    emptyVarValue = Network undefined undefined
 
 instance ExprType Node where
     textExprType _ = T.pack "node"
