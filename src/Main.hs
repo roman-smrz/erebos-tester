@@ -23,11 +23,13 @@ import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
+import System.FilePath.Glob
 import System.IO.Error
 import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
+import Config
 import GDB
 import Network
 import Output
@@ -426,14 +428,27 @@ options =
 
 main :: IO ()
 main = do
-    envtool <- fromMaybe (error "No test tool defined") <$> lookupEnv "EREBOS_TEST_TOOL"
+    configPath <- findConfig
+    config <- mapM parseConfig configPath
+    let baseDir = maybe "." dropFileName configPath
+
+    envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool ->
+        return $ fromMaybe (error "No test tool defined") $ mbtool `mplus` (return . (baseDir </>) =<< configTool =<< config)
+
     args <- getArgs
-    (opts, files) <- case getOpt Permute options args of
+    (opts, ofiles) <- case getOpt Permute options args of
         (o, files, []) -> return (foldl (flip id) defaultOptions { optDefaultTool = envtool } o, files)
         (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
             where header = "Usage: erebos-tester [OPTION...]"
 
-    optDefaultTool opts `seq` return ()
+    getPermissions (head $ words $ optDefaultTool opts) >>= \perms -> do
+        when (not $ executable perms) $ do
+            fail $ optDefaultTool opts <> " is not executable"
+
+    files <- if not (null ofiles)
+        then return ofiles
+        else concat <$> mapM (flip globDir1 baseDir) (maybe [] configTests config)
+    when (null files) $ fail $ "No test files"
 
     out <- startOutput $ optVerbose opts
     ok <- allM (runTest out opts) . concat =<< mapM parseTestFile files

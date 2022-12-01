@@ -33,7 +33,8 @@ executable erebos-tester
 executable erebos-tester-core
   ghc-options:         -Wall -threaded
   main-is:             Main.hs
-  other-modules:       GDB
+  other-modules:       Config
+                       GDB
                        Network
                        Output
                        Parser
@@ -57,10 +58,13 @@ executable erebos-tester-core
                        TypeFamilies
                        TypeOperators
   build-depends:       base             >=4.13 && <5,
+                       bytestring       >=0.10 && <0.11,
                        containers ^>=0.6.2.1,
                        directory ^>=1.3.6.0,
                        filepath ^>=1.4.2.1,
                        generic-deriving >=1.14 && <1.15,
+                       Glob             >=0.10 && <0.11,
+                       HsYAML           >=0.2 && <0.3,
                        lens             >=5.0 && <5.2,
                        megaparsec       >=9.0 && <10,
                        mtl ^>=2.2.2,
