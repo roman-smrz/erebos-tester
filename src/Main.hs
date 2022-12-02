@@ -41,6 +41,7 @@ import Util
 data Options = Options
     { optDefaultTool :: String
     , optProcTools :: [(ProcName, String)]
+    , optTestDir :: FilePath
     , optVerbose :: Bool
     , optTimeout :: Scientific
     , optGDB :: Bool
@@ -51,15 +52,12 @@ defaultOptions :: Options
 defaultOptions = Options
     { optDefaultTool = ""
     , optProcTools = []
+    , optTestDir = ".test"
     , optVerbose = False
     , optTimeout = 1
     , optGDB = False
     , optForce = False
     }
-
-testDir :: FilePath
-testDir = "./.test"
-
 
 data TestEnv = TestEnv
     { teOutput :: Output
@@ -142,6 +140,7 @@ atomicallyTest act = do
 
 withNetwork :: (Network -> TestRun a) -> TestRun a
 withNetwork inner = do
+    testDir <- asks $ optTestDir . teOptions . fst
     net <- liftIO $ do
         callCommand "ip link add name br0 group 1 type bridge"
         callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
@@ -340,6 +339,7 @@ evalSteps = mapM_ $ \case
 
 runTest :: Output -> Options -> Test -> IO Bool
 runTest out opts test = do
+    let testDir = optTestDir opts
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
     exists <- doesPathExist testDir
@@ -435,9 +435,14 @@ main = do
     envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool ->
         return $ fromMaybe (error "No test tool defined") $ mbtool `mplus` (return . (baseDir </>) =<< configTool =<< config)
 
+    let initOpts = defaultOptions
+            { optDefaultTool = envtool
+            , optTestDir = normalise $ baseDir </> optTestDir defaultOptions
+            }
+
     args <- getArgs
     (opts, ofiles) <- case getOpt Permute options args of
-        (o, files, []) -> return (foldl (flip id) defaultOptions { optDefaultTool = envtool } o, files)
+        (o, files, []) -> return (foldl (flip id) initOpts o, files)
         (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
             where header = "Usage: erebos-tester [OPTION...]"
 
