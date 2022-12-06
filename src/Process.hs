@@ -9,6 +9,7 @@ module Process (
 ) where
 
 import Control.Arrow
+import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad.Except
 
@@ -89,6 +90,9 @@ closeProcess p = do
             Nothing -> return ()
             Just pid -> signalProcess sig pid
 
+    liftIO $ void $ forkIO $ do
+        threadDelay 1000000
+        terminateProcess $ procHandle p
     liftIO (waitForProcess (procHandle p)) >>= \case
         ExitSuccess -> return ()
         ExitFailure code -> do
