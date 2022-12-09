@@ -158,13 +158,12 @@ withNetwork inner = do
 
     return res
 
-createNode :: Expr Network -> Maybe (TypedVarName Node) -> (Node -> TestRun a) -> TestRun a
+createNode :: Expr Network -> Either (TypedVarName Node) (TypedVarName Process) -> (Node -> TestRun a) -> TestRun a
 createNode netexpr tvname inner = do
-    let vname = fromTypedVarName <$> tvname
     net <- eval netexpr
     node <- liftIO $ do
         node <- modifyMVar (netNodes net) $ \nodes -> do
-            let nname = nextNodeName (fromMaybe (VarName "node") vname) $ map nodeName nodes
+            let nname = nextNodeName (either fromTypedVarName fromTypedVarName tvname) $ map nodeName nodes
                 ip = "192.168.0." ++ show (11 + length nodes)
                 node = Node { nodeName = nname
                             , nodeIp = T.pack ip
@@ -188,7 +187,7 @@ createNode netexpr tvname inner = do
         callOn node $ "ip link set dev lo up"
         return node
 
-    maybe id (flip withVar node) vname $ inner node
+    either (flip withVar node . fromTypedVarName) (const id) tvname $ inner node
 
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
@@ -298,13 +297,13 @@ evalSteps = mapM_ $ \case
         withVar name value $ evalSteps inner
 
     DeclNode name@(TypedVarName vname) net inner -> do
-        createNode net (Just name) $ \node -> do
+        createNode net (Left name) $ \node -> do
             withVar vname node $ evalSteps inner
 
-    Spawn (TypedVarName vname@(VarName tname)) target inner -> do
+    Spawn tvname@(TypedVarName vname@(VarName tname)) target inner -> do
         case target of
-            Left nname -> createNode RootNetwork (Just nname) go
-            Right (Left net) -> createNode net Nothing go
+            Left nname -> createNode RootNetwork (Left nname) go
+            Right (Left net) -> createNode net (Right tvname) go
             Right (Right node) -> go =<< eval node
       where
         go node = do
