@@ -39,6 +39,7 @@ executable erebos-tester-core
                        Output
                        Parser
                        Process
+                       Run.Monad
                        Test
                        Util
   other-extensions:    TemplateHaskell
