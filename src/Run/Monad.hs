@@ -2,7 +2,7 @@ module Run.Monad (
     TestRun(..),
     TestEnv(..),
     TestState(..),
-    Options(..), defaultOptions,
+    TestOptions(..), defaultTestOptions,
     Failed(..),
 ) where
 
@@ -28,7 +28,7 @@ newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (Excep
 data TestEnv = TestEnv
     { teOutput :: Output
     , teFailed :: TVar (Maybe Failed)
-    , teOptions :: Options
+    , teOptions :: TestOptions
     , teProcesses :: MVar [Process]
     , teGDB :: Maybe (MVar GDB)
     }
@@ -39,22 +39,20 @@ data TestState = TestState
     , tsNodePacketLoss :: Map NodeName Scientific
     }
 
-data Options = Options
+data TestOptions = TestOptions
     { optDefaultTool :: String
     , optProcTools :: [(ProcName, String)]
     , optTestDir :: FilePath
-    , optVerbose :: Bool
     , optTimeout :: Scientific
     , optGDB :: Bool
     , optForce :: Bool
     }
 
-defaultOptions :: Options
-defaultOptions = Options
+defaultTestOptions :: TestOptions
+defaultTestOptions = TestOptions
     { optDefaultTool = ""
     , optProcTools = []
     , optTestDir = ".test"
-    , optVerbose = False
     , optTimeout = 1
     , optGDB = False
     , optForce = False

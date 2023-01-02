@@ -271,7 +271,7 @@ evalSteps = mapM_ $ \case
         void $ liftIO $ getLine
         outClearPrompt
 
-runTest :: Output -> Options -> Test -> IO Bool
+runTest :: Output -> TestOptions -> Test -> IO Bool
 runTest out opts test = do
     let testDir = optTestDir opts
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
@@ -335,30 +335,42 @@ runTest out opts test = do
             return True
         _ -> return False
 
+data CmdlineOptions = CmdlineOptions
+    { optTest :: TestOptions
+    , optVerbose :: Bool
+    }
 
-options :: [OptDescr (Options -> Options)]
+defaultCmdlineOptions :: CmdlineOptions
+defaultCmdlineOptions = CmdlineOptions
+    { optTest = defaultTestOptions
+    , optVerbose = False
+    }
+
+options :: [OptDescr (CmdlineOptions -> CmdlineOptions)]
 options =
     [ Option ['T'] ["tool"]
-        (ReqArg (\str opts -> case break (==':') str of
-                                   (path, []) -> opts { optDefaultTool = path }
-                                   (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
+        (ReqArg (\str -> to $ \opts -> case break (==':') str of
+                                            (path, []) -> opts { optDefaultTool = path }
+                                            (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
                 ) "PATH")
         "test tool to be used"
     , Option ['v'] ["verbose"]
         (NoArg (\opts -> opts { optVerbose = True }))
         "show output of processes and successful tests"
     , Option ['t'] ["timeout"]
-        (ReqArg (\str opts -> case readMaybe str of
-                                   Just timeout -> opts { optTimeout = timeout }
-                                   Nothing -> error "timeout must be a number") "SECONDS")
+        (ReqArg (\str -> to $ \opts -> case readMaybe str of
+                                            Just timeout -> opts { optTimeout = timeout }
+                                            Nothing -> error "timeout must be a number") "SECONDS")
         "default timeout in seconds with microsecond precision"
     , Option ['g'] ["gdb"]
-        (NoArg (\opts -> opts { optGDB = True }))
+        (NoArg $ to $ \opts -> opts { optGDB = True })
         "run GDB and attach spawned processes"
     , Option ['f'] ["force"]
-        (NoArg (\opts -> opts { optForce = True }))
+        (NoArg $ to $ \opts -> opts { optForce = True })
         "remove test directory if it exists instead of stopping"
     ]
+  where
+    to f opts = opts { optTest = f (optTest opts) }
 
 main :: IO ()
 main = do
@@ -369,9 +381,11 @@ main = do
     envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool ->
         return $ fromMaybe (error "No test tool defined") $ mbtool `mplus` (return . (baseDir </>) =<< configTool =<< config)
 
-    let initOpts = defaultOptions
-            { optDefaultTool = envtool
-            , optTestDir = normalise $ baseDir </> optTestDir defaultOptions
+    let initOpts = defaultCmdlineOptions
+            { optTest = defaultTestOptions
+                { optDefaultTool = envtool
+                , optTestDir = normalise $ baseDir </> optTestDir defaultTestOptions
+                }
             }
 
     args <- getArgs
@@ -380,9 +394,9 @@ main = do
         (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
             where header = "Usage: erebos-tester [OPTION...]"
 
-    getPermissions (head $ words $ optDefaultTool opts) >>= \perms -> do
+    getPermissions (head $ words $ optDefaultTool $ optTest opts) >>= \perms -> do
         when (not $ executable perms) $ do
-            fail $ optDefaultTool opts <> " is not executable"
+            fail $ optDefaultTool (optTest opts) <> " is not executable"
 
     files <- if not (null ofiles)
         then return ofiles
@@ -390,5 +404,5 @@ main = do
     when (null files) $ fail $ "No test files"
 
     out <- startOutput $ optVerbose opts
-    ok <- allM (runTest out opts) . concat =<< mapM parseTestFile files
+    ok <- allM (runTest out $ optTest opts) . concat =<< mapM parseTestFile files
     when (not ok) exitFailure
