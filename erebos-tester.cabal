@@ -38,6 +38,7 @@ executable erebos-tester-core
                        Network
                        Output
                        Parser
+                       Paths_erebos_tester
                        Process
                        Run.Monad
                        Test

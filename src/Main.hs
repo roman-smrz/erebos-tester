@@ -28,6 +28,9 @@ import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
+import Paths_erebos_tester (version)
+import Data.Version (showVersion)
+
 import Config
 import GDB
 import Network
@@ -337,12 +340,14 @@ runTest out opts test = do
 
 data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
+    , optShowVersion :: Bool
     , optVerbose :: Bool
     }
 
 defaultCmdlineOptions :: CmdlineOptions
 defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
+    , optShowVersion = False
     , optVerbose = False
     }
 
@@ -368,6 +373,9 @@ options =
     , Option ['f'] ["force"]
         (NoArg $ to $ \opts -> opts { optForce = True })
         "remove test directory if it exists instead of stopping"
+    , Option ['V'] ["version"]
+        (NoArg $ \opts -> opts { optShowVersion = True })
+        "show version and exit"
     ]
   where
     to f opts = opts { optTest = f (optTest opts) }
@@ -393,6 +401,10 @@ main = do
         (o, files, []) -> return (foldl (flip id) initOpts o, files)
         (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
             where header = "Usage: erebos-tester [OPTION...]"
+
+    when (optShowVersion opts) $ do
+        putStrLn $ "Erebos Tester version " <> showVersion version
+        exitSuccess
 
     getPermissions (head $ words $ optDefaultTool $ optTest opts) >>= \perms -> do
         when (not $ executable perms) $ do
