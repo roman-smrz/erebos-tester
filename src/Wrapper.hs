@@ -1,5 +1,8 @@
 module Main where
 
+import GHC.Environment
+
+import System.Directory
 import System.Environment
 import System.FilePath
 import System.Linux.Namespaces
@@ -20,6 +23,18 @@ main = do
     -- needed for creating /run/netns
     callCommand "mount -t tmpfs tmpfs /run"
 
-    path <- getExecutablePath
+    epath <- takeDirectory <$> getExecutablePath -- directory containing executable
+    fpath <- map takeDirectory . take 1 <$> getFullArgs
+        -- directory used for invocation, can differ from above for symlinked executable
+
+    let dirs = concat
+            [ [ epath ]
+            , [ epath </> "../../../erebos-tester-core/build/erebos-tester-core" ]
+            , fpath
+            ]
+
     args <- getArgs
-    executeFile (takeDirectory path </> "../../../erebos-tester-core/build/erebos-tester-core/erebos-tester-core") False args Nothing
+    mapM_ (\file -> executeFile file False args Nothing) =<<
+        findExecutablesInDirectories dirs "erebos-tester-core"
+
+    fail "core binary not found"
