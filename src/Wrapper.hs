@@ -1,5 +1,7 @@
 module Main where
 
+import Control.Monad
+
 import GHC.Environment
 
 import System.Directory
@@ -24,7 +26,7 @@ main = do
     callCommand "mount -t tmpfs tmpfs /run"
 
     epath <- takeDirectory <$> getExecutablePath -- directory containing executable
-    fpath <- map takeDirectory . take 1 <$> getFullArgs
+    fpath <- map takeDirectory . filter (any isPathSeparator) . take 1 <$> getFullArgs
         -- directory used for invocation, can differ from above for symlinked executable
 
     let dirs = concat
@@ -36,5 +38,8 @@ main = do
     args <- getArgs
     mapM_ (\file -> executeFile file False args Nothing) =<<
         findExecutablesInDirectories dirs "erebos-tester-core"
+    when (null fpath) $
+        mapM_ (\file -> executeFile file False args Nothing) =<<
+            findExecutables "erebos-tester-core"
 
     fail "core binary not found"
