@@ -4,6 +4,9 @@ module Run.Monad (
     TestState(..),
     TestOptions(..), defaultTestOptions,
     Failed(..),
+
+    finally,
+    forkTest,
 ) where
 
 import Control.Concurrent
@@ -87,3 +90,18 @@ instance MonadEval TestRun where
 
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
+
+
+finally :: MonadError e m => m a -> m b -> m a
+finally act handler = do
+    x <- act `catchError` \e -> handler >> throwError e
+    void handler
+    return x
+
+forkTest :: TestRun () -> TestRun ()
+forkTest act = do
+    tenv <- ask
+    void $ liftIO $ forkIO $ do
+        runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
+            Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
+            Right () -> return ()

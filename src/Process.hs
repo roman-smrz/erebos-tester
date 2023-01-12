@@ -5,13 +5,16 @@ module Process (
     send,
     outProc,
     lineReadingLoop,
+    spawnOn,
     closeProcess,
+    withProcess,
 ) where
 
 import Control.Arrow
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad.Except
+import Control.Monad.Reader
 
 import Data.Function
 import Data.Text (Text)
@@ -24,6 +27,7 @@ import System.IO.Error
 import System.Posix.Signals
 import System.Process
 
+import {-# SOURCE #-} GDB
 import Network
 import Output
 import Run.Monad
@@ -82,6 +86,38 @@ lineReadingLoop process h act =
             act line
             lineReadingLoop process h act
 
+spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
+spawnOn target pname killWith cmd = do
+    let prefix = either (const "") (\node -> "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" ") target
+    (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
+        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
+        , env = Just [("EREBOS_DIR", either netDir nodeDir target)]
+        }
+    pout <- liftIO $ newTVarIO []
+
+    let process = Process
+            { procName = pname
+            , procHandle = handle
+            , procStdin = hin
+            , procOutput = pout
+            , procKillWith = killWith
+            , procNode = either (const undefined) id target
+            }
+
+    forkTest $ lineReadingLoop process hout $ \line -> do
+        outProc OutputChildStdout process line
+        liftIO $ atomically $ modifyTVar pout (++[line])
+    forkTest $ lineReadingLoop process herr $ \line -> do
+        case pname of
+             ProcNameTcpdump -> return ()
+             _ -> outProc OutputChildStderr process line
+
+    asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= \case
+        Just gdb | ProcName _ <- pname -> addInferior gdb process
+        _ -> return ()
+
+    return process
+
 closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Process -> m ()
 closeProcess p = do
     liftIO $ hClose $ procStdin p
@@ -99,3 +135,15 @@ closeProcess p = do
         ExitFailure code -> do
             outProc OutputChildFail p $ T.pack $ "exit code: " ++ show code
             throwError Failed
+
+withProcess :: Either Network Node -> ProcName -> Maybe Signal -> String -> (Process -> TestRun a) -> TestRun a
+withProcess target pname killWith cmd inner = do
+    procVar <- asks $ teProcesses . fst
+
+    process <- spawnOn target pname killWith cmd
+    liftIO $ modifyMVar_ procVar $ return . (process:)
+
+    inner process `finally` do
+        ps <- liftIO $ takeMVar procVar
+        closeProcess process `finally` do
+            liftIO $ putMVar procVar $ filter (/=process) ps

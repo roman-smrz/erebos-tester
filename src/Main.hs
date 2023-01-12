@@ -57,14 +57,6 @@ withNodePacketLoss node loss inner = do
         liftIO $ callOn node $ "tc qdisc replace dev veth0 root netem loss " ++ show (tl * 100) ++ "%"
         liftIO $ putStrLn $ "tc qdisc replace dev veth0 root netem loss " ++ show (tl * 100) ++ "%"
 
-forkTest :: TestRun () -> TestRun ()
-forkTest act = do
-    tenv <- ask
-    void $ liftIO $ forkIO $ do
-        runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
-            Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
-            Right () -> return ()
-
 atomicallyTest :: STM a -> TestRun a
 atomicallyTest act = do
     failedVar <- asks $ teFailed . fst
@@ -86,7 +78,7 @@ withNetwork inner = do
         callCommand "ip link set dev lo up"
         Network <$> newMVar [] <*> pure testDir
 
-    res <- spawnOn (Left net) (ProcNameTcpdump) (Just softwareTermination)
+    res <- withProcess (Left net) (ProcNameTcpdump) (Just softwareTermination)
         ("tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root") $ \_ -> do
         local (fmap $ \s -> s { tsNetwork = net }) $ inner net
 
@@ -129,44 +121,6 @@ createNode netexpr tvname inner = do
 
 callOn :: Node -> String -> IO ()
 callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
-
-spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> (Process -> TestRun a) -> TestRun a
-spawnOn target pname killWith cmd inner = do
-    let prefix = either (const "") (\node -> "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" ") target
-    (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
-        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
-        , env = Just [("EREBOS_DIR", either netDir nodeDir target)]
-        }
-    pout <- liftIO $ newTVarIO []
-
-    let process = Process
-            { procName = pname
-            , procHandle = handle
-            , procStdin = hin
-            , procOutput = pout
-            , procKillWith = killWith
-            , procNode = either (const undefined) id target
-            }
-
-    forkTest $ lineReadingLoop process hout $ \line -> do
-        outProc OutputChildStdout process line
-        liftIO $ atomically $ modifyTVar pout (++[line])
-    forkTest $ lineReadingLoop process herr $ \line -> do
-        case pname of
-             ProcNameTcpdump -> return ()
-             _ -> outProc OutputChildStderr process line
-
-    asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= \case
-        Just gdb | ProcName _ <- pname -> addInferior gdb process
-        _ -> return ()
-
-    procVar <- asks $ teProcesses . fst
-    liftIO $ modifyMVar_ procVar $ return . (process:)
-
-    inner process `finally` do
-        ps <- liftIO $ takeMVar procVar
-        closeProcess process `finally` do
-            liftIO $ putMVar procVar $ filter (/=process) ps
 
 tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
 tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just ((x, capture), xs)
@@ -218,12 +172,6 @@ testStepGuard sline expr = do
     x <- eval expr
     when (not x) $ exprFailed (T.pack "guard") sline Nothing expr
 
-finally :: MonadError e m => m a -> m b -> m a
-finally act handler = do
-    x <- act `catchError` \e -> handler >> throwError e
-    void handler
-    return x
-
 evalSteps :: [TestStep] -> TestRun ()
 evalSteps = mapM_ $ \case
     Let (SourceLine sline) name expr inner -> do
@@ -248,7 +196,7 @@ evalSteps = mapM_ $ \case
             opts <- asks $ teOptions . fst
             let pname = ProcName tname
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-            spawnOn (Right node) pname Nothing tool $ \p -> do
+            withProcess (Right node) pname Nothing tool $ \p -> do
                 withVar vname p (evalSteps inner)
 
     Send pname expr -> do
