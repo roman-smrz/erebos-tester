@@ -98,6 +98,7 @@ gdbStart onCrash = do
 
     gdbCommand gdb "-gdb-set schedule-multiple on"
     gdbCommand gdb "-gdb-set mi-async on"
+    gdbCommand gdb "-gdb-set non-stop on"
     gdbCommand gdb "-gdb-set print symbol-loading off"
 
     return gdb
@@ -115,7 +116,14 @@ gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . erro
                 | Just (MiString "signal-received") <- lookup "reason" params
                 , Just (MiString tid) <- lookup "thread-id" params
                 , Just inf <- find (elem tid . infThreads) infs
-                -> liftIO $ gdbOnCrash gdb $ infProcess inf
+                -> do
+                    -- It is needed to switch thread manually in non-stop mode,
+                    -- fork to avoid blocking further input and reply processing.
+                    out <- getOutput
+                    void $ liftIO $ forkIO $ do
+                        flip runReaderT out $ do
+                            gdbCommand gdb $ "-thread-select " <> tid
+                        gdbOnCrash gdb $ infProcess inf
             _ -> return ()
         StatusAsyncOutput cls params -> outProc OutputChildInfo (gdbProcess gdb) $ "status: " <> cls <> " " <> T.pack (show params)
         NotifyAsyncOutput cls params -> case cls of
