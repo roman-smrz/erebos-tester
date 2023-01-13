@@ -177,13 +177,14 @@ gdbCommand gdb cmd = do
 gdbSession :: MonadOutput m => GDB -> m ()
 gdbSession gdb = do
     outPrompt "gdb> "
-    loop
+    loop ""
     outClearPrompt
   where
-    loop = liftIO (catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e)) >>= \case
+    loop prev = liftIO (catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e)) >>= \case
         Just line -> do
-            gdbCommand gdb ("-interpreter-exec console \"" <> line <> "\"")
-            loop
+            let cmd = if T.null line then prev else line
+            gdbCommand gdb ("-interpreter-exec console \"" <> cmd <> "\"")
+            loop cmd
         Nothing -> return ()
 
 
