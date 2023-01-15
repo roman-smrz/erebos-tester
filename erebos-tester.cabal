@@ -67,6 +67,7 @@ executable erebos-tester-core
                        filepath ^>=1.4.2.1,
                        generic-deriving >=1.14 && <1.15,
                        Glob             >=0.10 && <0.11,
+                       haskeline        >=0.8 && <0.9,
                        HsYAML           >=0.2 && <0.3,
                        lens             >=5.0 && <5.2,
                        megaparsec       >=9.0 && <10,

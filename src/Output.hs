@@ -5,7 +5,7 @@ module Output (
     MonadOutput(..),
     startOutput,
     outLine,
-    outPrompt, outClearPrompt,
+    outPromptGetLine,
 ) where
 
 import Control.Concurrent.MVar
@@ -14,11 +14,10 @@ import Control.Monad.Reader
 
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 
-import System.IO
+import System.Console.Haskeline
 
 data Output = Output
     { outState :: MVar OutputState
@@ -31,6 +30,7 @@ data OutputConfig = OutputConfig
 
 data OutputState = OutputState
     { outCurPrompt :: Maybe Text
+    , outPrint :: TL.Text -> IO ()
     }
 
 data OutputType = OutputChildStdout
@@ -51,7 +51,7 @@ instance MonadIO m => MonadOutput (ReaderT Output m) where
 
 startOutput :: Bool -> IO Output
 startOutput verbose = Output
-    <$> newMVar OutputState { outCurPrompt = Nothing }
+    <$> newMVar OutputState { outCurPrompt = Nothing, outPrint = TL.putStrLn }
     <*> pure OutputConfig { outVerbose = verbose }
 
 outColor :: OutputType -> Text
@@ -89,14 +89,6 @@ printWhenQuiet = \case
     OutputAlways -> True
     _ -> False
 
-clearPrompt :: OutputState -> IO ()
-clearPrompt OutputState { outCurPrompt = Just _ } = T.putStr $ T.pack "\ESC[2K\r"
-clearPrompt _ = return ()
-
-showPrompt :: OutputState -> IO ()
-showPrompt OutputState { outCurPrompt = Just p } = T.putStr p >> hFlush stdout
-showPrompt _ = return ()
-
 ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
 ioWithOutput act = liftIO . act =<< getOutput
 
@@ -104,23 +96,21 @@ outLine :: MonadOutput m => OutputType -> Maybe Text -> Text -> m ()
 outLine otype prompt line = ioWithOutput $ \out ->
     when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
         withMVar (outState out) $ \st -> do
-            clearPrompt st
-            TL.putStrLn $ TL.fromChunks
+            outPrint st $ TL.fromChunks
                 [ T.pack "\ESC[", outColor otype, T.pack "m"
                 , maybe "" (<> outSign otype <> outArr otype <> " ") prompt
                 , line
                 , T.pack "\ESC[0m"
                 ]
-            showPrompt st
 
-outPrompt :: MonadOutput m => Text -> m ()
-outPrompt p = ioWithOutput $ \out -> modifyMVar_ (outState out) $ \st -> do
-    clearPrompt st
-    let st' = st { outCurPrompt = Just p }
-    showPrompt st'
-    return st'
-
-outClearPrompt :: MonadOutput m => m ()
-outClearPrompt = ioWithOutput $ \out -> modifyMVar_ (outState out) $ \st -> do
-    clearPrompt st
-    return st { outCurPrompt = Nothing }
+outPromptGetLine :: MonadOutput m => Text -> m (Maybe Text)
+outPromptGetLine prompt = ioWithOutput $ \out -> do
+    st <- takeMVar (outState out)
+    (x, st') <- runInputT defaultSettings $ do
+        p <- getExternalPrint
+        liftIO $ putMVar (outState out) st { outPrint = p . TL.unpack . (<>"\n") }
+        x <- getInputLine $ T.unpack prompt
+        st' <- liftIO $ takeMVar (outState out)
+        return (x, st' { outPrint = outPrint st })
+    putMVar (outState out) st'
+    return $ fmap T.pack x

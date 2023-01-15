@@ -218,9 +218,7 @@ evalSteps = mapM_ $ \case
         withNodePacketLoss n l $ evalSteps inner
 
     Wait -> do
-        outPrompt $ T.pack "Waiting..."
-        void $ liftIO $ getLine
-        outClearPrompt
+        void $ outPromptGetLine "Waiting..."
 
 runTest :: Output -> TestOptions -> Test -> IO Bool
 runTest out opts test = do

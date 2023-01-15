@@ -17,13 +17,11 @@ import Data.Char
 import Data.List
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 import Data.Void
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 
-import System.IO.Error
 import System.Process
 
 import Output
@@ -175,12 +173,9 @@ gdbCommand gdb cmd = do
         (Exit, _) -> outProc OutputError (gdbProcess gdb) "result exit"
 
 gdbSession :: MonadOutput m => GDB -> m ()
-gdbSession gdb = do
-    outPrompt "gdb> "
-    loop ""
-    outClearPrompt
+gdbSession gdb = loop ""
   where
-    loop prev = liftIO (catchIOError (Just <$> T.getLine) (\e -> if isEOFError e then return Nothing else ioError e)) >>= \case
+    loop prev = outPromptGetLine "gdb> " >>= \case
         Just line -> do
             let cmd = if T.null line then prev else line
             gdbCommand gdb ("-interpreter-exec console \"" <> cmd <> "\"")
