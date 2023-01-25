@@ -22,6 +22,7 @@ import Data.Void
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 
+import System.Console.Haskeline.Completion
 import System.Process
 
 import Output
@@ -163,10 +164,14 @@ addInferior gdb process = do
             gdbCommand gdb $ "-target-attach --thread-group " <> tgid <> " " <> T.pack (show pid)
             gdbCommand gdb $ "-exec-continue --thread-group " <> tgid
 
+gdbCommandRes :: MonadIO m => GDB -> Text -> m (ResultClass, [(Text, MiValue)])
+gdbCommandRes gdb cmd = do
+    send (gdbProcess gdb) cmd
+    liftIO (takeMVar (gdbResult gdb))
+
 gdbCommand :: MonadOutput m => GDB -> Text -> m ()
 gdbCommand gdb cmd = do
-    send (gdbProcess gdb) cmd
-    liftIO (takeMVar (gdbResult gdb)) >>= \case
+    gdbCommandRes gdb cmd >>= \case
         (Done, _) -> return ()
         (Connected, _) -> outProc OutputChildInfo (gdbProcess gdb) "result connected"
         (Error, _) -> outProc OutputError (gdbProcess gdb) $ "command error: " <> cmd
@@ -175,12 +180,20 @@ gdbCommand gdb cmd = do
 gdbSession :: MonadOutput m => GDB -> m ()
 gdbSession gdb = loop ""
   where
-    loop prev = outPromptGetLine "gdb> " >>= \case
+    loop prev = outPromptGetLineCompletion (gdbCompletion gdb) "gdb> " >>= \case
         Just line -> do
             let cmd = if T.null line then prev else line
             gdbCommand gdb ("-interpreter-exec console \"" <> cmd <> "\"")
             loop cmd
         Nothing -> return ()
+
+gdbCompletion :: GDB -> CompletionFunc IO
+gdbCompletion gdb (revcmd, _) = do
+    gdbCommandRes gdb ("-complete " <> T.pack (show (reverse revcmd))) >>= \case
+        (Done, resp)
+            | Just (MiList matches) <- lookup "matches" resp -> do
+                return ("", map (\(MiString m) -> Completion (T.unpack m) (T.unpack m) False) matches)
+        _ -> return ("", [])
 
 
 type MiParser = ParsecT Void MiStream Identity
@@ -199,7 +212,7 @@ miOutputRecord = choice
     ]
 
 miResultRecord :: MiParser MiRecord
-miResultRecord = char '^' >> ResultRecord <$> resultClass <*> many result
+miResultRecord = char '^' >> ResultRecord <$> resultClass <*> many (char ',' *> result)
 
 miExecAsync, miStatusAsync, miNotifyAsync :: MiParser MiRecord
 miExecAsync = char '*' >> ExecAsyncOutput <$> miString <*> many (char ',' *> result)

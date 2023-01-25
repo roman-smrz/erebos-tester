@@ -6,6 +6,7 @@ module Output (
     startOutput,
     outLine,
     outPromptGetLine,
+    outPromptGetLineCompletion,
 ) where
 
 import Control.Concurrent.MVar
@@ -18,6 +19,7 @@ import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 
 import System.Console.Haskeline
+import System.Console.Haskeline.History
 
 data Output = Output
     { outState :: MVar OutputState
@@ -29,8 +31,8 @@ data OutputConfig = OutputConfig
     }
 
 data OutputState = OutputState
-    { outCurPrompt :: Maybe Text
-    , outPrint :: TL.Text -> IO ()
+    { outPrint :: TL.Text -> IO ()
+    , outHistory :: History
     }
 
 data OutputType = OutputChildStdout
@@ -51,7 +53,7 @@ instance MonadIO m => MonadOutput (ReaderT Output m) where
 
 startOutput :: Bool -> IO Output
 startOutput verbose = Output
-    <$> newMVar OutputState { outCurPrompt = Nothing, outPrint = TL.putStrLn }
+    <$> newMVar OutputState { outPrint = TL.putStrLn, outHistory = emptyHistory }
     <*> pure OutputConfig { outVerbose = verbose }
 
 outColor :: OutputType -> Text
@@ -104,13 +106,18 @@ outLine otype prompt line = ioWithOutput $ \out ->
                 ]
 
 outPromptGetLine :: MonadOutput m => Text -> m (Maybe Text)
-outPromptGetLine prompt = ioWithOutput $ \out -> do
+outPromptGetLine = outPromptGetLineCompletion noCompletion
+
+outPromptGetLineCompletion :: MonadOutput m => CompletionFunc IO -> Text -> m (Maybe Text)
+outPromptGetLineCompletion compl prompt = ioWithOutput $ \out -> do
     st <- takeMVar (outState out)
-    (x, st') <- runInputT defaultSettings $ do
+    (x, st') <- runInputT (setComplete compl defaultSettings) $ do
         p <- getExternalPrint
+        putHistory $ outHistory st
         liftIO $ putMVar (outState out) st { outPrint = p . TL.unpack . (<>"\n") }
         x <- getInputLine $ T.unpack prompt
         st' <- liftIO $ takeMVar (outState out)
-        return (x, st' { outPrint = outPrint st })
+        hist' <- getHistory
+        return (x, st' { outPrint = outPrint st, outHistory = hist' })
     putMVar (outState out) st'
     return $ fmap T.pack x
