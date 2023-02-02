@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module GDB (
     GDB, gdbProcess,
     gdbStart,

@@ -161,5 +161,5 @@ regexSource (RegexPart src) = src
 regexSource (RegexString str) = T.concatMap escapeChar str
   where
     escapeChar c | isAlphaNum c = T.singleton c
-                 | c `elem` "`'<>" = T.singleton c
+                 | c `elem` ['`', '\'', '<', '>'] = T.singleton c
                  | otherwise = T.pack ['\\', c]

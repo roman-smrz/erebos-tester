@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Output (
     Output, OutputType(..),
     MonadOutput(..),
