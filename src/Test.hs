@@ -96,6 +96,11 @@ instance ExprType Regex where
     textExprValue _ = T.pack "<regex>"
     emptyVarValue = either error id $ regexCompile T.empty
 
+instance ExprType a => ExprType [a] where
+    textExprType _ = "[" <> textExprType @a Proxy <> "]"
+    textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
+    emptyVarValue = []
+
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
 data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)

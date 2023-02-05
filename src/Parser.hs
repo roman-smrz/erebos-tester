@@ -208,6 +208,19 @@ regex = label "regular expression" $ lexeme $ do
     _ <- eval expr -- test regex parsing with empty variables
     return expr
 
+list :: TestParser SomeExpr
+list = label "list" $ do
+    symbol "["
+    SomeExpr x <- someExpr
+    choice
+        [do symbol "]"
+            return $ SomeExpr $ UnOp (:[]) x
+        ,do symbol ","
+            xs <- listOf typedExpr
+            symbol "]"
+            return $ SomeExpr $ foldr (BinOp (:)) (Literal []) (x:xs)
+        ]
+
 data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
 
 data SomeUnOp = forall a b. (ExprType a, ExprType b) => SomeUnOp (a -> b)
@@ -310,6 +323,7 @@ someExpr = join inner <?> "expression"
         [ return <$> numberLiteral
         , return . SomeExpr <$> quotedString
         , return . SomeExpr <$> regex
+        , return <$> list
         ]
 
     variable = label "variable" $ do
