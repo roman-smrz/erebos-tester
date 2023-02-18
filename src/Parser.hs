@@ -273,11 +273,13 @@ someExpr = join inner <?> "expression"
                              , SomeBinOp ((-) @Scientific)
                              ]
               ]
-            , [ binary "==" $ [ SomeBinOp ((==) @Integer)
+            , [ binary' "==" (\op xs ys -> length xs == length ys && and (zipWith op xs ys)) $
+                              [ SomeBinOp ((==) @Integer)
                               , SomeBinOp ((==) @Scientific)
                               , SomeBinOp ((==) @Text)
                               ]
-              , binary "/=" $ [ SomeBinOp ((/=) @Integer)
+              , binary' "/=" (\op xs ys -> length xs /= length ys || or  (zipWith op xs ys)) $
+                              [ SomeBinOp ((/=) @Integer)
                               , SomeBinOp ((/=) @Scientific)
                               , SomeBinOp ((/=) @Text)
                               ]
@@ -295,15 +297,42 @@ someExpr = join inner <?> "expression"
             maybe err return $ listToMaybe $ catMaybes $ map (\(SomeUnOp op) -> SomeExpr <$> applyUnOp op e) ops
 
     binary :: String -> [SomeBinOp] -> Operator TestParser (TestParser SomeExpr)
-    binary name ops = InfixL $ do
+    binary name = binary' name (undefined :: forall a b. (a -> b -> Void) -> [a] -> [b] -> Integer)
+      -- use 'Void' that can never match actually used type to disable recursion
+
+    binary' :: forall c c'. (Typeable c, ExprType c')
+            => String
+            -> (forall a b. (a -> b -> c) -> [a] -> [b] -> c')
+            -> [SomeBinOp]
+            -> Operator TestParser (TestParser SomeExpr)
+    binary' name listmap ops = InfixL $ do
         off <- stateOffset <$> getParserState
         void $ osymbol name
+
         return $ \p q -> do
             SomeExpr e <- p
             SomeExpr f <- q
+
+            let eqT' :: forall r s t. (Typeable r, Typeable s, Typeable t) => (r -> s -> t) -> Maybe ((r -> s -> t) :~: (r -> s -> c))
+                eqT' _ = eqT
+
+            let proxyOf :: proxy a -> Proxy a
+                proxyOf _ = Proxy
+
+            let tryop :: forall a b d sa sb.
+                    (ExprType a, ExprType b, ExprType d, ExprType sa, ExprType sb) =>
+                    (a -> b -> d) -> Proxy sa -> Proxy sb -> Maybe SomeExpr
+                tryop op pe pf = msum
+                    [ SomeExpr <$> applyBinOp op e f
+                    , do Refl <- eqT' op
+                         ExprListUnpacker _ une <- exprListUnpacker pe
+                         ExprListUnpacker _ unf <- exprListUnpacker pf
+                         tryop (listmap op) (une pe) (unf pf)
+                    ]
+
             let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
                     [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "' and '", textExprType f, T.pack "'"]
-            maybe err return $ listToMaybe $ catMaybes $ map (\(SomeBinOp op) -> SomeExpr <$> applyBinOp op e f) ops
+            maybe err return $ listToMaybe $ catMaybes $ map (\(SomeBinOp op) -> tryop op (proxyOf e) (proxyOf f)) ops
 
     recordSelector :: Operator TestParser (TestParser SomeExpr)
     recordSelector = Postfix $ fmap (foldl1 (flip (.))) $ some $ do

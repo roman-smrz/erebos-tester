@@ -8,6 +8,7 @@ module Test (
     ExprType(..),
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
     RecordSelector(..),
+    ExprListUnpacker(..),
     Expr(..), eval, gatherVars,
 
     Regex(RegexPart, RegexString), regexMatch,
@@ -70,6 +71,9 @@ class Typeable a => ExprType a where
     recordMembers :: [(Text, RecordSelector a)]
     recordMembers = []
 
+    exprListUnpacker :: proxy a -> Maybe (ExprListUnpacker a)
+    exprListUnpacker _ = Nothing
+
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
     textExprValue x = T.pack (show x)
@@ -101,6 +105,8 @@ instance ExprType a => ExprType [a] where
     textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
     emptyVarValue = []
 
+    exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
+
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
 data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
@@ -111,6 +117,8 @@ fromSomeVarValue name (SomeVarValue value) = maybe (fail err) return $ cast valu
 
 textSomeVarValue :: SomeVarValue -> Text
 textSomeVarValue (SomeVarValue value) = textExprValue value
+
+data ExprListUnpacker a = forall e. ExprType e => ExprListUnpacker (a -> [e]) (Proxy a -> Proxy e)
 
 
 data Expr a where
