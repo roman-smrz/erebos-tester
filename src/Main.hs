@@ -172,13 +172,22 @@ testStepGuard sline expr = do
 
 evalSteps :: [TestStep] -> TestRun ()
 evalSteps = mapM_ $ \case
-    Let (SourceLine sline) name expr inner -> do
+    Let (SourceLine sline) (TypedVarName name) expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
             outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
             throwError Failed
         value <- eval expr
         withVar name value $ evalSteps inner
+
+    For (SourceLine sline) (TypedVarName name) expr inner -> do
+        cur <- asks (lookup name . tsVars . snd)
+        when (isJust cur) $ do
+            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+            throwError Failed
+        value <- eval expr
+        forM_ value $ \i -> do
+            withVar name i $ evalSteps inner
 
     DeclNode name@(TypedVarName vname) net inner -> do
         createNode net (Left name) $ \node -> do

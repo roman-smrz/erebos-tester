@@ -387,13 +387,38 @@ letStatement = do
     off <- stateOffset <$> getParserState
     name <- varName
     osymbol "="
-    SomeExpr (e :: Expr a) <- someExpr
+    SomeExpr e <- someExpr
 
     localState $ do
-        addVarName off $ TypedVarName @a name
+        let tname = TypedVarName name
+        addVarName off tname
         void $ eol
         body <- testBlock indent
-        return [Let line name e body]
+        return [Let line tname e body]
+
+forStatement :: TestParser [TestStep]
+forStatement = do
+    line <- getSourceLine
+    ref <- L.indentLevel
+    wsymbol "for"
+    voff <- stateOffset <$> getParserState
+    name <- varName
+
+    wsymbol "in"
+    loff <- stateOffset <$> getParserState
+    SomeExpr e <- someExpr
+    let err = parseError $ FancyError loff $ S.singleton $ ErrorFail $ T.unpack $
+            "expected a list, expression has type '" <> textExprType e <> "'"
+    ExprListUnpacker unpack _ <- maybe err return $ exprListUnpacker e
+
+    symbol ":"
+    scn
+    indent <- L.indentGuard scn GT ref
+    localState $ do
+        let tname = TypedVarName name
+        addVarName voff tname
+        body <- testBlock indent
+        return [For line tname (UnOp unpack e) body]
 
 class (Typeable a, Typeable (ParamRep a)) => ParamType a where
     type ParamRep a :: Type
@@ -634,6 +659,7 @@ testBlock indent = concat <$> go
 testStep :: TestParser [TestStep]
 testStep = choice
     [ letStatement
+    , forStatement
     , testLocal
     , testWith
     , testNode

@@ -33,7 +33,8 @@ data Test = Test
     , testSteps :: [TestStep]
     }
 
-data TestStep = forall a. ExprType a => Let SourceLine VarName (Expr a) [TestStep]
+data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) [TestStep]
+              | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [a]) [TestStep]
               | DeclNode (TypedVarName Node) (Expr Network) [TestStep]
               | Spawn (TypedVarName Process) (Either (TypedVarName Node) (Either (Expr Network) (Expr Node))) [TestStep]
               | Send (Expr Process) (Expr Text)
