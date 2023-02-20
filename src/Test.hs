@@ -9,6 +9,7 @@ module Test (
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
     RecordSelector(..),
     ExprListUnpacker(..),
+    ExprEnumerator(..),
     Expr(..), eval, gatherVars,
 
     Regex(RegexPart, RegexString), regexMatch,
@@ -75,10 +76,15 @@ class Typeable a => ExprType a where
     exprListUnpacker :: proxy a -> Maybe (ExprListUnpacker a)
     exprListUnpacker _ = Nothing
 
+    exprEnumerator :: proxy a -> Maybe (ExprEnumerator a)
+    exprEnumerator _ = Nothing
+
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
     textExprValue x = T.pack (show x)
     emptyVarValue = 0
+
+    exprEnumerator _ = Just $ ExprEnumerator enumFromTo enumFromThenTo
 
 instance ExprType Scientific where
     textExprType _ = T.pack "number"
@@ -121,10 +127,13 @@ textSomeVarValue (SomeVarValue value) = textExprValue value
 
 data ExprListUnpacker a = forall e. ExprType e => ExprListUnpacker (a -> [e]) (Proxy a -> Proxy e)
 
+data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
+
 
 data Expr a where
     Variable :: ExprType a => VarName -> Expr a
     Literal :: ExprType a => a -> Expr a
+    App :: Expr (a -> b) -> Expr a -> Expr b
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Regex] -> Expr Regex
     UnOp :: (b -> a) -> Expr b -> Expr a
@@ -134,6 +143,7 @@ data Expr a where
 eval :: MonadEval m => Expr a -> m a
 eval (Variable name) = fromSomeVarValue name =<< lookupVar name
 eval (Literal value) = return value
+eval (App f x) = eval f <*> eval x
 eval (Concat xs) = T.concat <$> mapM eval xs
 eval (Regex xs) = mapM eval xs >>= \case
     [re@RegexCompiled {}] -> return re
@@ -150,6 +160,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
     helper :: forall b. Expr b -> m [(VarName, SomeVarValue)]
     helper (Variable var) = (:[]) . (var,) <$> lookupVar var
     helper (Literal _) = return []
+    helper (App f x) = (++) <$> helper f <*> helper x
     helper (Concat es) = concat <$> mapM helper es
     helper (Regex es) = concat <$> mapM helper es
     helper (UnOp _ e) = helper e

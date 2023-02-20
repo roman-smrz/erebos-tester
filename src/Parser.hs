@@ -75,7 +75,7 @@ osymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy operatorChar) 
 wsymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy wordChar) <* sc
 
 operatorChar :: (MonadParsec e s m, Token s ~ Char) => m (Token s)
-operatorChar = satisfy $ (`elem` ['+', '-', '*', '/', '='])
+operatorChar = satisfy $ (`elem` ['.', '+', '-', '*', '/', '='])
 {-# INLINE operatorChar #-}
 
 localState :: TestParser a -> TestParser a
@@ -212,13 +212,36 @@ list :: TestParser SomeExpr
 list = label "list" $ do
     symbol "["
     SomeExpr x <- someExpr
+
+    let enumErr off = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+            "list range enumeration not defined for '" <> textExprType x <> "'"
     choice
         [do symbol "]"
             return $ SomeExpr $ UnOp (:[]) x
-        ,do symbol ","
-            xs <- listOf typedExpr
+
+        ,do off <- stateOffset <$> getParserState
+            osymbol ".."
+            ExprEnumerator fromTo _ <- maybe (enumErr off) return $ exprEnumerator x
+            y <- typedExpr
             symbol "]"
-            return $ SomeExpr $ foldr (BinOp (:)) (Literal []) (x:xs)
+            return $ SomeExpr $ UnOp fromTo x `App` y
+
+        ,do symbol ","
+            y <- typedExpr
+
+            choice
+                [do off <- stateOffset <$> getParserState
+                    osymbol ".."
+                    ExprEnumerator _ fromThenTo <- maybe (enumErr off) return $ exprEnumerator x
+                    z <- typedExpr
+                    symbol "]"
+                    return $ SomeExpr $ UnOp fromThenTo x `App` y `App` z
+
+                ,do symbol ","
+                    xs <- listOf typedExpr
+                    symbol "]"
+                    return $ SomeExpr $ foldr (BinOp (:)) (Literal []) (x:y:xs)
+                ]
         ]
 
 data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
