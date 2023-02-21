@@ -132,17 +132,22 @@ data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 
 data Expr a where
     Variable :: ExprType a => VarName -> Expr a
-    Literal :: ExprType a => a -> Expr a
+    Pure :: a -> Expr a
     App :: Expr (a -> b) -> Expr a -> Expr b
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Regex] -> Expr Regex
-    UnOp :: (b -> a) -> Expr b -> Expr a
-    BinOp :: (b -> c -> a) -> Expr b -> Expr c -> Expr a
     RootNetwork :: Expr Network
+
+instance Functor Expr where
+    fmap f x = Pure f `App` x
+
+instance Applicative Expr where
+    pure = Pure
+    (<*>) = App
 
 eval :: MonadEval m => Expr a -> m a
 eval (Variable name) = fromSomeVarValue name =<< lookupVar name
-eval (Literal value) = return value
+eval (Pure value) = return value
 eval (App f x) = eval f <*> eval x
 eval (Concat xs) = T.concat <$> mapM eval xs
 eval (Regex xs) = mapM eval xs >>= \case
@@ -150,8 +155,6 @@ eval (Regex xs) = mapM eval xs >>= \case
     parts -> case regexCompile $ T.concat $ map regexSource parts of
         Left err -> fail err
         Right re -> return re
-eval (UnOp f x) = f <$> eval x
-eval (BinOp f x y) = f <$> eval x <*> eval y
 eval (RootNetwork) = rootNetwork
 
 gatherVars :: forall a m. MonadEval m => Expr a -> m [(VarName, SomeVarValue)]
@@ -159,12 +162,10 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m [(VarName, SomeVarValue)]
     helper (Variable var) = (:[]) . (var,) <$> lookupVar var
-    helper (Literal _) = return []
+    helper (Pure _) = return []
     helper (App f x) = (++) <$> helper f <*> helper x
     helper (Concat es) = concat <$> mapM helper es
     helper (Regex es) = concat <$> mapM helper es
-    helper (UnOp _ e) = helper e
-    helper (BinOp _ e f) = (++) <$> helper e <*> helper f
     helper (RootNetwork) = return []
 
 

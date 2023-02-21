@@ -6,6 +6,7 @@ module Parser (
     parseTestFile,
 ) where
 
+import Control.Applicative (liftA2)
 import Control.Monad.Combinators.Expr
 import Control.Monad.Identity
 import Control.Monad.State
@@ -153,10 +154,10 @@ numberLiteral :: TestParser SomeExpr
 numberLiteral = label "number" $ lexeme $ do
     x <- L.scientific
     choice
-        [ return (SomeExpr $ Literal (x / 100)) <* void (char ('%'))
+        [ return (SomeExpr $ Pure (x / 100)) <* void (char ('%'))
         , if base10Exponent x == 0
-             then return $ SomeExpr $ Literal (coefficient x)
-             else return $ SomeExpr $ Literal x
+             then return $ SomeExpr $ Pure (coefficient x)
+             else return $ SomeExpr $ Pure x
         ]
 
 quotedString :: TestParser (Expr Text)
@@ -164,7 +165,7 @@ quotedString = label "string" $ lexeme $ do
     void $ char '"'
     let inner = choice
             [ char '"' >> return []
-            , takeWhile1P Nothing (`notElem` ['\"', '\\', '$']) >>= \s -> (Literal (TL.toStrict s):) <$> inner
+            , takeWhile1P Nothing (`notElem` ['\"', '\\', '$']) >>= \s -> (Pure (TL.toStrict s):) <$> inner
             ,do void $ char '\\'
                 c <- choice
                     [ char '\\' >> return '\\'
@@ -174,11 +175,11 @@ quotedString = label "string" $ lexeme $ do
                     , char 'r' >> return '\r'
                     , char 't' >> return '\t'
                     ]
-                (Literal (T.singleton c) :) <$> inner
+                (Pure (T.singleton c) :) <$> inner
             ,do e <- stringExpansion (T.pack "string") $ \e ->
                     [ cast e
-                    , UnOp (T.pack . show @Integer) <$> cast e
-                    , UnOp (T.pack . show @Scientific) <$> cast e
+                    , fmap (T.pack . show @Integer) <$> cast e
+                    , fmap (T.pack . show @Scientific) <$> cast e
                     ]
                 (e:) <$> inner
             ]
@@ -189,18 +190,18 @@ regex = label "regular expression" $ lexeme $ do
     void $ char '/'
     let inner = choice
             [ char '/' >> return []
-            , takeWhile1P Nothing (`notElem` ['/', '\\', '$']) >>= \s -> (Literal (RegexPart (TL.toStrict s)) :) <$> inner
+            , takeWhile1P Nothing (`notElem` ['/', '\\', '$']) >>= \s -> (Pure (RegexPart (TL.toStrict s)) :) <$> inner
             ,do void $ char '\\'
                 s <- choice
-                    [ char '/' >> return (Literal $ RegexPart $ T.singleton '/')
-                    , anySingle >>= \c -> return (Literal $ RegexPart $ T.pack ['\\', c])
+                    [ char '/' >> return (Pure $ RegexPart $ T.singleton '/')
+                    , anySingle >>= \c -> return (Pure $ RegexPart $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
             ,do e <- stringExpansion (T.pack "regex") $ \e ->
                     [ cast e
-                    , UnOp RegexString <$> cast e
-                    , UnOp (RegexString . T.pack . show @Integer) <$> cast e
-                    , UnOp (RegexString . T.pack . show @Scientific) <$> cast e
+                    , fmap RegexString <$> cast e
+                    , fmap (RegexString . T.pack . show @Integer) <$> cast e
+                    , fmap (RegexString . T.pack . show @Scientific) <$> cast e
                     ]
                 (e:) <$> inner
             ]
@@ -217,14 +218,14 @@ list = label "list" $ do
             "list range enumeration not defined for '" <> textExprType x <> "'"
     choice
         [do symbol "]"
-            return $ SomeExpr $ UnOp (:[]) x
+            return $ SomeExpr $ fmap (:[]) x
 
         ,do off <- stateOffset <$> getParserState
             osymbol ".."
             ExprEnumerator fromTo _ <- maybe (enumErr off) return $ exprEnumerator x
             y <- typedExpr
             symbol "]"
-            return $ SomeExpr $ UnOp fromTo x `App` y
+            return $ SomeExpr $ fromTo <$> x <*> y
 
         ,do symbol ","
             y <- typedExpr
@@ -235,12 +236,12 @@ list = label "list" $ do
                     ExprEnumerator _ fromThenTo <- maybe (enumErr off) return $ exprEnumerator x
                     z <- typedExpr
                     symbol "]"
-                    return $ SomeExpr $ UnOp fromThenTo x `App` y `App` z
+                    return $ SomeExpr $ fromThenTo <$> x <*> y <*> z
 
                 ,do symbol ","
                     xs <- listOf typedExpr
                     symbol "]"
-                    return $ SomeExpr $ foldr (BinOp (:)) (Literal []) (x:y:xs)
+                    return $ SomeExpr $ foldr (liftA2 (:)) (Pure []) (x:y:xs)
                 ]
         ]
 
@@ -253,7 +254,7 @@ applyUnOp :: forall a b sa.
     (a -> b) -> Expr sa -> Maybe (Expr b)
 applyUnOp op x = do
     Refl :: a :~: sa <- eqT
-    return $ UnOp op x
+    return $ op <$> x
 
 data SomeBinOp = forall a b c. (ExprType a, ExprType b, ExprType c) => SomeBinOp (a -> b -> c)
 
@@ -263,7 +264,7 @@ applyBinOp :: forall a b c sa sb.
 applyBinOp op x y = do
     Refl :: a :~: sa <- eqT
     Refl :: b :~: sb <- eqT
-    return $ BinOp op x y
+    return $ op <$> x <*> y
 
 someExpr :: TestParser SomeExpr
 someExpr = join inner <?> "expression"
@@ -369,7 +370,7 @@ someExpr = join inner <?> "expression"
             maybe err return $ applyRecordSelector e <$> lookup m recordMembers
 
     applyRecordSelector :: ExprType a => Expr a -> RecordSelector a -> SomeExpr
-    applyRecordSelector e (RecordSelector f) = SomeExpr $ UnOp f e
+    applyRecordSelector e (RecordSelector f) = SomeExpr $ f <$> e
 
     literal = label "literal" $ choice
         [ return <$> numberLiteral
@@ -441,7 +442,7 @@ forStatement = do
         let tname = TypedVarName name
         addVarName voff tname
         body <- testBlock indent
-        return [For line tname (UnOp unpack e) body]
+        return [For line tname (unpack <$> e) body]
 
 class (Typeable a, Typeable (ParamRep a)) => ParamType a where
     type ParamRep a :: Type
