@@ -1,5 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
-
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Parser (
