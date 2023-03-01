@@ -26,9 +26,6 @@ import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
-import Paths_erebos_tester (version)
-import Data.Version (showVersion)
-
 import Config
 import GDB
 import Network
@@ -38,6 +35,7 @@ import Process
 import Run.Monad
 import Test
 import Util
+import Version
 
 withVar :: ExprType e => VarName -> e -> TestRun a -> TestRun a
 withVar name value = local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s })
@@ -356,7 +354,7 @@ main = do
             where header = "Usage: erebos-tester [OPTION...]"
 
     when (optShowVersion opts) $ do
-        putStrLn $ "Erebos Tester version " <> showVersion version
+        putStrLn versionLine
         exitSuccess
 
     getPermissions (head $ words $ optDefaultTool $ optTest opts) >>= \perms -> do
