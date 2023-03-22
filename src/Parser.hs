@@ -492,14 +492,16 @@ instance Functor CommandDef where
   fmap f (CommandDef types ctor) = CommandDef types (f . ctor)
 
 instance Applicative CommandDef where
-  pure x = CommandDef [] (\[] -> x)
+  pure x = CommandDef [] (\case [] -> x; _ -> error "command arguments mismatch")
   CommandDef types1 ctor1 <*> CommandDef types2 ctor2 =
       CommandDef (types1 ++ types2) $ \params ->
           let (params1, params2) = splitAt (length types1) params
            in ctor1 params1 $ ctor2 params2
 
 param :: forall a. ParamType a => String -> CommandDef a
-param name = CommandDef [(name, SomeParam (Proxy @a) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
+param name = CommandDef [(name, SomeParam (Proxy @a) Proxy)] $ \case
+    [SomeParam Proxy (Identity x)] -> fromJust $ cast x
+    _ -> error "command arguments mismatch"
 
 data ParamOrContext a
 
@@ -513,7 +515,9 @@ instance ParamType a => ParamType (ParamOrContext a) where
             | otherwise -> fail $ showParamType @a Proxy <> " not available from context type '" <> T.unpack (textExprType ctx) <> "'"
 
 paramOrContext :: forall a. ParamType a => String -> CommandDef a
-paramOrContext name = CommandDef [(name, SomeParam (Proxy @(ParamOrContext a)) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
+paramOrContext name = CommandDef [(name, SomeParam (Proxy @(ParamOrContext a)) Proxy)] $ \case
+    [SomeParam Proxy (Identity x)] -> fromJust $ cast x
+    _ -> error "command arguments mismatch"
 
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
@@ -530,7 +534,9 @@ instance ParamType TestStep where
     showParamType _ = "<code line>"
 
 innerBlock :: CommandDef [TestStep]
-innerBlock = CommandDef [("", SomeParam (Proxy @InnerBlock) Proxy)] (\[SomeParam Proxy (Identity x)] -> fromJust $ cast x)
+innerBlock = CommandDef [("", SomeParam (Proxy @InnerBlock) Proxy)] $ \case
+    [SomeParam Proxy (Identity x)] -> fromJust $ cast x
+    _ -> error "command arguments mismatch"
 
 command :: String -> CommandDef TestStep -> TestParser [TestStep]
 command name (CommandDef types ctor) = do

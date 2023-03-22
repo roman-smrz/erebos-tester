@@ -190,7 +190,7 @@ gdbCompletion gdb (revcmd, _) = do
     gdbCommandRes gdb ("-complete " <> T.pack (show (reverse revcmd))) >>= \case
         (Done, resp)
             | Just (MiList matches) <- lookup "matches" resp -> do
-                return ("", map (\(MiString m) -> Completion (T.unpack m) (T.unpack m) False) matches)
+                return ("", concatMap (\case MiString m -> [Completion (T.unpack m) (T.unpack m) False]; _ -> []) matches)
         _ -> return ("", [])
 
 
