@@ -50,8 +50,8 @@ withNodePacketLoss node loss inner = do
   where
     resetLoss = do
         tl <- asks $ fromMaybe 0 . M.lookup (nodeName node) . tsNodePacketLoss . snd
-        liftIO $ callOn node $ "tc qdisc replace dev veth0 root netem loss " ++ show (tl * 100) ++ "%"
-        liftIO $ putStrLn $ "tc qdisc replace dev veth0 root netem loss " ++ show (tl * 100) ++ "%"
+        liftIO $ callOn node $ "tc qdisc replace dev veth0 root netem loss " <> T.pack (show (tl * 100)) <> "%"
+        liftIO $ putStrLn $ "tc qdisc replace dev veth0 root netem loss " <> show (tl * 100) <> "%"
 
 atomicallyTest :: STM a -> TestRun a
 atomicallyTest act = do
@@ -67,56 +67,25 @@ atomicallyTest act = do
 withNetwork :: (Network -> TestRun a) -> TestRun a
 withNetwork inner = do
     testDir <- asks $ optTestDir . teOptions . fst
-    net <- liftIO $ do
-        callCommand "ip link add name br0 group 1 type bridge"
-        callCommand "ip addr add 192.168.0.1/24 broadcast 192.168.0.255 dev br0"
-        callCommand "ip link set dev br0 up"
-        callCommand "ip link set dev lo up"
-        Network <$> newMVar [] <*> pure testDir
+    inet <- newInternet testDir
+    let net = inetRoot inet
 
-    res <- withProcess (Left net) (ProcNameTcpdump) (Just softwareTermination)
-        ("tcpdump -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root") $ \_ -> do
+    tcpdump <- liftIO (findExecutable "tcpdump") >>= return . \case
+        Just path -> withProcess (Left net) ProcNameTcpdump (Just softwareTermination)
+            (path ++ " -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root") . const
+        Nothing -> id
+
+    res <- tcpdump $ do
         local (fmap $ \s -> s { tsNetwork = net }) $ inner net
 
-    liftIO $ do
-        callCommand $ "ip -all netns del"
-        callCommand $ "ip link del group 1"
-
+    delInternet inet
     return res
 
-createNode :: Expr Network -> Either (TypedVarName Node) (TypedVarName Process) -> (Node -> TestRun a) -> TestRun a
-createNode netexpr tvname inner = do
+withNode :: Expr Network -> Either (TypedVarName Node) (TypedVarName Process) -> (Node -> TestRun a) -> TestRun a
+withNode netexpr tvname inner = do
     net <- eval netexpr
-    node <- liftIO $ do
-        node <- modifyMVar (netNodes net) $ \nodes -> do
-            let nname = nextNodeName (either fromTypedVarName fromTypedVarName tvname) $ map nodeName nodes
-                ip = "192.168.0." ++ show (11 + length nodes)
-                node = Node { nodeName = nname
-                            , nodeIp = T.pack ip
-                            , nodeNetwork = net
-                            , nodeDir = netDir net </> ("erebos_" ++ unpackNodeName nname)
-                            }
-            return $ (node : nodes, node)
-
-        let name = unpackNodeName $ nodeName node
-            dir = nodeDir node
-
-        exists <- doesPathExist dir
-        when exists $ ioError $ userError $ dir ++ " exists"
-        createDirectoryIfMissing True dir
-
-        callCommand $ "ip netns add \""++ name ++ "\""
-        callCommand $ "ip link add \"veth_" ++ name ++ "\" group 1 type veth peer name veth0 netns \"" ++ name ++ "\""
-        callCommand $ "ip link set dev \"veth_" ++ name ++ "\" master br0 up"
-        callOn node $ "ip addr add " ++ T.unpack (nodeIp node) ++ "/24 broadcast 192.168.0.255 dev veth0"
-        callOn node $ "ip link set dev veth0 up"
-        callOn node $ "ip link set dev lo up"
-        return node
-
+    node <- newNode net (either fromTypedVarName fromTypedVarName tvname)
     either (flip withVar node . fromTypedVarName) (const id) tvname $ inner node
-
-callOn :: Node -> String -> IO ()
-callOn node cmd = callCommand $ "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" " ++ cmd
 
 tryMatch :: Regex -> [Text] -> Maybe ((Text, [Text]), [Text])
 tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just ((x, capture), xs)
@@ -188,13 +157,13 @@ evalSteps = mapM_ $ \case
             withVar name i $ evalSteps inner
 
     DeclNode name@(TypedVarName vname) net inner -> do
-        createNode net (Left name) $ \node -> do
+        withNode net (Left name) $ \node -> do
             withVar vname node $ evalSteps inner
 
     Spawn tvname@(TypedVarName vname@(VarName tname)) target inner -> do
         case target of
-            Left nname -> createNode RootNetwork (Left nname) go
-            Right (Left net) -> createNode net (Right tvname) go
+            Left nname -> withNode RootNetwork (Left nname) go
+            Right (Left net) -> withNode net (Right tvname) go
             Right (Right node) -> go =<< eval node
       where
         go node = do

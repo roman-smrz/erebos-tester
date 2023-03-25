@@ -88,7 +88,8 @@ lineReadingLoop process h act =
 
 spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
 spawnOn target pname killWith cmd = do
-    let prefix = either (const "") (\node -> "ip netns exec \"" ++ unpackNodeName (nodeName node) ++ "\" ") target
+    let netns = either netnsName netnsName target
+    let prefix = T.unpack $ "ip netns exec \"" <> netns <> "\" "
     (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
         , env = Just [("EREBOS_DIR", either netDir nodeDir target)]
