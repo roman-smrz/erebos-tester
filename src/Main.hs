@@ -64,22 +64,28 @@ atomicallyTest act = do
         Left e -> throwError e
         Right x -> return x
 
-withNetwork :: (Network -> TestRun a) -> TestRun a
-withNetwork inner = do
+withInternet :: (Network -> TestRun a) -> TestRun a
+withInternet inner = do
     testDir <- asks $ optTestDir . teOptions . fst
     inet <- newInternet testDir
-    let net = inetRoot inet
-
-    tcpdump <- liftIO (findExecutable "tcpdump") >>= return . \case
-        Just path -> withProcess (Left net) ProcNameTcpdump (Just softwareTermination)
-            (path ++ " -i br0 -w '" ++ testDir ++ "/br0.pcap' -U -Z root") . const
-        Nothing -> id
-
-    res <- tcpdump $ do
+    res <- withNetwork (inetRoot inet) $ \net -> do
         local (fmap $ \s -> s { tsNetwork = net }) $ inner net
-
     delInternet inet
     return res
+
+withSubnet :: Network -> Maybe (TypedVarName Network) -> (Network -> TestRun a) -> TestRun a
+withSubnet parent tvname inner = do
+    net <- newSubnet parent (fromTypedVarName <$> tvname)
+    withNetwork net inner
+
+withNetwork :: Network -> (Network -> TestRun a) -> TestRun a
+withNetwork net inner = do
+    tcpdump <- liftIO (findExecutable "tcpdump") >>= return . \case
+        Just path -> withProcess (Left net) ProcNameTcpdump (Just softwareTermination)
+            (path ++ " -i br0 -w '" ++ netDir net ++ "/br0.pcap' -U -Z root") . const
+        Nothing -> id
+
+    tcpdump $ inner net
 
 withNode :: Expr Network -> Either (TypedVarName Node) (TypedVarName Process) -> (Node -> TestRun a) -> TestRun a
 withNode netexpr tvname inner = do
@@ -155,6 +161,11 @@ evalSteps = mapM_ $ \case
         value <- eval expr
         forM_ value $ \i -> do
             withVar name i $ evalSteps inner
+
+    Subnet name@(TypedVarName vname) parentExpr inner -> do
+        parent <- eval parentExpr
+        withSubnet parent (Just name) $ \net -> do
+            withVar vname net $ evalSteps inner
 
     DeclNode name@(TypedVarName vname) net inner -> do
         withNode net (Left name) $ \node -> do
@@ -243,7 +254,7 @@ runTest out opts test = do
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
     res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
-        withNetwork $ \_ -> evalSteps (testSteps test)
+        withInternet $ \_ -> evalSteps (testSteps test)
 
     void $ installHandler processStatusChanged oldHandler Nothing
 

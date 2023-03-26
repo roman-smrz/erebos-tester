@@ -630,6 +630,12 @@ testWith = do
         modify $ \s -> s { testContext = ctx }
         testBlock indent
 
+testSubnet :: TestParser [TestStep]
+testSubnet = command "subnet" $ Subnet
+    <$> param ""
+    <*> paramOrContext "of"
+    <*> innerBlock
+
 testNode :: TestParser [TestStep]
 testNode = command "node" $ DeclNode
     <$> param ""
@@ -690,6 +696,7 @@ testStep = choice
     , forStatement
     , testLocal
     , testWith
+    , testSubnet
     , testNode
     , testSpawn
     , testSend
