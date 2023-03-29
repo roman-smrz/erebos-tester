@@ -41,6 +41,7 @@ executable erebos-tester-core
                        Parser
                        Paths_erebos_tester
                        Process
+                       Run
                        Run.Monad
                        Test
                        Util
