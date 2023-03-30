@@ -37,6 +37,7 @@ executable erebos-tester-core
   other-modules:       Config
                        GDB
                        Network
+                       Network.Ip
                        Output
                        Parser
                        Paths_erebos_tester
