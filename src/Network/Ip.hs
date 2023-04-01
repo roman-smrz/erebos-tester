@@ -9,11 +9,18 @@ module Network.Ip (
     allowsSubnets,
     ipSubnet,
     lanSubnet,
+
+    NetworkNamespace(..),
+    HasNetns(..),
+    textNetnsName,
+    callOn,
 ) where
 
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Word
+
+import System.Process
 
 newtype IpPrefix = IpPrefix [Word8]
     deriving (Eq, Ord)
@@ -43,3 +50,15 @@ ipSubnet num (IpPrefix prefix) = IpPrefix (prefix ++ [num])
 lanSubnet :: IpPrefix -> IpPrefix
 lanSubnet (IpPrefix prefix) = IpPrefix (take 3 $ prefix ++ repeat 0)
 
+
+newtype NetworkNamespace = NetworkNamespace Text
+    deriving (Eq, Ord)
+
+class HasNetns a where netnsName :: a -> NetworkNamespace
+
+textNetnsName :: NetworkNamespace -> Text
+textNetnsName (NetworkNamespace name) = name
+
+callOn :: HasNetns a => a -> Text -> IO ()
+callOn n cmd = callCommand $ T.unpack $ "ip netns exec \"" <> ns <> "\" " <> cmd
+    where NetworkNamespace ns = netnsName n

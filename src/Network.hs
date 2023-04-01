@@ -5,9 +5,6 @@ module Network (
     NodeName(..), textNodeName, unpackNodeName,
     nextNodeName,
 
-    HasNetns(..),
-    callOn,
-
     newInternet, delInternet,
     newSubnet,
     newNode,
@@ -92,13 +89,12 @@ nextNodeName (VarName tname) = go 0
                                   | otherwise       = go n ns
 
 
-class HasNetns a where netnsName :: a -> Text
-instance HasNetns Network where netnsName n = "s" <> textNetworkName n
-instance HasNetns Node where netnsName n = netnsName (nodeNetwork n) <> ":" <> textNodeName (nodeName n)
+instance HasNetns Network where
+    netnsName n = NetworkNamespace $ "s" <> textNetworkName n
 
-callOn :: HasNetns a => a -> Text -> IO ()
-callOn n cmd = callCommand $ T.unpack $ "ip netns exec \"" <> netnsName n <> "\" " <> cmd
-
+instance HasNetns Node where
+    netnsName n = NetworkNamespace $
+        textNetnsName (netnsName (nodeNetwork n)) <> ":" <> textNodeName (nodeName n)
 
 instance ExprType Network where
     textExprType _ = T.pack "network"
@@ -137,7 +133,7 @@ newSubnet net vname = do
         idx <- nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
         sub <- newNetwork
             (ipSubnet idx (netPrefix net))
-            (netDir net </> maybe (T.unpack $ netnsName net) (("sub_"++) . unpackVarName) vname)
+            (netDir net </> maybe (T.unpack $ textNetnsName $ netnsName net) (("sub_"++) . unpackVarName) vname)
         modifyTVar (netSubnets net) ((idx, sub) :)
         return (sub, idx)
     initNetwork sub
@@ -149,7 +145,7 @@ newSubnet net vname = do
 
     liftIO $ do
         let veth = T.pack $ "veth_s" <> show idx
-        callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> netnsName sub <> "\""
+        callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (netnsName sub) <> "\""
         callOn net $ "ip addr add dev " <> veth <> " " <> textIpAddressCidr router
         callOn net $ "ip link set dev " <> veth <> " up"
 
@@ -177,7 +173,7 @@ initNetwork net = liftIO $ do
     let lan = lanSubnet $ netPrefix net
         lanIp = IpAddress lan
     createDirectoryIfMissing True $ netDir net
-    callCommand $ T.unpack $ "ip netns add \"" <> netnsName net <> "\""
+    callCommand $ T.unpack $ "ip netns add \"" <> textNetnsName (netnsName net) <> "\""
     callOn net $ "ip link add name br0 type bridge"
     callOn net $ "ip addr add " <> textIpAddressCidr (lanIp 1) <> " broadcast " <> textIpAddress (lanIp 255) <> " dev br0"
     callOn net $ "ip link set dev br0 up"
@@ -206,8 +202,8 @@ newNode net vname = liftIO $ do
     createDirectoryIfMissing True dir
 
     let veth = T.pack $ "veth" <> show idx
-    callCommand $ T.unpack $ "ip netns add \"" <> netnsName node <> "\""
-    callOn net  $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> netnsName node <> "\""
+    callCommand $ T.unpack $ "ip netns add \"" <> textNetnsName (netnsName node) <> "\""
+    callOn net  $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (netnsName node) <> "\""
     callOn net  $ "ip link set dev " <> veth <> " master br0 up"
     callOn node $ "ip addr add " <> textIpAddressCidr (nodeIp node) <> " broadcast " <> textIpAddress (lanIp 255) <> " dev veth0"
     callOn node $ "ip link set dev veth0 up"

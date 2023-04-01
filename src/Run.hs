@@ -25,6 +25,7 @@ import System.Process
 
 import GDB
 import Network
+import Network.Ip
 import Output
 import Process
 import Run.Monad
