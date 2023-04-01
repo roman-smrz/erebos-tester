@@ -36,9 +36,9 @@ NETWORK STRUCTURE
 Local network (namespace "s<PREFIX>", e.g. "s1_2"):
 
   (upstream, if any)                 (to subnets, if any and prefix length < 24)
-         ↑                           veth_sX_1 (IP: prefix.1(.0)*.254)
-       veth0                         veth_sX_2 (IP: prefix.2(.0)*.254) → veth0 in subnet namespace
-         |                           veth_sX_3 (IP: prefix.3(.0)*.254)
+         ↑                           veth_s1 (IP: prefix.1(.0)*.254)
+       veth0                         veth_s2 (IP: prefix.2(.0)*.254) → veth0 in subnet namespace
+         |                           veth_s3 (IP: prefix.3(.0)*.254)
         br0 (IP: prefix(.0)*.1/24)   ...
        / | \
   veth2 ... veth253
@@ -133,13 +133,13 @@ delInternet _ = liftIO $ do
 
 newSubnet :: MonadIO m => Network -> Maybe VarName -> m Network
 newSubnet net vname = do
-    sub <- liftIO $ atomically $ do
-        pref <- nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
+    (sub, idx) <- liftIO $ atomically $ do
+        idx <- nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
         sub <- newNetwork
-            (ipSubnet pref (netPrefix net))
+            (ipSubnet idx (netPrefix net))
             (netDir net </> maybe (T.unpack $ netnsName net) (("sub_"++) . unpackVarName) vname)
-        modifyTVar (netSubnets net) ((pref, sub) :)
-        return sub
+        modifyTVar (netSubnets net) ((idx, sub) :)
+        return (sub, idx)
     initNetwork sub
 
     let lan = lanSubnet $ netPrefix sub
@@ -148,15 +148,16 @@ newSubnet net vname = do
         router = lanIp 254
 
     liftIO $ do
-        callOn net $ "ip link add \"veth_" <> netnsName sub <> "\" type veth peer name veth0 netns \"" <> netnsName sub <> "\""
-        callOn net $ "ip addr add dev \"veth_" <> netnsName sub <> "\" " <> textIpAddressCidr router
-        callOn net $ "ip link set dev \"veth_" <> netnsName sub <> "\" up"
+        let veth = T.pack $ "veth_s" <> show idx
+        callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> netnsName sub <> "\""
+        callOn net $ "ip addr add dev " <> veth <> " " <> textIpAddressCidr router
+        callOn net $ "ip link set dev " <> veth <> " up"
 
         -- If the new subnet can be split further, routing rule for the whole prefix is needed
         when (allowsSubnets (netPrefix sub)) $ callOn net $ "ip route add "
             <> textIpNetwork (netPrefix sub)
             <> " via " <> textIpAddress bridge
-            <> " dev \"veth_" <> netnsName sub <> "\""
+            <> " dev " <> veth
             <> " src " <> textIpAddress router
 
         callOn sub $ "ip link set dev veth0 master br0 up"
