@@ -666,6 +666,21 @@ testGuard = command "guard" $ Guard
     <$> cmdLine
     <*> param ""
 
+testDisconnectNode :: TestParser [TestStep]
+testDisconnectNode = command "disconnect_node" $ DisconnectNode
+    <$> paramOrContext ""
+    <*> innerBlock
+
+testDisconnectNodes :: TestParser [TestStep]
+testDisconnectNodes = command "disconnect_nodes" $ DisconnectNodes
+    <$> paramOrContext ""
+    <*> innerBlock
+
+testDisconnectUpstream :: TestParser [TestStep]
+testDisconnectUpstream = command "disconnect_upstream" $ DisconnectUpstream
+    <$> paramOrContext ""
+    <*> innerBlock
+
 testPacketLoss :: TestParser [TestStep]
 testPacketLoss = command "packet_loss" $ PacketLoss
     <$> param ""
@@ -702,6 +717,9 @@ testStep = choice
     , testSend
     , testExpect
     , testGuard
+    , testDisconnectNode
+    , testDisconnectNodes
+    , testDisconnectUpstream
     , testPacketLoss
     , testWait
     ]

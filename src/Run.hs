@@ -12,6 +12,7 @@ import Control.Monad.Reader
 
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Set qualified as S
 import Data.Scientific
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -60,6 +61,8 @@ runTest out opts test = do
             { tsNetwork = error "network not initialized"
             , tsVars = []
             , tsNodePacketLoss = M.empty
+            , tsDisconnectedUp = S.empty
+            , tsDisconnectedBridge = S.empty
             }
 
     let sigHandler SignalInfo { siginfoSpecific = chld } = do
@@ -149,6 +152,18 @@ evalSteps = mapM_ $ \case
     Guard line expr -> do
         testStepGuard line expr
 
+    DisconnectNode node inner -> do
+        n <- eval node
+        withDisconnectedUp n $ evalSteps inner
+
+    DisconnectNodes net inner -> do
+        n <- eval net
+        withDisconnectedBridge n $ evalSteps inner
+
+    DisconnectUpstream net inner -> do
+        n <- eval net
+        withDisconnectedUp n $ evalSteps inner
+
     PacketLoss loss node inner -> do
         l <- eval loss
         n <- eval node
@@ -190,16 +205,42 @@ withNode netexpr tvname inner = do
     node <- newNode net (either fromTypedVarName fromTypedVarName tvname)
     either (flip withVar node . fromTypedVarName) (const id) tvname $ inner node
 
+withDisconnectedUp :: HasNetns n => n -> TestRun a -> TestRun a
+withDisconnectedUp n inner = do
+    let netns = netnsName n
+    disconnected <- asks $ S.member netns . tsDisconnectedUp . snd
+    if disconnected
+      then inner
+      else do
+        local (fmap $ \s -> s { tsDisconnectedUp = S.insert netns $ tsDisconnectedUp s }) $ do
+            liftIO $ callOn n $ "ip link set veth0 down"
+            x <- inner
+            liftIO $ callOn n $ "ip link set veth0 up"
+            return x
+
+withDisconnectedBridge :: HasNetns n => n -> TestRun a -> TestRun a
+withDisconnectedBridge n inner = do
+    let netns = netnsName n
+    disconnected <- asks $ S.member netns . tsDisconnectedBridge . snd
+    if disconnected
+      then inner
+      else do
+        local (fmap $ \s -> s { tsDisconnectedBridge = S.insert netns $ tsDisconnectedBridge s }) $ do
+            liftIO $ callOn n $ "ip link set br0 down"
+            x <- inner
+            liftIO $ callOn n $ "ip link set br0 up"
+            return x
+
 withNodePacketLoss :: Node -> Scientific -> TestRun a -> TestRun a
 withNodePacketLoss node loss inner = do
-    x <- local (fmap $ \s -> s { tsNodePacketLoss = M.insertWith (\l l' -> 1 - (1 - l) * (1 - l')) (nodeName node) loss $ tsNodePacketLoss s }) $ do
+    x <- local (fmap $ \s -> s { tsNodePacketLoss = M.insertWith (\l l' -> 1 - (1 - l) * (1 - l')) (netnsName node) loss $ tsNodePacketLoss s }) $ do
         resetLoss
         inner
     resetLoss
     return x
   where
     resetLoss = do
-        tl <- asks $ fromMaybe 0 . M.lookup (nodeName node) . tsNodePacketLoss . snd
+        tl <- asks $ fromMaybe 0 . M.lookup (netnsName node) . tsNodePacketLoss . snd
         liftIO $ callOn node $ "tc qdisc replace dev veth0 root netem loss " <> T.pack (show (tl * 100)) <> "%"
 
 

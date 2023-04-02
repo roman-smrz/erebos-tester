@@ -16,11 +16,13 @@ import Control.Monad.Except
 import Control.Monad.Reader
 
 import Data.Map (Map)
+import Data.Set (Set)
 import Data.Scientific
 import qualified Data.Text as T
 
 import {-# SOURCE #-} GDB
 import {-# SOURCE #-} Network
+import Network.Ip
 import Output
 import {-# SOURCE #-} Process
 import Test
@@ -39,7 +41,9 @@ data TestEnv = TestEnv
 data TestState = TestState
     { tsNetwork :: Network
     , tsVars :: [(VarName, SomeVarValue)]
-    , tsNodePacketLoss :: Map NodeName Scientific
+    , tsDisconnectedUp :: Set NetworkNamespace
+    , tsDisconnectedBridge :: Set NetworkNamespace
+    , tsNodePacketLoss :: Map NetworkNamespace Scientific
     }
 
 data TestOptions = TestOptions
