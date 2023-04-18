@@ -56,7 +56,10 @@ options =
         "run GDB and attach spawned processes"
     , Option ['f'] ["force"]
         (NoArg $ to $ \opts -> opts { optForce = True })
-        "remove test directory if it exists instead of stopping"
+        "remove test directory if it already exists instead of stopping"
+    , Option ['k'] ["keep"]
+        (NoArg $ to $ \opts -> opts { optKeep = True })
+        "keep test directory even if all tests succeed"
     , Option ['V'] ["version"]
         (NoArg $ \opts -> opts { optShowVersion = True })
         "show version and exit"

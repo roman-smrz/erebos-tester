@@ -94,7 +94,7 @@ runTest out opts test = do
     failed <- atomically $ readTVar (teFailed tenv)
     case (res, failed) of
         (Right (), Nothing) -> do
-            removeDirectoryRecursive testDir
+            when (not $ optKeep opts) $ removeDirectoryRecursive testDir
             return True
         _ -> return False
 

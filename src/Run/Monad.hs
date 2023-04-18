@@ -53,6 +53,7 @@ data TestOptions = TestOptions
     , optTimeout :: Scientific
     , optGDB :: Bool
     , optForce :: Bool
+    , optKeep :: Bool
     }
 
 defaultTestOptions :: TestOptions
@@ -63,6 +64,7 @@ defaultTestOptions = TestOptions
     , optTimeout = 1
     , optGDB = False
     , optForce = False
+    , optKeep = False
     }
 
 data Failed = Failed
