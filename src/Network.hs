@@ -147,6 +147,8 @@ newSubnet net vname = do
         let veth = T.pack $ "veth_s" <> show idx
         callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (netnsName sub) <> "\""
         callOn net $ "ip addr add dev " <> veth <> " " <> textIpAddressCidr router
+        callOn sub $ "ip link set dev veth0 master br0 up" -- this end needs to go up first,
+                            -- otherwise it sometimes gets stuck with NO-CARRIER for a while.
         callOn net $ "ip link set dev " <> veth <> " up"
 
         -- If the new subnet can be split further, routing rule for the whole prefix is needed
@@ -155,8 +157,6 @@ newSubnet net vname = do
             <> " via " <> textIpAddress bridge
             <> " dev " <> veth
             <> " src " <> textIpAddress router
-
-        callOn sub $ "ip link set dev veth0 master br0 up"
         callOn sub $ "ip route add default via " <> textIpAddress router <> " dev br0 src " <> textIpAddress bridge
     return sub
 
