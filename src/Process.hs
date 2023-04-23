@@ -89,7 +89,7 @@ lineReadingLoop process h act =
 
 spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
 spawnOn target pname killWith cmd = do
-    let netns = either netnsName netnsName target
+    let netns = either getNetns getNetns target
     let prefix = T.unpack $ "ip netns exec \"" <> textNetnsName netns <> "\" "
     (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe

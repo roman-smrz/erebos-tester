@@ -14,6 +14,7 @@ import Control.Arrow
 import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.IO.Class
+import Control.Monad.Writer
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -56,17 +57,19 @@ data Internet = Internet
 
 data Network = Network
     { netPrefix :: IpPrefix
+    , netNetns :: NetworkNamespace
     , netNodes :: TVar [Node]
     , netSubnets :: TVar [(Word8, Network)]
     , netDir :: FilePath
     }
 
-textNetworkName :: Network -> Text
-textNetworkName Network { netPrefix = IpPrefix prefix } = T.intercalate "_" (map (T.pack . show) prefix)
+textNetworkName :: IpPrefix -> Text
+textNetworkName (IpPrefix prefix) = T.intercalate "_" (map (T.pack . show) prefix)
 
 data Node = Node
     { nodeIp :: IpAddress
     , nodeName :: NodeName
+    , nodeNetns :: NetworkNamespace
     , nodeNetwork :: Network
     , nodeDir :: FilePath
     }
@@ -89,22 +92,18 @@ nextNodeName (VarName tname) = go 0
                                   | otherwise       = go n ns
 
 
-instance HasNetns Network where
-    netnsName n = NetworkNamespace $ "s" <> textNetworkName n
-
-instance HasNetns Node where
-    netnsName n = NetworkNamespace $
-        textNetnsName (netnsName (nodeNetwork n)) <> ":" <> textNodeName (nodeName n)
+instance HasNetns Network where getNetns = netNetns
+instance HasNetns Node where getNetns = nodeNetns
 
 instance ExprType Network where
     textExprType _ = T.pack "network"
-    textExprValue n = "s:" <> textNetworkName n
-    emptyVarValue = Network (IpPrefix []) undefined undefined undefined
+    textExprValue n = "s:" <> textNetworkName (netPrefix n)
+    emptyVarValue = Network (IpPrefix []) undefined undefined undefined undefined
 
 instance ExprType Node where
     textExprType _ = T.pack "node"
     textExprValue n = T.pack "n:" <> textNodeName (nodeName n)
-    emptyVarValue = Node (IpAddress (IpPrefix []) 0) (NodeName T.empty 0) undefined undefined
+    emptyVarValue = Node (IpAddress (IpPrefix []) 0) (NodeName T.empty 0) undefined undefined undefined
 
     recordMembers = map (first T.pack)
         [ ("ip", RecordSelector $ textIpAddress . nodeIp)
@@ -116,7 +115,7 @@ nextPrefix _ used = maximum (0 : used) + 1
 
 newInternet :: MonadIO m => FilePath -> m Internet
 newInternet dir = do
-    inet <- liftIO $ atomically $ do
+    inet <- atomicallyWithIO $ do
         Internet
             <$> pure dir
             <*> newNetwork (IpPrefix [1]) dir
@@ -129,12 +128,12 @@ delInternet _ = liftIO $ do
 
 newSubnet :: MonadIO m => Network -> Maybe VarName -> m Network
 newSubnet net vname = do
-    (sub, idx) <- liftIO $ atomically $ do
-        idx <- nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
+    (sub, idx) <- atomicallyWithIO $ do
+        idx <- lift $ nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
         sub <- newNetwork
             (ipSubnet idx (netPrefix net))
-            (netDir net </> maybe (T.unpack $ textNetnsName $ netnsName net) (("sub_"++) . unpackVarName) vname)
-        modifyTVar (netSubnets net) ((idx, sub) :)
+            (netDir net </> maybe (T.unpack $ textNetnsName $ getNetns net) (("sub_"++) . unpackVarName) vname)
+        lift $ modifyTVar (netSubnets net) ((idx, sub) :)
         return (sub, idx)
     initNetwork sub
 
@@ -145,7 +144,7 @@ newSubnet net vname = do
 
     liftIO $ do
         let veth = T.pack $ "veth_s" <> show idx
-        callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (netnsName sub) <> "\""
+        callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (getNetns sub) <> "\""
         callOn net $ "ip addr add dev " <> veth <> " " <> textIpAddressCidr router
         callOn sub $ "ip link set dev veth0 master br0 up" -- this end needs to go up first,
                             -- otherwise it sometimes gets stuck with NO-CARRIER for a while.
@@ -160,12 +159,13 @@ newSubnet net vname = do
         callOn sub $ "ip route add default via " <> textIpAddress router <> " dev br0 src " <> textIpAddress bridge
     return sub
 
-newNetwork :: IpPrefix -> FilePath -> STM Network
+newNetwork :: IpPrefix -> FilePath -> WriterT [IO ()] STM Network
 newNetwork prefix dir = do
     Network
         <$> pure prefix
-        <*> newTVar []
-        <*> newTVar []
+        <*> addNetworkNamespace ("s" <> textNetworkName prefix)
+        <*> lift (newTVar [])
+        <*> lift (newTVar [])
         <*> pure dir
 
 initNetwork :: MonadIO m => Network -> m ()
@@ -173,7 +173,6 @@ initNetwork net = liftIO $ do
     let lan = lanSubnet $ netPrefix net
         lanIp = IpAddress lan
     createDirectoryIfMissing True $ netDir net
-    callCommand $ T.unpack $ "ip netns add \"" <> textNetnsName (netnsName net) <> "\""
     callOn net $ "ip link add name br0 type bridge"
     callOn net $ "ip addr add " <> textIpAddressCidr (lanIp 1) <> " broadcast " <> textIpAddress (lanIp 255) <> " dev br0"
     callOn net $ "ip link set dev br0 up"
@@ -184,16 +183,18 @@ newNode net vname = liftIO $ do
     let lan = lanSubnet $ netPrefix net
         lanIp = IpAddress lan
 
-    (node, idx) <- atomically $ do
-        nodes <- readTVar (netNodes net)
+    (node, idx) <- atomicallyWithIO $ do
+        nodes <- lift $ readTVar (netNodes net)
         let nname = nextNodeName vname $ map nodeName nodes
-            idx = fromIntegral $ 2 + length nodes
+        netns <- addNetworkNamespace $ textNetnsName (getNetns net) <> ":" <> textNodeName nname
+        let idx = fromIntegral $ 2 + length nodes
             node = Node { nodeName = nname
+                        , nodeNetns = netns
                         , nodeIp = lanIp idx
                         , nodeNetwork = net
                         , nodeDir = netDir net </> ("node_" ++ unpackNodeName nname)
                         }
-        writeTVar (netNodes net) (node : nodes)
+        lift $ writeTVar (netNodes net) (node : nodes)
         return (node, idx)
 
     let dir = nodeDir node
@@ -202,8 +203,7 @@ newNode net vname = liftIO $ do
     createDirectoryIfMissing True dir
 
     let veth = T.pack $ "veth" <> show idx
-    callCommand $ T.unpack $ "ip netns add \"" <> textNetnsName (netnsName node) <> "\""
-    callOn net  $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (netnsName node) <> "\""
+    callOn net  $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (getNetns node) <> "\""
     callOn net  $ "ip link set dev " <> veth <> " master br0 up"
     callOn node $ "ip addr add " <> textIpAddressCidr (nodeIp node) <> " broadcast " <> textIpAddress (lanIp 255) <> " dev veth0"
     callOn node $ "ip link set dev veth0 up"
@@ -211,3 +211,9 @@ newNode net vname = liftIO $ do
     callOn node $ "ip route add default via " <> textIpAddress (lanIp 1) <> " dev veth0 src " <> textIpAddress (nodeIp node)
 
     return node
+
+atomicallyWithIO :: MonadIO m => WriterT [IO ()] STM a -> m a
+atomicallyWithIO act = liftIO $ do
+    (x, fin) <- atomically $ runWriterT act
+    sequence_ fin
+    return x

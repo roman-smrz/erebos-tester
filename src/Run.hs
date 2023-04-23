@@ -207,7 +207,7 @@ withNode netexpr tvname inner = do
 
 withDisconnectedUp :: HasNetns n => n -> TestRun a -> TestRun a
 withDisconnectedUp n inner = do
-    let netns = netnsName n
+    let netns = getNetns n
     disconnected <- asks $ S.member netns . tsDisconnectedUp . snd
     if disconnected
       then inner
@@ -220,7 +220,7 @@ withDisconnectedUp n inner = do
 
 withDisconnectedBridge :: HasNetns n => n -> TestRun a -> TestRun a
 withDisconnectedBridge n inner = do
-    let netns = netnsName n
+    let netns = getNetns n
     disconnected <- asks $ S.member netns . tsDisconnectedBridge . snd
     if disconnected
       then inner
@@ -233,14 +233,14 @@ withDisconnectedBridge n inner = do
 
 withNodePacketLoss :: Node -> Scientific -> TestRun a -> TestRun a
 withNodePacketLoss node loss inner = do
-    x <- local (fmap $ \s -> s { tsNodePacketLoss = M.insertWith (\l l' -> 1 - (1 - l) * (1 - l')) (netnsName node) loss $ tsNodePacketLoss s }) $ do
+    x <- local (fmap $ \s -> s { tsNodePacketLoss = M.insertWith (\l l' -> 1 - (1 - l) * (1 - l')) (getNetns node) loss $ tsNodePacketLoss s }) $ do
         resetLoss
         inner
     resetLoss
     return x
   where
     resetLoss = do
-        tl <- asks $ fromMaybe 0 . M.lookup (netnsName node) . tsNodePacketLoss . snd
+        tl <- asks $ fromMaybe 0 . M.lookup (getNetns node) . tsNodePacketLoss . snd
         liftIO $ callOn node $ "tc qdisc replace dev veth0 root netem loss " <> T.pack (show (tl * 100)) <> "%"
 
 

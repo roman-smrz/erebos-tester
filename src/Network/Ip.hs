@@ -10,11 +10,16 @@ module Network.Ip (
     ipSubnet,
     lanSubnet,
 
-    NetworkNamespace(..),
+    NetworkNamespace,
     HasNetns(..),
+    addNetworkNamespace,
     textNetnsName,
     callOn,
 ) where
+
+import Control.Concurrent.STM
+
+import Control.Monad.Writer
 
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -51,14 +56,23 @@ lanSubnet :: IpPrefix -> IpPrefix
 lanSubnet (IpPrefix prefix) = IpPrefix (take 3 $ prefix ++ repeat 0)
 
 
-newtype NetworkNamespace = NetworkNamespace Text
+newtype NetworkNamespace = NetworkNamespace
+    { netnsName :: Text
+    }
     deriving (Eq, Ord)
 
-class HasNetns a where netnsName :: a -> NetworkNamespace
+class HasNetns a where getNetns :: a -> NetworkNamespace
+
+addNetworkNamespace :: Text -> WriterT [IO ()] STM NetworkNamespace
+addNetworkNamespace name = do
+    tell $ (:[]) $ callCommand $ T.unpack $ "ip netns add \"" <> name <> "\""
+    return $ NetworkNamespace
+        { netnsName = name
+        }
 
 textNetnsName :: NetworkNamespace -> Text
-textNetnsName (NetworkNamespace name) = name
+textNetnsName = netnsName
 
 callOn :: HasNetns a => a -> Text -> IO ()
 callOn n cmd = callCommand $ T.unpack $ "ip netns exec \"" <> ns <> "\" " <> cmd
-    where NetworkNamespace ns = netnsName n
+    where NetworkNamespace ns = getNetns n
