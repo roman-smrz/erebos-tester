@@ -40,6 +40,9 @@ executable erebos-tester-core
                        Network.Ip
                        Output
                        Parser
+                       Parser.Core
+                       Parser.Expr
+                       Parser.Statement
                        Paths_erebos_tester
                        Process
                        Run
