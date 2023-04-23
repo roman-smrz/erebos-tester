@@ -1,6 +1,4 @@
 module Parser.Expr (
-    procName,
-
     varName,
     newVarName,
     addVarName,
@@ -29,14 +27,7 @@ import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
 import Parser.Core
-import Process (ProcName(..))
 import Test
-
-procName :: TestParser ProcName
-procName = label "process name" $ lexeme $ do
-    c <- lowerChar
-    cs <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_' || x == '-')
-    return $ ProcName $ TL.toStrict (c `TL.cons` cs)
 
 identifier :: TestParser Text
 identifier = do

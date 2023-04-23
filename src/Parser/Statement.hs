@@ -19,7 +19,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Network (Network, Node)
 import Parser.Core
 import Parser.Expr
-import Process (Process, ProcName(..))
+import Process (Process)
 import Test
 import Util
 
@@ -90,10 +90,6 @@ class (Typeable a, Typeable (ParamRep a)) => ParamType a where
 instance ParamType SourceLine where
     parseParam _ = mzero
     showParamType _ = "<source line>"
-
-instance ParamType ProcName where
-    parseParam _ = procName
-    showParamType _ = "<proc>"
 
 instance ExprType a => ParamType (TypedVarName a) where
     parseParam _ = newVarName
