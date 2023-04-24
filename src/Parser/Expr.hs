@@ -136,32 +136,36 @@ list = label "list" $ do
 
     let enumErr off = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             "list range enumeration not defined for '" <> textExprType x <> "'"
-    choice
+    let exprList = foldr (liftA2 (:)) (Pure [])
+    SomeExpr <$> choice
         [do symbol "]"
-            return $ SomeExpr $ fmap (:[]) x
+            return $ exprList [x]
 
         ,do off <- stateOffset <$> getParserState
             osymbol ".."
             ExprEnumerator fromTo _ <- maybe (enumErr off) return $ exprEnumerator x
             y <- typedExpr
             symbol "]"
-            return $ SomeExpr $ fromTo <$> x <*> y
+            return $ fromTo <$> x <*> y
 
         ,do symbol ","
             y <- typedExpr
 
             choice
-                [do off <- stateOffset <$> getParserState
+                [do symbol "]"
+                    return $ exprList [x, y]
+
+                ,do off <- stateOffset <$> getParserState
                     osymbol ".."
                     ExprEnumerator _ fromThenTo <- maybe (enumErr off) return $ exprEnumerator x
                     z <- typedExpr
                     symbol "]"
-                    return $ SomeExpr $ fromThenTo <$> x <*> y <*> z
+                    return $ fromThenTo <$> x <*> y <*> z
 
                 ,do symbol ","
                     xs <- listOf typedExpr
                     symbol "]"
-                    return $ SomeExpr $ foldr (liftA2 (:)) (Pure []) (x:y:xs)
+                    return $ exprList (x:y:xs)
                 ]
         ]
 
