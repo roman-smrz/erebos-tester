@@ -58,6 +58,7 @@ data Internet = Internet
 data Network = Network
     { netPrefix :: IpPrefix
     , netNetns :: NetworkNamespace
+    , netBridge :: Link Bridge
     , netNodes :: TVar [Node]
     , netSubnets :: TVar [(Word8, Network)]
     , netDir :: FilePath
@@ -98,7 +99,7 @@ instance HasNetns Node where getNetns = nodeNetns
 instance ExprType Network where
     textExprType _ = T.pack "network"
     textExprValue n = "s:" <> textNetworkName (netPrefix n)
-    emptyVarValue = Network (IpPrefix []) undefined undefined undefined undefined
+    emptyVarValue = Network (IpPrefix []) undefined undefined undefined undefined undefined
 
 instance ExprType Node where
     textExprType _ = T.pack "node"
@@ -115,12 +116,10 @@ nextPrefix _ used = maximum (0 : used) + 1
 
 newInternet :: MonadIO m => FilePath -> m Internet
 newInternet dir = do
-    inet <- atomicallyWithIO $ do
+    atomicallyWithIO $ do
         Internet
             <$> pure dir
             <*> newNetwork (IpPrefix [1]) dir
-    initNetwork $ inetRoot inet
-    return inet
 
 delInternet :: MonadIO m => Internet -> m ()
 delInternet _ = liftIO $ do
@@ -135,7 +134,6 @@ newSubnet net vname = do
             (netDir net </> maybe (T.unpack $ textNetnsName $ getNetns net) (("sub_"++) . unpackVarName) vname)
         lift $ modifyTVar (netSubnets net) ((idx, sub) :)
         return (sub, idx)
-    initNetwork sub
 
     let lan = lanSubnet $ netPrefix sub
         lanIp = IpAddress lan
@@ -143,40 +141,39 @@ newSubnet net vname = do
         router = lanIp 254
 
     liftIO $ do
-        let veth = T.pack $ "veth_s" <> show idx
-        callOn net $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (getNetns sub) <> "\""
-        callOn net $ "ip addr add dev " <> veth <> " " <> textIpAddressCidr router
-        callOn sub $ "ip link set dev veth0 master br0 up" -- this end needs to go up first,
-                            -- otherwise it sometimes gets stuck with NO-CARRIER for a while.
-        callOn net $ "ip link set dev " <> veth <> " up"
+        (vethNet, vethSub) <- addVEth (net, "veth_s" <> T.pack (show idx)) (sub, "veth0")
+        addAddress vethNet router
+        setMaster vethSub (netBridge sub) -- this end needs to go up first, otherwise it
+        linkUp    vethSub                 -- sometimes gets stuck with NO-CARRIER for a while.
+        linkUp    vethNet
 
         -- If the new subnet can be split further, routing rule for the whole prefix is needed
         when (allowsSubnets (netPrefix sub)) $ callOn net $ "ip route add "
             <> textIpNetwork (netPrefix sub)
             <> " via " <> textIpAddress bridge
-            <> " dev " <> veth
+            <> " dev " <> linkName vethNet
             <> " src " <> textIpAddress router
         callOn sub $ "ip route add default via " <> textIpAddress router <> " dev br0 src " <> textIpAddress bridge
     return sub
 
 newNetwork :: IpPrefix -> FilePath -> WriterT [IO ()] STM Network
 newNetwork prefix dir = do
+    postpone $ createDirectoryIfMissing True dir
+
+    netns <- addNetworkNamespace ("s" <> textNetworkName prefix)
+    bridge <- addBridge netns "br0"
+
+    addAddress bridge $ IpAddress (lanSubnet prefix) 1
+    linkUp $ bridge
+    linkUp $ loopback netns
+
     Network
         <$> pure prefix
-        <*> addNetworkNamespace ("s" <> textNetworkName prefix)
+        <*> pure netns
+        <*> pure bridge
         <*> lift (newTVar [])
         <*> lift (newTVar [])
         <*> pure dir
-
-initNetwork :: MonadIO m => Network -> m ()
-initNetwork net = liftIO $ do
-    let lan = lanSubnet $ netPrefix net
-        lanIp = IpAddress lan
-    createDirectoryIfMissing True $ netDir net
-    callOn net $ "ip link add name br0 type bridge"
-    callOn net $ "ip addr add " <> textIpAddressCidr (lanIp 1) <> " broadcast " <> textIpAddress (lanIp 255) <> " dev br0"
-    callOn net $ "ip link set dev br0 up"
-    callOn net $ "ip link set dev lo up"
 
 newNode :: MonadIO m => Network -> VarName -> m Node
 newNode net vname = liftIO $ do
@@ -202,12 +199,12 @@ newNode net vname = liftIO $ do
     when exists $ ioError $ userError $ dir ++ " exists"
     createDirectoryIfMissing True dir
 
-    let veth = T.pack $ "veth" <> show idx
-    callOn net  $ "ip link add " <> veth <> " type veth peer name veth0 netns \"" <> textNetnsName (getNetns node) <> "\""
-    callOn net  $ "ip link set dev " <> veth <> " master br0 up"
-    callOn node $ "ip addr add " <> textIpAddressCidr (nodeIp node) <> " broadcast " <> textIpAddress (lanIp 255) <> " dev veth0"
-    callOn node $ "ip link set dev veth0 up"
-    callOn node $ "ip link set dev lo up"
+    (vethNet, vethNode) <- addVEth (net, "veth" <> T.pack (show idx)) (node, "veth0")
+    setMaster vethNet $ netBridge net
+    linkUp vethNet
+    addAddress vethNode $ nodeIp node
+    linkUp $ vethNode
+    linkUp $ loopback node
     callOn node $ "ip route add default via " <> textIpAddress (lanIp 1) <> " dev veth0 src " <> textIpAddress (nodeIp node)
 
     return node
