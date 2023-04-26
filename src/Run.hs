@@ -215,9 +215,9 @@ withDisconnectedUp link inner = do
       then inner
       else do
         local (fmap $ \s -> s { tsDisconnectedUp = S.insert netns $ tsDisconnectedUp s }) $ do
-            linkDown link
+            atomicallyWithIO $ linkDown link
             x <- inner
-            linkUp link
+            atomicallyWithIO $ linkUp link
             return x
 
 withDisconnectedBridge :: Link Bridge -> TestRun a -> TestRun a
@@ -228,9 +228,9 @@ withDisconnectedBridge bridge inner = do
       then inner
       else do
         local (fmap $ \s -> s { tsDisconnectedBridge = S.insert netns $ tsDisconnectedBridge s }) $ do
-            linkDown bridge
+            atomicallyWithIO $ linkDown bridge
             x <- inner
-            linkUp bridge
+            atomicallyWithIO $ linkUp bridge
             return x
 
 withNodePacketLoss :: Node -> Scientific -> TestRun a -> TestRun a

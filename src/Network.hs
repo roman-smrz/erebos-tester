@@ -146,14 +146,10 @@ newSubnet net vname = atomicallyWithIO $ do
     linkUp    vethSub                 -- sometimes gets stuck with NO-CARRIER for a while.
     linkUp    vethNet
 
-    postpone $ do
-        -- If the new subnet can be split further, routing rule for the whole prefix is needed
-        when (allowsSubnets (netPrefix sub)) $ callOn net $ "ip route add "
-            <> textIpNetwork (netPrefix sub)
-            <> " via " <> textIpAddress bridge
-            <> " dev " <> linkName vethNet
-            <> " src " <> textIpAddress router
-        callOn sub $ "ip route add default via " <> textIpAddress router <> " dev br0 src " <> textIpAddress bridge
+    -- If the new subnet can be split further, routing rule for the whole prefix is needed
+    when (allowsSubnets (netPrefix sub)) $ do
+        addRoute (netPrefix sub) bridge vethNet router
+    addRoute (IpPrefix []) router (netBridge sub) bridge
     return sub { netUpstream = Just vethSub }
 
 newNetwork :: IpPrefix -> FilePath -> WriterT [IO ()] STM Network
@@ -202,12 +198,6 @@ newNode nodeNetwork vname = atomicallyWithIO $ do
     addAddress nodeUpstream $ nodeIp
     linkUp $ nodeUpstream
     linkUp $ loopback node
-    postpone $ callOn node $ "ip route add default via " <> textIpAddress (lanIp 1) <> " dev veth0 src " <> textIpAddress nodeIp
+    addRoute (IpPrefix []) (lanIp 1) nodeUpstream nodeIp
 
     return node
-
-atomicallyWithIO :: MonadIO m => WriterT [IO ()] STM a -> m a
-atomicallyWithIO act = liftIO $ do
-    (x, fin) <- atomically $ runWriterT act
-    sequence_ fin
-    return x
