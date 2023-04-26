@@ -1,6 +1,6 @@
 # Revision history for erebos-tester
 
-## 0.2.0
+## 0.2.0 -- 2023-04-26
 
 * Lists and "for" statement.
 * Subnets of networks.
