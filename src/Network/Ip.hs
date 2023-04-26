@@ -130,10 +130,10 @@ addAddress link addr@(IpAddress prefix _) = do
     let bcast = IpAddress prefix 255
     postpone $ callOn link $ "ip addr add " <> textIpAddressCidr addr <> " broadcast " <> textIpAddress bcast <> " dev \"" <> linkName link <> "\""
 
-setMaster :: (MonadPIO m, MonadFail m) => Link a -> Link Bridge -> m ()
-setMaster link bridge = do
+setMaster :: MonadPIO m => Link a -> Link Bridge -> m ()
+setMaster link bridge = postpone $ do
     when (getNetns link /= getNetns bridge) $ fail "link and bridge in different network namespaces"
-    postpone $ callOn link $ "ip link set dev \"" <> linkName link <> "\" master \"" <> linkName bridge <> "\""
+    callOn link $ "ip link set dev \"" <> linkName link <> "\" master \"" <> linkName bridge <> "\""
 
 linkUp :: MonadPIO m => Link a -> m ()
 linkUp link = do

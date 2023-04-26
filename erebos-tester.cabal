@@ -62,6 +62,7 @@ executable erebos-tester-core
                        MultiParamTypeClasses
                        OverloadedStrings
                        RankNTypes
+                       RecordWildCards
                        ScopedTypeVariables
                        TupleSections
                        TypeApplications

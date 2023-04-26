@@ -97,6 +97,9 @@ instance MonadEval TestRun where
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
 
+instance MonadPIO TestRun where
+    postpone = liftIO
+
 
 finally :: MonadError e m => m a -> m b -> m a
 finally act handler = do

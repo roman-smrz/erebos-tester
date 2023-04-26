@@ -59,6 +59,7 @@ data Network = Network
     { netPrefix :: IpPrefix
     , netNetns :: NetworkNamespace
     , netBridge :: Link Bridge
+    , netUpstream :: Maybe (Link VEth)
     , netNodes :: TVar [Node]
     , netSubnets :: TVar [(Word8, Network)]
     , netDir :: FilePath
@@ -71,6 +72,7 @@ data Node = Node
     { nodeIp :: IpAddress
     , nodeName :: NodeName
     , nodeNetns :: NetworkNamespace
+    , nodeUpstream :: Link VEth
     , nodeNetwork :: Network
     , nodeDir :: FilePath
     }
@@ -99,12 +101,12 @@ instance HasNetns Node where getNetns = nodeNetns
 instance ExprType Network where
     textExprType _ = T.pack "network"
     textExprValue n = "s:" <> textNetworkName (netPrefix n)
-    emptyVarValue = Network (IpPrefix []) undefined undefined undefined undefined undefined
+    emptyVarValue = Network (IpPrefix []) undefined undefined undefined undefined undefined undefined
 
 instance ExprType Node where
     textExprType _ = T.pack "node"
     textExprValue n = T.pack "n:" <> textNodeName (nodeName n)
-    emptyVarValue = Node (IpAddress (IpPrefix []) 0) (NodeName T.empty 0) undefined undefined undefined
+    emptyVarValue = Node (IpAddress (IpPrefix []) 0) (NodeName T.empty 0) undefined undefined undefined undefined
 
     recordMembers = map (first T.pack)
         [ ("ip", RecordSelector $ textIpAddress . nodeIp)
@@ -126,27 +128,25 @@ delInternet _ = liftIO $ do
     callCommand $ "ip -all netns delete"
 
 newSubnet :: MonadIO m => Network -> Maybe VarName -> m Network
-newSubnet net vname = do
-    (sub, idx) <- atomicallyWithIO $ do
-        idx <- lift $ nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
-        sub <- newNetwork
-            (ipSubnet idx (netPrefix net))
-            (netDir net </> maybe (T.unpack $ textNetnsName $ getNetns net) (("sub_"++) . unpackVarName) vname)
-        lift $ modifyTVar (netSubnets net) ((idx, sub) :)
-        return (sub, idx)
+newSubnet net vname = atomicallyWithIO $ do
+    idx <- lift $ nextPrefix (netPrefix net) . map fst <$> readTVar (netSubnets net)
+    sub <- newNetwork
+        (ipSubnet idx (netPrefix net))
+        (netDir net </> maybe (T.unpack $ textNetnsName $ getNetns net) (("sub_"++) . unpackVarName) vname)
+    lift $ modifyTVar (netSubnets net) ((idx, sub) :)
 
     let lan = lanSubnet $ netPrefix sub
         lanIp = IpAddress lan
         bridge = lanIp 1
         router = lanIp 254
 
-    liftIO $ do
-        (vethNet, vethSub) <- addVEth (net, "veth_s" <> T.pack (show idx)) (sub, "veth0")
-        addAddress vethNet router
-        setMaster vethSub (netBridge sub) -- this end needs to go up first, otherwise it
-        linkUp    vethSub                 -- sometimes gets stuck with NO-CARRIER for a while.
-        linkUp    vethNet
+    (vethNet, vethSub) <- addVEth (net, "veth_s" <> T.pack (show idx)) (sub, "veth0")
+    addAddress vethNet router
+    setMaster vethSub (netBridge sub) -- this end needs to go up first, otherwise it
+    linkUp    vethSub                 -- sometimes gets stuck with NO-CARRIER for a while.
+    linkUp    vethNet
 
+    postpone $ do
         -- If the new subnet can be split further, routing rule for the whole prefix is needed
         when (allowsSubnets (netPrefix sub)) $ callOn net $ "ip route add "
             <> textIpNetwork (netPrefix sub)
@@ -154,7 +154,7 @@ newSubnet net vname = do
             <> " dev " <> linkName vethNet
             <> " src " <> textIpAddress router
         callOn sub $ "ip route add default via " <> textIpAddress router <> " dev br0 src " <> textIpAddress bridge
-    return sub
+    return sub { netUpstream = Just vethSub }
 
 newNetwork :: IpPrefix -> FilePath -> WriterT [IO ()] STM Network
 newNetwork prefix dir = do
@@ -171,41 +171,38 @@ newNetwork prefix dir = do
         <$> pure prefix
         <*> pure netns
         <*> pure bridge
+        <*> pure Nothing
         <*> lift (newTVar [])
         <*> lift (newTVar [])
         <*> pure dir
 
 newNode :: MonadIO m => Network -> VarName -> m Node
-newNode net vname = liftIO $ do
-    let lan = lanSubnet $ netPrefix net
+newNode nodeNetwork vname = atomicallyWithIO $ do
+    let lan = lanSubnet $ netPrefix nodeNetwork
         lanIp = IpAddress lan
 
-    (node, idx) <- atomicallyWithIO $ do
-        nodes <- lift $ readTVar (netNodes net)
-        let nname = nextNodeName vname $ map nodeName nodes
-        netns <- addNetworkNamespace $ textNetnsName (getNetns net) <> ":" <> textNodeName nname
-        let idx = fromIntegral $ 2 + length nodes
-            node = Node { nodeName = nname
-                        , nodeNetns = netns
-                        , nodeIp = lanIp idx
-                        , nodeNetwork = net
-                        , nodeDir = netDir net </> ("node_" ++ unpackNodeName nname)
-                        }
-        lift $ writeTVar (netNodes net) (node : nodes)
-        return (node, idx)
+    nodes <- lift $ readTVar (netNodes nodeNetwork)
+    let nodeName = nextNodeName vname $ map Network.nodeName nodes
+        idx = fromIntegral $ 2 + length nodes
+        nodeIp = lanIp idx
+        nodeDir = netDir nodeNetwork </> ("node_" ++ unpackNodeName nodeName)
+    nodeNetns <- addNetworkNamespace $ textNetnsName (getNetns nodeNetwork) <> ":" <> textNodeName nodeName
+    (vethNet, nodeUpstream) <- addVEth (nodeNetwork, "veth" <> T.pack (show idx)) (nodeNetns, "veth0")
 
-    let dir = nodeDir node
-    exists <- doesPathExist dir
-    when exists $ ioError $ userError $ dir ++ " exists"
-    createDirectoryIfMissing True dir
+    postpone $ do
+        exists <- doesPathExist nodeDir
+        when exists $ ioError $ userError $ nodeDir ++ " exists"
+        createDirectoryIfMissing True nodeDir
 
-    (vethNet, vethNode) <- addVEth (net, "veth" <> T.pack (show idx)) (node, "veth0")
-    setMaster vethNet $ netBridge net
+    let node = Node {..}
+    lift $ writeTVar (netNodes nodeNetwork) (node : nodes)
+
+    setMaster vethNet $ netBridge nodeNetwork
     linkUp vethNet
-    addAddress vethNode $ nodeIp node
-    linkUp $ vethNode
+    addAddress nodeUpstream $ nodeIp
+    linkUp $ nodeUpstream
     linkUp $ loopback node
-    callOn node $ "ip route add default via " <> textIpAddress (lanIp 1) <> " dev veth0 src " <> textIpAddress (nodeIp node)
+    postpone $ callOn node $ "ip route add default via " <> textIpAddress (lanIp 1) <> " dev veth0 src " <> textIpAddress nodeIp
 
     return node
 

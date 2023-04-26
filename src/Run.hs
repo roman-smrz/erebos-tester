@@ -154,15 +154,17 @@ evalSteps = mapM_ $ \case
 
     DisconnectNode node inner -> do
         n <- eval node
-        withDisconnectedUp n $ evalSteps inner
+        withDisconnectedUp (nodeUpstream n) $ evalSteps inner
 
     DisconnectNodes net inner -> do
         n <- eval net
-        withDisconnectedBridge n $ evalSteps inner
+        withDisconnectedBridge (netBridge n) $ evalSteps inner
 
     DisconnectUpstream net inner -> do
         n <- eval net
-        withDisconnectedUp n $ evalSteps inner
+        case netUpstream n of
+            Just link -> withDisconnectedUp link $ evalSteps inner
+            Nothing -> evalSteps inner
 
     PacketLoss loss node inner -> do
         l <- eval loss
@@ -205,30 +207,30 @@ withNode netexpr tvname inner = do
     node <- newNode net (either fromTypedVarName fromTypedVarName tvname)
     either (flip withVar node . fromTypedVarName) (const id) tvname $ inner node
 
-withDisconnectedUp :: HasNetns n => n -> TestRun a -> TestRun a
-withDisconnectedUp n inner = do
-    let netns = getNetns n
+withDisconnectedUp :: Link VEth -> TestRun a -> TestRun a
+withDisconnectedUp link inner = do
+    let netns = getNetns link
     disconnected <- asks $ S.member netns . tsDisconnectedUp . snd
     if disconnected
       then inner
       else do
         local (fmap $ \s -> s { tsDisconnectedUp = S.insert netns $ tsDisconnectedUp s }) $ do
-            liftIO $ callOn n $ "ip link set veth0 down"
+            linkDown link
             x <- inner
-            liftIO $ callOn n $ "ip link set veth0 up"
+            linkUp link
             return x
 
-withDisconnectedBridge :: HasNetns n => n -> TestRun a -> TestRun a
-withDisconnectedBridge n inner = do
-    let netns = getNetns n
+withDisconnectedBridge :: Link Bridge -> TestRun a -> TestRun a
+withDisconnectedBridge bridge inner = do
+    let netns = getNetns bridge
     disconnected <- asks $ S.member netns . tsDisconnectedBridge . snd
     if disconnected
       then inner
       else do
         local (fmap $ \s -> s { tsDisconnectedBridge = S.insert netns $ tsDisconnectedBridge s }) $ do
-            liftIO $ callOn n $ "ip link set br0 down"
+            linkDown bridge
             x <- inner
-            liftIO $ callOn n $ "ip link set br0 up"
+            linkUp bridge
             return x
 
 withNodePacketLoss :: Node -> Scientific -> TestRun a -> TestRun a
