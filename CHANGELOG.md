@@ -1,5 +1,15 @@
 # Revision history for erebos-tester
 
-## 0.1.0.0 -- YYYY-mm-dd
+## 0.2.0
 
-* First version. Released on an unsuspecting world.
+* Lists and "for" statement.
+* Subnets of networks.
+* Commands to disconnect nodes or networks.
+
+## 0.1.1 -- 2023-02-04
+
+* GDB improvements and fixes.
+
+## 0.1.0 -- 2023-01-08
+
+* First version.
