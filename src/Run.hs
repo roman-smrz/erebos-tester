@@ -128,9 +128,8 @@ evalSteps = mapM_ $ \case
 
     Spawn tvname@(TypedVarName vname@(VarName tname)) target inner -> do
         case target of
-            Left nname -> withNode RootNetwork (Left nname) go
-            Right (Left net) -> withNode net (Right tvname) go
-            Right (Right node) -> go =<< eval node
+            Left net -> withNode net (Right tvname) go
+            Right node -> go =<< eval node
       where
         go node = do
             opts <- asks $ teOptions . fst
