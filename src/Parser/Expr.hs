@@ -289,10 +289,10 @@ someExpr = join inner <?> "expression"
             SomeExpr e <- p
             let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
                     [ T.pack "value of type ", textExprType e, T.pack " does not have member '", m, T.pack "'" ]
-            maybe err return $ applyRecordSelector e <$> lookup m recordMembers
+            maybe err return $ applyRecordSelector m e <$> lookup m recordMembers
 
-    applyRecordSelector :: ExprType a => Expr a -> RecordSelector a -> SomeExpr
-    applyRecordSelector e (RecordSelector f) = SomeExpr $ f <$> e
+    applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
+    applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
 
     literal = label "literal" $ choice
         [ return <$> numberLiteral

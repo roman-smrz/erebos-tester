@@ -266,8 +266,8 @@ exprFailed desc (SourceLine sline) pname expr = do
     let prompt = maybe T.empty textProcName pname
     exprVars <- gatherVars expr
     outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", sline]
-    forM_ exprVars $ \(name, value) ->
-        outLine OutputMatchFail (Just prompt) $ T.concat [T.pack "  ", textVarName name, T.pack " = ", textSomeVarValue value]
+    forM_ exprVars $ \((name, sel), value) ->
+        outLine OutputMatchFail (Just prompt) $ T.concat ["  ", textVarName name, T.concat (map ("."<>) sel), " = ", textSomeVarValue value]
     throwError Failed
 
 expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
