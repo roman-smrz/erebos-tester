@@ -83,7 +83,10 @@ runTest out opts test = do
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
     res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
-        withInternet $ \_ -> evalSteps (testSteps test)
+        withInternet $ \_ -> do
+            evalSteps (testSteps test)
+            when (optWait opts) $ do
+                void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
 
     void $ installHandler processStatusChanged oldHandler Nothing
 

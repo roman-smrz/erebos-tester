@@ -64,6 +64,9 @@ options =
     , Option ['V'] ["version"]
         (NoArg $ \opts -> opts { optShowVersion = True })
         "show version and exit"
+    , Option [] ["wait"]
+        (NoArg $ to $ \opts -> opts { optWait = True })
+        "wait at the end of each test"
     ]
   where
     to f opts = opts { optTest = f (optTest opts) }
