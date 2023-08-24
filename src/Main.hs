@@ -19,6 +19,7 @@ import Output
 import Parser
 import Process
 import Run
+import Test
 import Util
 import Version
 
@@ -98,10 +99,21 @@ main = do
             fail $ optDefaultTool (optTest opts) <> " is not executable"
 
     files <- if not (null ofiles)
-        then return ofiles
-        else concat <$> mapM (flip globDir1 baseDir) (maybe [] configTests config)
+        then return $ flip map ofiles $ \ofile ->
+            case span (/= ':') ofile of
+                (path, ':':test) -> (path, Just $ T.pack test)
+                (path, _)        -> (path, Nothing)
+        else map (, Nothing) . concat <$> mapM (flip globDir1 baseDir) (maybe [] configTests config)
+
     when (null files) $ fail $ "No test files"
 
     out <- startOutput $ optVerbose opts
-    ok <- allM (runTest out $ optTest opts) . concat =<< mapM parseTestFile files
+
+    tests <- forM files $ \(path, mbTestName) -> do
+        fileTests <- parseTestFile path
+        return $ case mbTestName of
+            Nothing -> fileTests
+            Just name -> filter ((==name) . testName) fileTests
+
+    ok <- allM (runTest out $ optTest opts) $ concat tests
     when (not ok) exitFailure
