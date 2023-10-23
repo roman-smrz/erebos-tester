@@ -10,6 +10,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 
+import Data.Either
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -150,6 +151,10 @@ evalSteps = mapM_ $ \case
     Expect line pname expr captures inner -> do
         p <- eval pname
         expect line p expr captures $ evalSteps inner
+
+    Flush pname expr -> do
+        p <- eval pname
+        flush p expr
 
     Guard line expr -> do
         testStepGuard line expr
@@ -303,6 +308,14 @@ expect (SourceLine sline) p expr tvars inner = do
              local (fmap $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }) inner
 
          Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
+
+flush :: Process -> Maybe (Expr Regex) -> TestRun ()
+flush p mbexpr = do
+    mbre <- sequence $ fmap eval mbexpr
+    atomicallyTest $ do
+        writeTVar (procOutput p) =<< case mbre of
+            Nothing -> return []
+            Just re -> filter (isLeft . regexMatch re) <$> readTVar (procOutput p)
 
 testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
 testStepGuard sline expr = do

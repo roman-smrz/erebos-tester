@@ -42,6 +42,7 @@ data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a)
               | Spawn (TypedVarName Process) (Either (Expr Network) (Expr Node)) [TestStep]
               | Send (Expr Process) (Expr Text)
               | Expect SourceLine (Expr Process) (Expr Regex) [TypedVarName Text] [TestStep]
+              | Flush (Expr Process) (Maybe (Expr Regex))
               | Guard SourceLine (Expr Bool)
               | DisconnectNode (Expr Node) [TestStep]
               | DisconnectNodes (Expr Network) [TestStep]

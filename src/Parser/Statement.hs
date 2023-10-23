@@ -106,6 +106,13 @@ instance ParamType a => ParamType [a] where
     paramDefault _ = return []
     paramFromSomeExpr _ se@(SomeExpr e) = cast e <|> ((:[]) <$> paramFromSomeExpr @a Proxy se)
 
+instance ParamType a => ParamType (Maybe a) where
+    type ParamRep (Maybe a) = Maybe (ParamRep a)
+    parseParam _ = Just <$> parseParam @a Proxy
+    showParamType _ = showParamType @a Proxy
+    paramDefault _ = return Nothing
+    paramFromSomeExpr _ se = Just <$> paramFromSomeExpr @a Proxy se
+
 instance (ParamType a, ParamType b) => ParamType (Either a b) where
     type ParamRep (Either a b) = Either (ParamRep a) (ParamRep b)
     parseParam _ = try (Left <$> parseParam @a Proxy) <|> (Right <$> parseParam @b Proxy)
@@ -289,6 +296,11 @@ testExpect = command "expect" $ Expect
     <*> param "capture"
     <*> innerBlock
 
+testFlush :: TestParser [TestStep]
+testFlush = command "flush" $ Flush
+    <$> paramOrContext "from"
+    <*> param ""
+
 testGuard :: TestParser [TestStep]
 testGuard = command "guard" $ Guard
     <$> cmdLine
@@ -344,6 +356,7 @@ testStep = choice
     , testSpawn
     , testSend
     , testExpect
+    , testFlush
     , testGuard
     , testDisconnectNode
     , testDisconnectNodes
