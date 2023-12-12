@@ -25,6 +25,7 @@ import Version
 
 data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
+    , optRepeat :: Int
     , optShowVersion :: Bool
     , optVerbose :: Bool
     }
@@ -32,6 +33,7 @@ data CmdlineOptions = CmdlineOptions
 defaultCmdlineOptions :: CmdlineOptions
 defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
+    , optRepeat = 1
     , optShowVersion = False
     , optVerbose = False
     }
@@ -61,6 +63,9 @@ options =
     , Option ['k'] ["keep"]
         (NoArg $ to $ \opts -> opts { optKeep = True })
         "keep test directory even if all tests succeed"
+    , Option ['r'] ["repeat"]
+        (ReqArg (\str opts -> opts { optRepeat = read str }) "COUNT")
+        "number of times to repeat the test(s)"
     , Option ['V'] ["version"]
         (NoArg $ \opts -> opts { optShowVersion = True })
         "show version and exit"
@@ -118,5 +123,6 @@ main = do
             Nothing -> fileTests
             Just name -> filter ((==name) . testName) fileTests
 
-    ok <- allM (runTest out $ optTest opts) $ concat tests
+    ok <- allM (runTest out $ optTest opts) $
+        concatMap (replicate (optRepeat opts)) $ concat tests
     when (not ok) exitFailure
