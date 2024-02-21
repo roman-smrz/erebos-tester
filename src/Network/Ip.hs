@@ -33,6 +33,7 @@ module Network.Ip (
 ) where
 
 import Control.Concurrent.STM
+import Control.Monad
 import Control.Monad.Writer
 
 import Data.Function

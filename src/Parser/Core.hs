@@ -1,6 +1,6 @@
 module Parser.Core where
 
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.State
 
 import Data.Text (Text)

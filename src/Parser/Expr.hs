@@ -9,7 +9,7 @@ module Parser.Expr (
 
 import Control.Applicative (liftA2)
 import Control.Monad.Combinators.Expr
-import Control.Monad.Identity
+import Control.Monad
 import Control.Monad.State
 
 import Data.Char

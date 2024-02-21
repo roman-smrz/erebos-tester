@@ -7,6 +7,7 @@ module GDB (
 
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Identity
 import Control.Monad.Reader

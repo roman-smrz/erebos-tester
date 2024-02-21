@@ -13,6 +13,7 @@ module Process (
 import Control.Arrow
 import Control.Concurrent
 import Control.Concurrent.STM
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 

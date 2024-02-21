@@ -8,6 +8,7 @@ module Output (
 ) where
 
 import Control.Concurrent.MVar
+import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 
