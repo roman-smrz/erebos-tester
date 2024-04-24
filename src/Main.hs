@@ -13,6 +13,7 @@ import System.Environment
 import System.Exit
 import System.FilePath
 import System.FilePath.Glob
+import System.IO
 
 import Config
 import Output
@@ -26,16 +27,18 @@ import Version
 data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
     , optRepeat :: Int
-    , optShowVersion :: Bool
     , optVerbose :: Bool
+    , optShowHelp :: Bool
+    , optShowVersion :: Bool
     }
 
 defaultCmdlineOptions :: CmdlineOptions
 defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
     , optRepeat = 1
-    , optShowVersion = False
     , optVerbose = False
+    , optShowHelp = False
+    , optShowVersion = False
     }
 
 options :: [OptDescr (CmdlineOptions -> CmdlineOptions)]
@@ -66,12 +69,15 @@ options =
     , Option ['r'] ["repeat"]
         (ReqArg (\str opts -> opts { optRepeat = read str }) "COUNT")
         "number of times to repeat the test(s)"
-    , Option ['V'] ["version"]
-        (NoArg $ \opts -> opts { optShowVersion = True })
-        "show version and exit"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
+    , Option ['h'] ["help"]
+        (NoArg $ \opts -> opts { optShowHelp = True })
+        "show this help and exit"
+    , Option ['V'] ["version"]
+        (NoArg $ \opts -> opts { optShowVersion = True })
+        "show version and exit"
     ]
   where
     to f opts = opts { optTest = f (optTest opts) }
@@ -95,8 +101,14 @@ main = do
     args <- getArgs
     (opts, ofiles) <- case getOpt Permute options args of
         (o, files, []) -> return (foldl (flip id) initOpts o, files)
-        (_, _, errs) -> ioError (userError (concat errs ++ usageInfo header options))
-            where header = "Usage: erebos-tester [OPTION...]"
+        (_, _, errs) -> do
+            hPutStrLn stderr $ concat errs <> "Try `erebos-tester --help' for more information."
+            exitFailure
+
+    when (optShowHelp opts) $ do
+        let header = "Usage: erebos-tester [OPTION...]"
+        putStrLn $ usageInfo header options
+        exitSuccess
 
     when (optShowVersion opts) $ do
         putStrLn versionLine
