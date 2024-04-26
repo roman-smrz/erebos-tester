@@ -20,12 +20,29 @@ category:            Testing
 extra-doc-files:
     CHANGELOG.md
 
+flag ci
+    description:    Options for CI testing
+    default: False
+    manual: True
+
 source-repository head
     type:       git
     location:   git://erebosprotocol.net/tester
 
+common common
+    ghc-options:
+        -Wall
+        -fdefer-typed-holes
+
+    if flag(ci)
+        ghc-options:
+            -Werror
+            -- sometimes needed for backward/forward compatibility:
+            -Wno-error=unused-imports
+
 executable erebos-tester
-  ghc-options:         -Wall
+  import: common
+
   main-is:             Wrapper.hs
   -- other-modules:
   -- other-extensions:
@@ -39,7 +56,10 @@ executable erebos-tester
   default-language:    Haskell2010
 
 executable erebos-tester-core
-  ghc-options:         -Wall -threaded
+  import: common
+  ghc-options:
+        -threaded
+
   main-is:             Main.hs
 
   other-modules:       Config
