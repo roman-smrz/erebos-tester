@@ -136,5 +136,5 @@ main = do
             Just name -> filter ((==name) . testName) fileTests
 
     ok <- allM (runTest out $ optTest opts) $
-        concatMap (replicate (optRepeat opts)) $ concat tests
+        concat $ replicate (optRepeat opts) $ concat tests
     when (not ok) exitFailure
