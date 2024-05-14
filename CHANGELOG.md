@@ -1,5 +1,14 @@
 # Revision history for erebos-tester
 
+## 0.2.1 -- 2024-05-14
+
+* Selection of test from test file path on command line using ':' charater
+* Added --repeat option to run the tests multiple times
+* Added --wait option to wait at the end of each test
+* Added 'flush' command
+* Show record selectors in failure reports
+* Compatibility with GHC up to 9.8
+
 ## 0.2.0 -- 2023-04-26
 
 * Lists and "for" statement.
