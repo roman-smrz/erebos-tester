@@ -9,7 +9,7 @@ description:
     different nodes, possibly within separate subnets, on the virtual network.
     Each instance can receive its own commands and produce output to be checked
     via standard input/output, as defined using custom script language.
-homepage:            http://erebosprotocol.net
+homepage:            https://erebosprotocol.net/tester
 -- bug-reports:
 license:             GPL-3.0-only
 license-file:        LICENSE
