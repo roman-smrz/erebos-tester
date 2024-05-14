@@ -18,6 +18,7 @@ maintainer:          roman.smrz@seznam.cz
 -- copyright:
 category:            Testing
 extra-doc-files:
+    README.md
     CHANGELOG.md
 
 flag ci
