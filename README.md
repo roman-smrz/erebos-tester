@@ -183,7 +183,20 @@ Members:
 
 Represents running process. Created by `spawn`, used by `send` and `expect` commands.
 
+Members:
+
+`node`: node on which the process is running
+
 #### list
+
+Lists are written using bracket notation:
+```
+let numbers = [1, 2, 4]
+```
+
+List elements can be of any type, but all elements of a particular list must have the same type.
+
+Used in the `for` command.
 
 ### Build-in commands
 
