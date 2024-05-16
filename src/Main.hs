@@ -47,7 +47,7 @@ options =
         (ReqArg (\str -> to $ \opts -> case break (==':') str of
                                             (path, []) -> opts { optDefaultTool = path }
                                             (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
-                ) "PATH")
+                ) "<path>")
         "test tool to be used"
     , Option ['v'] ["verbose"]
         (NoArg (\opts -> opts { optVerbose = True }))
@@ -55,7 +55,7 @@ options =
     , Option ['t'] ["timeout"]
         (ReqArg (\str -> to $ \opts -> case readMaybe str of
                                             Just timeout -> opts { optTimeout = timeout }
-                                            Nothing -> error "timeout must be a number") "SECONDS")
+                                            Nothing -> error "timeout must be a number") "<seconds>")
         "default timeout in seconds with microsecond precision"
     , Option ['g'] ["gdb"]
         (NoArg $ to $ \opts -> opts { optGDB = True })
@@ -67,7 +67,7 @@ options =
         (NoArg $ to $ \opts -> opts { optKeep = True })
         "keep test directory even if all tests succeed"
     , Option ['r'] ["repeat"]
-        (ReqArg (\str opts -> opts { optRepeat = read str }) "COUNT")
+        (ReqArg (\str opts -> opts { optRepeat = read str }) "<count>")
         "number of times to repeat the test(s)"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
@@ -106,7 +106,13 @@ main = do
             exitFailure
 
     when (optShowHelp opts) $ do
-        let header = "Usage: erebos-tester [OPTION...]"
+        let header = unlines
+                [ "Usage: erebos-tester [<option>...] [<script>[:<test>]...]"
+                , "  <script>    path to test script file"
+                , "  <test>      name of the test to run"
+                , ""
+                ]
+                <> "Options are:"
         putStrLn $ usageInfo header options
         exitSuccess
 
