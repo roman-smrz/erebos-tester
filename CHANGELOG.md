@@ -1,11 +1,17 @@
 # Revision history for erebos-tester
 
+## 0.2.2 -- 2024-05-17
+
+* Fix unshare failing with newer compilers
+* Documentation and helptext updates
+* Compatibility with GHC up to 9.10
+
 ## 0.2.1 -- 2024-05-14
 
-* Selection of test from test file path on command line using ':' charater
-* Added --repeat option to run the tests multiple times
-* Added --wait option to wait at the end of each test
-* Added 'flush' command
+* Selection of test from test file path on command line using '`:`' charater
+* Added `--repeat` option to run the tests multiple times
+* Added `--wait` option to wait at the end of each test
+* Added `flush` command
 * Show record selectors in failure reports
 * Compatibility with GHC up to 9.8
 
