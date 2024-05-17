@@ -43,6 +43,13 @@ common common
 
 executable erebos-tester
   import: common
+  ghc-options:
+        -- disable interval timer to avoid spawing thread that breaks unshare(CLONE_NEWUSER)
+        -with-rtsopts=-V0
+  if impl(ghc >= 9.8)
+        ghc-options:
+            -- no multithreading is allowed for unshare(CLONE_NEWUSER)
+            -single-threaded
 
   main-is:             Wrapper.hs
   -- other-modules:
