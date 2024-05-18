@@ -160,7 +160,7 @@ regular expressions expand are used directly.
 ```
 let str = "."
 let re1 = /./
-let re2 = "$str$re1" # match '.' followed by any character
+let re2 = /$str$re1/ # match '.' followed by any character
 ```
 
 #### boolean
