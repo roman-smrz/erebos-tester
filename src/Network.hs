@@ -110,6 +110,7 @@ instance ExprType Node where
 
     recordMembers = map (first T.pack)
         [ ("ip", RecordSelector $ textIpAddress . nodeIp)
+        , ("network", RecordSelector $ nodeNetwork)
         ]
 
 

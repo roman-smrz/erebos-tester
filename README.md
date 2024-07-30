@@ -173,11 +173,16 @@ Represents network/subnet, created by `subnet` command and used by `subnet`, `no
 
 #### node
 
-Represents network node, created by `node` command and used by `spawn` or network configuration commands.
+Represents network node, created by `node` command or implicitly by `spawn`,
+and used by `spawn` or network configuration commands.
 
 Members:
 
-`ip`: string representation of node's IP address.
+`ip`
+: String representation of node's IP address.
+
+`network`
+: The network which the node belogs to.
 
 #### process
 
@@ -185,7 +190,8 @@ Represents running process. Created by `spawn`, used by `send` and `expect` comm
 
 Members:
 
-`node`: node on which the process is running
+`node`
+: Node on which the process is running.
 
 #### list
 
