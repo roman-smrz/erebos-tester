@@ -14,6 +14,8 @@ import System.Exit
 import System.FilePath
 import System.FilePath.Glob
 import System.IO
+import System.Posix.Terminal
+import System.Posix.Types
 
 import Config
 import Output
@@ -28,6 +30,7 @@ data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
     , optRepeat :: Int
     , optVerbose :: Bool
+    , optColor :: Maybe Bool
     , optShowHelp :: Bool
     , optShowVersion :: Bool
     }
@@ -37,6 +40,7 @@ defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
     , optRepeat = 1
     , optVerbose = False
+    , optColor = Nothing
     , optShowHelp = False
     , optShowVersion = False
     }
@@ -52,6 +56,12 @@ options =
     , Option ['v'] ["verbose"]
         (NoArg (\opts -> opts { optVerbose = True }))
         "show output of processes and successful tests"
+    , Option [] [ "color" ]
+        (NoArg (\opts -> opts { optColor = Just True }))
+        "always use colors for output (default when stdout is tty)"
+    , Option [] [ "no-color" ]
+        (NoArg (\opts -> opts { optColor = Just False }))
+        "never use colors for output (default when stdout is not a tty)"
     , Option ['t'] ["timeout"]
         (ReqArg (\str -> to $ \opts -> case readMaybe str of
                                             Just timeout -> opts { optTimeout = timeout }
@@ -133,7 +143,10 @@ main = do
 
     when (null files) $ fail $ "No test files"
 
-    out <- startOutput $ optVerbose opts
+    useColor <- case optColor opts of
+        Just use -> return use
+        Nothing -> queryTerminal (Fd 1)
+    out <- startOutput (optVerbose opts) useColor
 
     tests <- forM files $ \(path, mbTestName) -> do
         fileTests <- parseTestFile path

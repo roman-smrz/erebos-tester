@@ -27,6 +27,7 @@ data Output = Output
 
 data OutputConfig = OutputConfig
     { outVerbose :: Bool
+    , outUseColor :: Bool
     }
 
 data OutputState = OutputState
@@ -50,10 +51,10 @@ class MonadIO m => MonadOutput m where
 instance MonadIO m => MonadOutput (ReaderT Output m) where
     getOutput = ask
 
-startOutput :: Bool -> IO Output
-startOutput verbose = Output
+startOutput :: Bool -> Bool -> IO Output
+startOutput outVerbose outUseColor = Output
     <$> newMVar OutputState { outPrint = TL.putStrLn, outHistory = emptyHistory }
-    <*> pure OutputConfig { outVerbose = verbose }
+    <*> pure OutputConfig { .. }
 
 outColor :: OutputType -> Text
 outColor OutputChildStdout = T.pack "0"
@@ -97,11 +98,15 @@ outLine :: MonadOutput m => OutputType -> Maybe Text -> Text -> m ()
 outLine otype prompt line = ioWithOutput $ \out ->
     when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
         withMVar (outState out) $ \st -> do
-            outPrint st $ TL.fromChunks
-                [ T.pack "\ESC[", outColor otype, T.pack "m"
-                , maybe "" (<> outSign otype <> outArr otype <> " ") prompt
-                , line
-                , T.pack "\ESC[0m"
+            outPrint st $ TL.fromChunks $ concat
+                [ if outUseColor (outConfig out)
+                    then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
+                    else []
+                , [ maybe "" (<> outSign otype <> outArr otype <> " ") prompt ]
+                , [ line ]
+                , if outUseColor (outConfig out)
+                    then [ T.pack "\ESC[0m" ]
+                    else []
                 ]
 
 outPromptGetLine :: MonadOutput m => Text -> m (Maybe Text)
