@@ -1,4 +1,5 @@
 module Test (
+    Module(..),
     Test(..),
     TestStep(..),
     SourceLine(..),
@@ -29,6 +30,11 @@ import Text.Regex.TDFA.Text qualified as RE
 import {-# SOURCE #-} Network
 import {-# SOURCE #-} Process
 import Util
+
+data Module = Module
+    { moduleName :: [ Text ]
+    , moduleTests :: [ Test ]
+    }
 
 data Test = Test
     { testName :: Text

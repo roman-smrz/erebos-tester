@@ -1,4 +1,6 @@
 module Parser.Expr (
+    identifier,
+
     varName,
     newVarName,
     addVarName,

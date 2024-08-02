@@ -6,14 +6,18 @@ module Parser (
 
 import Control.Monad.State
 
-import qualified Data.Text.Lazy as TL
-import qualified Data.Text.Lazy.IO as TL
+import Data.Text (Text)
+import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Text.Lazy.IO qualified as TL
 
 import Text.Megaparsec hiding (State)
 
 import System.Exit
+import System.FilePath
 
 import Parser.Core
+import Parser.Expr
 import Parser.Statement
 import Test
 
@@ -24,19 +28,28 @@ parseTestDefinition = label "test definition" $ toplevel $ do
               wsymbol "test"
               lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
 
-parseTestDefinitions :: TestParser [Test]
-parseTestDefinitions = do
-    tests <- many parseTestDefinition
+parseTestModule :: Text -> TestParser Module
+parseTestModule defaultName = do
+    moduleName <- choice
+        [ label "module declaration" $ do
+            wsymbol "module"
+            x <- identifier
+            (x:) <$> many (symbol "." >> identifier)
+        , do
+            return $ [ defaultName ]
+        ]
+    moduleTests <- many parseTestDefinition
     eof
-    return tests
+    return Module { .. }
 
-parseTestFile :: FilePath -> IO [Test]
+parseTestFile :: FilePath -> IO Module
 parseTestFile path = do
     content <- TL.readFile path
     let initState = TestParserState
             { testVars = []
             , testContext = SomeExpr RootNetwork
             }
-    case evalState (runParserT parseTestDefinitions path content) initState of
+        defaultModuleName = T.pack $ takeBaseName path
+    case evalState (runParserT (parseTestModule defaultModuleName) path content) initState of
          Left err -> putStr (errorBundlePretty err) >> exitFailure
          Right tests -> return tests
