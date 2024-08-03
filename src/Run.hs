@@ -121,6 +121,10 @@ evalSteps = mapM_ $ \case
         forM_ value $ \i -> do
             withVar name i $ evalSteps inner
 
+    ExprStatement expr -> do
+        TestBlock steps <- eval expr
+        evalSteps steps
+
     Subnet name@(TypedVarName vname) parentExpr inner -> do
         parent <- eval parentExpr
         withSubnet parent (Just name) $ \net -> do

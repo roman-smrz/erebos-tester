@@ -2,6 +2,7 @@ module Test (
     Module(..),
     Test(..),
     TestStep(..),
+    TestBlock(..),
     SourceLine(..),
 
     MonadEval(..),
@@ -41,8 +42,11 @@ data Test = Test
     , testSteps :: [TestStep]
     }
 
+newtype TestBlock = TestBlock [ TestStep ]
+
 data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) [TestStep]
               | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [a]) [TestStep]
+              | ExprStatement (Expr TestBlock)
               | Subnet (TypedVarName Network) (Expr Network) [TestStep]
               | DeclNode (TypedVarName Node) (Expr Network) [TestStep]
               | Spawn (TypedVarName Process) (Either (Expr Network) (Expr Node)) [TestStep]
@@ -125,6 +129,11 @@ instance ExprType a => ExprType [a] where
     emptyVarValue = []
 
     exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
+
+instance ExprType TestBlock where
+    textExprType _ = "test block"
+    textExprValue _ = "<test block>"
+    emptyVarValue = TestBlock []
 
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
