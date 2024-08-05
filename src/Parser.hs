@@ -39,7 +39,7 @@ parseTestModule absPath = do
             x <- identifier
             name <- (x:) <$> many (symbol "." >> identifier)
             when (or (zipWith (/=) (reverse name) (reverse $ map T.pack $ splitDirectories $ dropExtension $ absPath))) $ do
-                parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+                registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
                     "module name does not match file path"
             eol >> scn
             return name

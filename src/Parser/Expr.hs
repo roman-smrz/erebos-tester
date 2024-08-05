@@ -48,7 +48,7 @@ newVarName = do
 addVarName :: forall a. ExprType a => Int -> TypedVarName a -> TestParser ()
 addVarName off (TypedVarName name) = do
     gets (lookup name . testVars) >>= \case
-        Just _ -> parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+        Just _ -> registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             T.pack "variable '" <> textVarName name <> T.pack "' already exists"
         Nothing -> return ()
     modify $ \s -> s { testVars = (name, SomeExprType @a Proxy) : testVars s }
@@ -67,8 +67,10 @@ stringExpansion :: ExprType a => Text -> (forall b. ExprType b => Expr b -> [May
 stringExpansion tname conv = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpansion
-    let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-            [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
+    let err = do
+            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
+            return $ Pure emptyVarValue
 
     maybe err return $ listToMaybe $ catMaybes $ conv e
 
@@ -312,6 +314,8 @@ typedExpr :: forall a. ExprType a => TestParser (Expr a)
 typedExpr = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpr
-    let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-            [ T.pack "expected '", textExprType @a Proxy, T.pack "', expression has type '", textExprType e, T.pack "'" ]
+    let err = do
+            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                [ T.pack "expected '", textExprType @a Proxy, T.pack "', expression has type '", textExprType e, T.pack "'" ]
+            return $ Pure emptyVarValue
     maybe err return $ cast e

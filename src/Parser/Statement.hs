@@ -116,7 +116,13 @@ instance ParamType a => ParamType (Maybe a) where
 
 instance (ParamType a, ParamType b) => ParamType (Either a b) where
     type ParamRep (Either a b) = Either (ParamRep a) (ParamRep b)
-    parseParam _ = try (Left <$> parseParam @a Proxy) <|> (Right <$> parseParam @b Proxy)
+    parseParam _ = try' (Left <$> parseParam @a Proxy) <|> (Right <$> parseParam @b Proxy)
+      where
+        try' act = try $ do
+            x <- act
+            (stateParseErrors <$> getParserState) >>= \case
+                [] -> return x
+                (_ : _) -> fail ""
     showParamType _ = showParamType @a Proxy ++ " or " ++ showParamType @b Proxy
     paramFromSomeExpr _ se = (Left <$> paramFromSomeExpr @a Proxy se) <|> (Right <$> paramFromSomeExpr @b Proxy se)
 
@@ -255,7 +261,7 @@ testWith = do
     notAllowed <- flip allM expected $ \case
         SomeExprType (Proxy :: Proxy a) | Just (Refl :: ctxe :~: a) <- eqT -> return False
         _ -> return True
-    when notAllowed $ parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+    when notAllowed $ registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
         "expected " <> T.intercalate ", " (map (("'"<>) . (<>"'") . textSomeExprType) expected) <> ", expression has type '" <> textExprType @ctxe Proxy <> "'"
 
     symbol ":"
