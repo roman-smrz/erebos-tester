@@ -2,6 +2,7 @@ module Parser.Core where
 
 import Control.Monad
 import Control.Monad.State
+import Control.Monad.Writer
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as TL
@@ -15,9 +16,12 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Network ()
 import Test
 
-type TestParser = ParsecT Void TestStream (State TestParserState)
+type TestParser = ParsecT Void TestStream (WriterT [ Toplevel ] (State TestParserState))
 
 type TestStream = TL.Text
+
+data Toplevel
+    = ToplevelTest Test
 
 data TestParserState = TestParserState
     { testVars :: [(VarName, SomeExprType)]
@@ -65,8 +69,8 @@ localState inner = do
     put s
     return x
 
-toplevel :: TestParser a -> TestParser a
-toplevel = L.nonIndented scn
+toplevel :: (a -> Toplevel) -> TestParser a -> TestParser ()
+toplevel f = tell . (: []) . f <=< L.nonIndented scn
 
 block :: (a -> [b] -> TestParser c) -> TestParser a -> TestParser b -> TestParser c
 block merge header item = L.indentBlock scn $ do

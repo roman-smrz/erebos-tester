@@ -5,7 +5,9 @@ module Parser (
 ) where
 
 import Control.Monad.State
+import Control.Monad.Writer
 
+import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -24,8 +26,8 @@ import Parser.Statement
 import Test
 import Test.Builtins
 
-parseTestDefinition :: TestParser Test
-parseTestDefinition = label "test definition" $ toplevel $ do
+parseTestDefinition :: TestParser ()
+parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
     block (\name steps -> return $ Test name $ concat steps) header testStep
     where header = do
               wsymbol "test"
@@ -47,7 +49,10 @@ parseTestModule absPath = do
         , do
             return $ [ T.pack $ takeBaseName absPath ]
         ]
-    moduleTests <- many parseTestDefinition
+    (_, toplevels) <- listen $ many $ choice
+        [ parseTestDefinition
+        ]
+    let moduleTests = catMaybes $ map (\case ToplevelTest x -> Just x; {- _ -> Nothing -}) toplevels
     eof
     return Module { .. }
 
@@ -56,9 +61,13 @@ parseTestFile path = do
     content <- TL.readFile path
     absPath <- makeAbsolute path
     let initState = TestParserState
-            { testVars = map (fmap someVarValueType) builtins
+            { testVars = concat
+                [ map (fmap someVarValueType) builtins
+                ]
             , testContext = SomeExpr RootNetwork
             }
-    case evalState (runParserT (parseTestModule absPath) path content) initState of
+        (res, _) = flip evalState initState $ runWriterT $ runParserT (parseTestModule absPath) path content
+
+    case res of
          Left err -> putStr (errorBundlePretty err) >> exitFailure
          Right testModule -> return testModule
