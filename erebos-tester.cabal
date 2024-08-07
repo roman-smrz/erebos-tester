@@ -87,6 +87,7 @@ executable erebos-tester-core
                        Run
                        Run.Monad
                        Test
+                       Test.Builtins
                        Util
                        Version
                        Version.Git

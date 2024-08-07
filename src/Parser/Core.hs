@@ -24,9 +24,6 @@ data TestParserState = TestParserState
     , testContext :: SomeExpr
     }
 
-data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
-data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
-
 someEmptyVar :: SomeExprType -> SomeVarValue
 someEmptyVar (SomeExprType (Proxy :: Proxy a)) = SomeVarValue $ emptyVarValue @a
 

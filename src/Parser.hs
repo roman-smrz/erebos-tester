@@ -22,6 +22,7 @@ import Parser.Core
 import Parser.Expr
 import Parser.Statement
 import Test
+import Test.Builtins
 
 parseTestDefinition :: TestParser Test
 parseTestDefinition = label "test definition" $ toplevel $ do
@@ -55,7 +56,7 @@ parseTestFile path = do
     content <- TL.readFile path
     absPath <- makeAbsolute path
     let initState = TestParserState
-            { testVars = []
+            { testVars = map (fmap someVarValueType) builtins
             , testContext = SomeExpr RootNetwork
             }
     case evalState (runParserT (parseTestModule absPath) path content) initState of

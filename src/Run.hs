@@ -32,6 +32,7 @@ import Output
 import Process
 import Run.Monad
 import Test
+import Test.Builtins
 
 runTest :: Output -> TestOptions -> Test -> IO Bool
 runTest out opts test = do
@@ -60,7 +61,7 @@ runTest out opts test = do
             }
         tstate = TestState
             { tsNetwork = error "network not initialized"
-            , tsVars = []
+            , tsVars = builtins
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty

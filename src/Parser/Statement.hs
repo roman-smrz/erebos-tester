@@ -75,6 +75,11 @@ forStatement = do
         body <- testBlock indent
         return [For line tname (unpack <$> e) body]
 
+exprStatement :: TestParser [ TestStep ]
+exprStatement  = do
+    expr <- typedExpr
+    return [ ExprStatement expr ]
+
 class (Typeable a, Typeable (ParamRep a)) => ParamType a where
     type ParamRep a :: Type
     type ParamRep a = a
@@ -335,11 +340,6 @@ testPacketLoss = command "packet_loss" $ PacketLoss
     <*> innerBlock
 
 
-testWait :: TestParser [TestStep]
-testWait = do
-    wsymbol "wait"
-    return [Wait]
-
 testBlock :: Pos -> TestParser [TestStep]
 testBlock indent = concat <$> go
   where
@@ -369,5 +369,5 @@ testStep = choice
     , testDisconnectNodes
     , testDisconnectUpstream
     , testPacketLoss
-    , testWait
+    , exprStatement
     ]

@@ -7,8 +7,8 @@ module Test (
 
     MonadEval(..),
     VarName(..), TypedVarName(..), textVarName, unpackVarName,
-    ExprType(..),
-    SomeVarValue(..), fromSomeVarValue, textSomeVarValue,
+    ExprType(..), SomeExpr(..), SomeExprType(..), someExprType,
+    SomeVarValue(..), fromSomeVarValue, textSomeVarValue, someVarValueType,
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
@@ -135,9 +135,16 @@ instance ExprType TestBlock where
     textExprValue _ = "<test block>"
     emptyVarValue = TestBlock []
 
-data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
-data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
+data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
+
+data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
+
+someExprType :: SomeExpr -> SomeExprType
+someExprType (SomeExpr (_ :: Expr a)) = SomeExprType (Proxy @a)
+
+
+data SomeVarValue = forall a. ExprType a => SomeVarValue a
 
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m a
 fromSomeVarValue name (SomeVarValue value) = maybe (fail err) return $ cast value
@@ -145,6 +152,12 @@ fromSomeVarValue name (SomeVarValue value) = maybe (fail err) return $ cast valu
 
 textSomeVarValue :: SomeVarValue -> Text
 textSomeVarValue (SomeVarValue value) = textExprValue value
+
+someVarValueType :: SomeVarValue -> SomeExprType
+someVarValueType (SomeVarValue (_ :: a)) = SomeExprType (Proxy @a)
+
+
+data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
 
 data ExprListUnpacker a = forall e. ExprType e => ExprListUnpacker (a -> [e]) (Proxy a -> Proxy e)
 
