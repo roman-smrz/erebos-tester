@@ -1,5 +1,12 @@
 # Revision history for erebos-tester
 
+## 0.2.3 -- 2024-08-10
+
+* Added `network` member to the `node` object
+* Use colors by default only on terminal, add `--color`/`--no-color` options to select manually.
+* Accept module name declaration
+* Report multiple parsing errors in single pass
+
 ## 0.2.2 -- 2024-05-17
 
 * Fix unshare failing with newer compilers
