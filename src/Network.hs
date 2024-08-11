@@ -101,12 +101,10 @@ instance HasNetns Node where getNetns = nodeNetns
 instance ExprType Network where
     textExprType _ = T.pack "network"
     textExprValue n = "s:" <> textNetworkName (netPrefix n)
-    emptyVarValue = Network (IpPrefix []) undefined undefined undefined undefined undefined undefined
 
 instance ExprType Node where
     textExprType _ = T.pack "node"
     textExprValue n = T.pack "n:" <> textNodeName (nodeName n)
-    emptyVarValue = Node (IpAddress (IpPrefix []) 0) (NodeName T.empty 0) undefined undefined undefined undefined
 
     recordMembers = map (first T.pack)
         [ ("ip", RecordSelector $ textIpAddress . nodeIp)

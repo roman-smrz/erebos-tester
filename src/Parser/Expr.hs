@@ -72,7 +72,7 @@ stringExpansion tname conv = do
     let err = do
             registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
                 [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
-            return $ Pure emptyVarValue
+            return $ Undefined "expansion not defined for type"
 
     maybe err return $ listToMaybe $ catMaybes $ conv e
 
@@ -326,5 +326,5 @@ typedExpr = do
     let err = do
             registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
                 [ T.pack "expected '", textExprType @a Proxy, T.pack "', expression has type '", textExprType e, T.pack "'" ]
-            return $ Pure emptyVarValue
+            return $ Undefined "unexpected type"
     maybe err return $ cast e

@@ -84,7 +84,6 @@ unpackVarName = T.unpack . textVarName
 class Typeable a => ExprType a where
     textExprType :: proxy a -> Text
     textExprValue :: a -> Text
-    emptyVarValue :: a
 
     recordMembers :: [(Text, RecordSelector a)]
     recordMembers = []
@@ -98,42 +97,35 @@ class Typeable a => ExprType a where
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
     textExprValue x = T.pack (show x)
-    emptyVarValue = 0
 
     exprEnumerator _ = Just $ ExprEnumerator enumFromTo enumFromThenTo
 
 instance ExprType Scientific where
     textExprType _ = T.pack "number"
     textExprValue x = T.pack (show x)
-    emptyVarValue = 0
 
 instance ExprType Bool where
     textExprType _ = T.pack "bool"
     textExprValue True = T.pack "true"
     textExprValue False = T.pack "false"
-    emptyVarValue = False
 
 instance ExprType Text where
     textExprType _ = T.pack "string"
     textExprValue x = T.pack (show x)
-    emptyVarValue = T.empty
 
 instance ExprType Regex where
     textExprType _ = T.pack "regex"
     textExprValue _ = T.pack "<regex>"
-    emptyVarValue = either error id $ regexCompile T.empty
 
 instance ExprType a => ExprType [a] where
     textExprType _ = "[" <> textExprType @a Proxy <> "]"
     textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
-    emptyVarValue = []
 
     exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
 
 instance ExprType TestBlock where
     textExprType _ = "test block"
     textExprValue _ = "<test block>"
-    emptyVarValue = TestBlock []
 
 
 data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
@@ -171,6 +163,7 @@ data Expr a where
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Regex] -> Expr Regex
     RootNetwork :: Expr Network
+    Undefined :: String -> Expr a
 
 data AppAnnotation b = AnnNone
                      | ExprType b => AnnRecord Text
@@ -193,6 +186,7 @@ eval (Regex xs) = mapM eval xs >>= \case
         Left err -> fail err
         Right re -> return re
 eval (RootNetwork) = rootNetwork
+eval (Undefined err) = fail err
 
 gatherVars :: forall a m. MonadEval m => Expr a -> m [((VarName, [Text]), SomeVarValue)]
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
@@ -209,6 +203,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
     helper (Concat es) = concat <$> mapM helper es
     helper (Regex es) = concat <$> mapM helper es
     helper (RootNetwork) = return []
+    helper (Undefined {}) = return []
 
     gatherSelectors :: forall b. Expr b -> Maybe (VarName, [Text])
     gatherSelectors = \case

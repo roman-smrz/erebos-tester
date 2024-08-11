@@ -50,7 +50,6 @@ instance Eq Process where
 instance ExprType Process where
     textExprType _ = T.pack "proc"
     textExprValue n = T.pack "p:" <> textProcName (procName n)
-    emptyVarValue = Process (ProcName T.empty) undefined undefined undefined undefined emptyVarValue
 
     recordMembers = map (first T.pack)
         [ ("node", RecordSelector $ procNode)
