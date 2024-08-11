@@ -123,7 +123,7 @@ instance (ParamType a, ParamType b) => ParamType (Either a b) where
     type ParamRep (Either a b) = Either (ParamRep a) (ParamRep b)
     parseParam _ = try' (Left <$> parseParam @a Proxy) <|> (Right <$> parseParam @b Proxy)
       where
-        try' act = try $ do
+        try' act = try $ region id $ do
             x <- act
             (stateParseErrors <$> getParserState) >>= \case
                 [] -> return x
