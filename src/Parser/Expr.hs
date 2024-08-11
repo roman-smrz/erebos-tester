@@ -26,7 +26,9 @@ import Data.Void
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
+import Text.Megaparsec.Char.Lexer qualified as L
+import Text.Regex.TDFA qualified as RE
+import Text.Regex.TDFA.Text qualified as RE
 
 import Parser.Core
 import Test
@@ -58,7 +60,7 @@ someExpansion = do
     void $ char '$'
     choice
         [do name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
-            SomeVarValue (_ :: a) <- lookupVar name
+            SomeExprType (_ :: Proxy a) <- lookupVarType name
             return $ SomeExpr $ Variable @a name
         , between (char '{') (char '}') someExpr
         ]
@@ -111,6 +113,7 @@ quotedString = label "string" $ lexeme $ do
 
 regex :: TestParser (Expr Regex)
 regex = label "regular expression" $ lexeme $ do
+    off <- stateOffset <$> getParserState
     void $ char '/'
     let inner = choice
             [ char '/' >> return []
@@ -129,9 +132,15 @@ regex = label "regular expression" $ lexeme $ do
                     ]
                 (e:) <$> inner
             ]
-    expr <- Regex <$> inner
-    _ <- eval expr -- test regex parsing with empty variables
-    return expr
+    parts <- inner
+    let testEval = \case
+            Pure (RegexPart p) -> p
+            _ -> ""
+    case RE.compile RE.defaultCompOpt RE.defaultExecOpt $ T.concat $ map testEval parts of
+        Left err -> registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+            [ "failed to parse regular expression: ", T.pack err ]
+        Right _ -> return ()
+    return $ Regex parts
 
 list :: TestParser SomeExpr
 list = label "list" $ do
@@ -307,7 +316,7 @@ someExpr = join inner <?> "expression"
 
     variable = label "variable" $ do
         name <- varName
-        SomeVarValue (_ :: a) <- lookupVar name
+        SomeExprType (_ :: Proxy a) <- lookupVarType name
         return $ return $ SomeExpr $ Variable @a name
 
 typedExpr :: forall a. ExprType a => TestParser (Expr a)

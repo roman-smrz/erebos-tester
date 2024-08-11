@@ -6,7 +6,6 @@ import Control.Monad.Writer
 
 import Data.Text (Text)
 import qualified Data.Text.Lazy as TL
-import Data.Typeable
 import Data.Void
 
 import Text.Megaparsec hiding (State)
@@ -28,15 +27,11 @@ data TestParserState = TestParserState
     , testContext :: SomeExpr
     }
 
-someEmptyVar :: SomeExprType -> SomeVarValue
-someEmptyVar (SomeExprType (Proxy :: Proxy a)) = SomeVarValue $ emptyVarValue @a
-
 textSomeExprType :: SomeExprType -> Text
 textSomeExprType (SomeExprType p) = textExprType p
 
-instance MonadEval TestParser where
-    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") (return . someEmptyVar) =<< gets (lookup name . testVars)
-    rootNetwork = return emptyVarValue
+lookupVarType :: VarName -> TestParser SomeExprType
+lookupVarType name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< gets (lookup name . testVars)
 
 skipLineComment :: TestParser ()
 skipLineComment = L.skipLineComment $ TL.pack "#"
