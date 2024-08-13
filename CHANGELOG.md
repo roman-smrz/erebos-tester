@@ -1,5 +1,10 @@
 # Revision history for erebos-tester
 
+## 0.2.4 -- 2024-08-13
+
+* Fix build with mtl-2.3
+* Fix type error reporting for some command parameters
+
 ## 0.2.3 -- 2024-08-10
 
 * Added `network` member to the `node` object
