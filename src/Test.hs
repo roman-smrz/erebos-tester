@@ -7,7 +7,9 @@ module Test (
 
     MonadEval(..),
     VarName(..), TypedVarName(..), textVarName, unpackVarName,
-    ExprType(..), SomeExpr(..), SomeExprType(..), someExprType,
+    ExprType(..), SomeExpr(..),
+    TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
+    DynamicType,
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue, someVarValueType,
     RecordSelector(..),
     ExprListUnpacker(..),
@@ -69,7 +71,7 @@ class MonadFail m => MonadEval m where
 
 
 newtype VarName = VarName Text
-    deriving (Eq, Ord)
+    deriving (Eq, Ord, Show)
 
 newtype TypedVarName a = TypedVarName { fromTypedVarName :: VarName }
     deriving (Eq, Ord)
@@ -128,12 +130,27 @@ instance ExprType TestBlock where
     textExprValue _ = "<test block>"
 
 
+data DynamicType
+
+instance ExprType DynamicType where
+    textExprType _ = "ambiguous type"
+    textExprValue _ = "<dynamic type>"
+
 data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
 
-data SomeExprType = forall a. ExprType a => SomeExprType (Proxy a)
+newtype TypeVar = TypeVar Text
+    deriving (Eq, Ord)
+
+data SomeExprType
+    = forall a. ExprType a => ExprTypePrim (Proxy a)
+    | ExprTypeVar TypeVar
 
 someExprType :: SomeExpr -> SomeExprType
-someExprType (SomeExpr (_ :: Expr a)) = SomeExprType (Proxy @a)
+someExprType (SomeExpr (_ :: Expr a)) = ExprTypePrim (Proxy @a)
+
+textSomeExprType :: SomeExprType -> Text
+textSomeExprType (ExprTypePrim p) = textExprType p
+textSomeExprType (ExprTypeVar (TypeVar name)) = name
 
 
 data SomeVarValue = forall a. ExprType a => SomeVarValue a
@@ -146,7 +163,7 @@ textSomeVarValue :: SomeVarValue -> Text
 textSomeVarValue (SomeVarValue value) = textExprValue value
 
 someVarValueType :: SomeVarValue -> SomeExprType
-someVarValueType (SomeVarValue (_ :: a)) = SomeExprType (Proxy @a)
+someVarValueType (SomeVarValue (_ :: a)) = ExprTypePrim (Proxy @a)
 
 
 data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
@@ -158,6 +175,7 @@ data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 
 data Expr a where
     Variable :: ExprType a => VarName -> Expr a
+    DynVariable :: TypeVar -> VarName -> Expr DynamicType
     Pure :: a -> Expr a
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
     Concat :: [Expr Text] -> Expr Text
@@ -177,6 +195,7 @@ instance Applicative Expr where
 
 eval :: MonadEval m => Expr a -> m a
 eval (Variable name) = fromSomeVarValue name =<< lookupVar name
+eval (DynVariable _ _) = fail "ambiguous type"
 eval (Pure value) = return value
 eval (App _ f x) = eval f <*> eval x
 eval (Concat xs) = T.concat <$> mapM eval xs
@@ -193,6 +212,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m [((VarName, [Text]), SomeVarValue)]
     helper (Variable var) = (:[]) . ((var, []),) <$> lookupVar var
+    helper (DynVariable _ var) = (:[]) . ((var, []),) <$> lookupVar var
     helper (Pure _) = return []
     helper e@(App (AnnRecord sel) _ x)
         | Just (var, sels) <- gatherSelectors x

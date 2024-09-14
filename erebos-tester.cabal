@@ -103,6 +103,7 @@ executable erebos-tester-core
                        ImportQualifiedPost
                        LambdaCase
                        MultiParamTypeClasses
+                       MultiWayIf
                        OverloadedStrings
                        RankNTypes
                        RecordWildCards

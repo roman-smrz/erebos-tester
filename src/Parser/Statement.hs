@@ -259,12 +259,12 @@ testWith = do
     off <- stateOffset <$> getParserState
     ctx@(SomeExpr (_ :: Expr ctxe)) <- someExpr
     let expected =
-            [ SomeExprType @Network Proxy
-            , SomeExprType @Node Proxy
-            , SomeExprType @Process Proxy
+            [ ExprTypePrim @Network Proxy
+            , ExprTypePrim @Node Proxy
+            , ExprTypePrim @Process Proxy
             ]
     notAllowed <- flip allM expected $ \case
-        SomeExprType (Proxy :: Proxy a) | Just (Refl :: ctxe :~: a) <- eqT -> return False
+        ExprTypePrim (Proxy :: Proxy a) | Just (Refl :: ctxe :~: a) <- eqT -> return False
         _ -> return True
     when notAllowed $ registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
         "expected " <> T.intercalate ", " (map (("'"<>) . (<>"'") . textSomeExprType) expected) <> ", expression has type '" <> textExprType @ctxe Proxy <> "'"

@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.Writer
 
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
@@ -66,8 +67,10 @@ parseTestFile path = do
                 [ map (fmap someVarValueType) builtins
                 ]
             , testContext = SomeExpr RootNetwork
+            , testNextTypeVar = 0
+            , testTypeUnif = M.empty
             }
-        (res, _) = flip evalState initState $ runWriterT $ runParserT (parseTestModule absPath) path content
+        (res, _) = runWriter $ flip (flip runParserT path) content $ flip evalStateT initState $ parseTestModule absPath
 
     case res of
          Left err -> putStr (errorBundlePretty err) >> exitFailure

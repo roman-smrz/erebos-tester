@@ -4,8 +4,13 @@ import Control.Monad
 import Control.Monad.State
 import Control.Monad.Writer
 
-import Data.Text (Text)
-import qualified Data.Text.Lazy as TL
+import Data.Map (Map)
+import Data.Map qualified as M
+import Data.Maybe
+import Data.Set qualified as S
+import Data.Text qualified as T
+import Data.Text.Lazy qualified as TL
+import Data.Typeable
 import Data.Void
 
 import Text.Megaparsec hiding (State)
@@ -15,23 +20,127 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Network ()
 import Test
 
-type TestParser = ParsecT Void TestStream (WriterT [ Toplevel ] (State TestParserState))
+type TestParser = StateT TestParserState (ParsecT Void TestStream (Writer [ Toplevel ]))
 
 type TestStream = TL.Text
+
+type TestParseError = ParseError TestStream Void
 
 data Toplevel
     = ToplevelTest Test
 
 data TestParserState = TestParserState
-    { testVars :: [(VarName, SomeExprType)]
+    { testVars :: [ ( VarName, SomeExprType ) ]
     , testContext :: SomeExpr
+    , testNextTypeVar :: Int
+    , testTypeUnif :: Map TypeVar SomeExprType
     }
 
-textSomeExprType :: SomeExprType -> Text
-textSomeExprType (SomeExprType p) = textExprType p
+newTypeVar :: TestParser TypeVar
+newTypeVar = do
+    idx <- gets testNextTypeVar
+    modify $ \s -> s { testNextTypeVar = idx + 1 }
+    return $ TypeVar $ T.pack $ 'a' : show idx
 
-lookupVarType :: VarName -> TestParser SomeExprType
-lookupVarType name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< gets (lookup name . testVars)
+lookupVarType :: Int -> VarName -> TestParser SomeExprType
+lookupVarType off name = do
+    gets (lookup name . testVars) >>= \case
+        Nothing -> do
+            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+                "variable not in scope: `" <> textVarName name <> "'"
+            vtype <- ExprTypeVar <$> newTypeVar
+            modify $ \s -> s { testVars = ( name, vtype ) : testVars s }
+            return vtype
+        Just t@(ExprTypeVar tvar) -> do
+            gets (fromMaybe t . M.lookup tvar . testTypeUnif)
+        Just x -> return x
+
+lookupVarExpr :: Int -> VarName -> TestParser SomeExpr
+lookupVarExpr off name = do
+    lookupVarType off name >>= \case
+        ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable name :: Expr a)
+        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar name
+
+unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
+unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do
+    cur <- gets testTypeUnif
+    case M.lookup aname cur of
+        Just a -> return a
+        Nothing -> return (ExprTypeVar aname)
+
+unify off (ExprTypeVar aname) (ExprTypeVar bname) = do
+    cur <- gets testTypeUnif
+    case ( M.lookup aname cur, M.lookup bname cur ) of
+        ( Just a, Just b ) -> do
+            c <- unify off a b
+            modify $ \s -> s { testTypeUnif = M.insert aname c $ M.insert bname c $ cur }
+            return c
+
+        ( Just a, Nothing ) -> do
+            modify $ \s -> s { testTypeUnif = M.insert bname a $ cur }
+            return a
+
+        ( Nothing, Just b ) -> do
+            modify $ \s -> s { testTypeUnif = M.insert aname b $ cur }
+            return b
+
+        ( Nothing, Nothing ) -> do
+            let b = ExprTypeVar bname
+            modify $ \s -> s { testTypeUnif = M.insert aname b $ cur }
+            return b
+
+unify off (ExprTypeVar aname) b = do
+    cur <- gets testTypeUnif
+    case M.lookup aname cur of
+        Just a -> do
+            c <- unify off a b
+            modify $ \s -> s { testTypeUnif = M.insert aname c $ cur }
+            return c
+        Nothing -> do
+            modify $ \s -> s { testTypeUnif = M.insert aname b $ cur }
+            return b
+
+unify off a (ExprTypeVar bname) = do
+    cur <- gets testTypeUnif
+    case M.lookup bname cur of
+        Just b -> do
+            c <- unify off a b
+            modify $ \s -> s { testTypeUnif = M.insert bname c $ cur }
+            return c
+
+        Nothing -> do
+            modify $ \s -> s { testTypeUnif = M.insert bname a $ cur }
+            return a
+
+unify _ res@(ExprTypePrim (Proxy :: Proxy a)) (ExprTypePrim (Proxy :: Proxy b))
+    | Just (Refl :: a :~: b) <- eqT
+    = return res
+
+unify off a b = do
+    parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+        "couldn't match expected type `" <> textSomeExprType a <> "' with actual type `" <> textSomeExprType b <> "'"
+
+
+unifyExpr :: forall a b proxy. (ExprType a, ExprType b) => Int -> proxy a -> Expr b -> TestParser (Expr a)
+unifyExpr off pa x = if
+    | Just (Refl :: a :~: b) <- eqT
+    -> return x
+
+    | DynVariable tvar name <- x
+    -> do
+        _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) (ExprTypeVar tvar)
+        return $ Variable name
+
+    | Just (Refl :: DynamicType :~: b) <- eqT
+    , Undefined msg <- x
+    -> do
+        return $ Undefined msg
+
+    | otherwise
+    -> do
+        parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+            "couldn't match expected type `" <> textExprType pa <> "' with actual type `" <> textExprType x <> "'"
+
 
 skipLineComment :: TestParser ()
 skipLineComment = L.skipLineComment $ TL.pack "#"

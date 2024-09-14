@@ -53,15 +53,15 @@ addVarName off (TypedVarName name) = do
         Just _ -> registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             T.pack "variable '" <> textVarName name <> T.pack "' already exists"
         Nothing -> return ()
-    modify $ \s -> s { testVars = (name, SomeExprType @a Proxy) : testVars s }
+    modify $ \s -> s { testVars = ( name, ExprTypePrim @a Proxy ) : testVars s }
 
 someExpansion :: TestParser SomeExpr
 someExpansion = do
     void $ char '$'
     choice
-        [do name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
-            SomeExprType (_ :: Proxy a) <- lookupVarType name
-            return $ SomeExpr $ Variable @a name
+        [do off <- stateOffset <$> getParserState
+            name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+            lookupVarExpr off name
         , between (char '{') (char '}') someExpr
         ]
 
@@ -186,20 +186,20 @@ data SomeUnOp = forall a b. (ExprType a, ExprType b) => SomeUnOp (a -> b)
 
 applyUnOp :: forall a b sa.
     (ExprType a, ExprType b, ExprType sa) =>
-    (a -> b) -> Expr sa -> Maybe (Expr b)
-applyUnOp op x = do
-    Refl :: a :~: sa <- eqT
-    return $ op <$> x
+    Int -> (a -> b) -> Expr sa -> TestParser (Expr b)
+applyUnOp off op x = do
+    x' <- unifyExpr off (Proxy @a) x
+    return $ op <$> x'
 
 data SomeBinOp = forall a b c. (ExprType a, ExprType b, ExprType c) => SomeBinOp (a -> b -> c)
 
 applyBinOp :: forall a b c sa sb.
     (ExprType a, ExprType b, ExprType c, ExprType sa, ExprType sb) =>
-    (a -> b -> c) -> Expr sa -> Expr sb -> Maybe (Expr c)
-applyBinOp op x y = do
-    Refl :: a :~: sa <- eqT
-    Refl :: b :~: sb <- eqT
-    return $ op <$> x <*> y
+    Int -> (a -> b -> c) -> Expr sa -> Expr sb -> TestParser (Expr c)
+applyBinOp off op x y = do
+    x' <- unifyExpr off (Proxy @a) x
+    y' <- unifyExpr off (Proxy @b) y
+    return $ op <$> x' <*> y'
 
 someExpr :: TestParser SomeExpr
 someExpr = join inner <?> "expression"
@@ -251,9 +251,11 @@ someExpr = join inner <?> "expression"
         void $ osymbol name
         return $ \p -> do
             SomeExpr e <- p
-            let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+            let err = FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
                     [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "'"]
-            maybe err return $ listToMaybe $ catMaybes $ map (\(SomeUnOp op) -> SomeExpr <$> applyUnOp op e) ops
+            region (const err) $
+                choice $ map (\(SomeUnOp op) -> SomeExpr <$> applyUnOp off op e) ops
+
 
     binary :: String -> [SomeBinOp] -> Operator TestParser (TestParser SomeExpr)
     binary name = binary' name (undefined :: forall a b. (a -> b -> Void) -> [a] -> [b] -> Integer)
@@ -278,20 +280,22 @@ someExpr = join inner <?> "expression"
             let proxyOf :: proxy a -> Proxy a
                 proxyOf _ = Proxy
 
+            let err = FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                    [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "' and '", textExprType f, T.pack "'"]
+
             let tryop :: forall a b d sa sb.
                     (ExprType a, ExprType b, ExprType d, ExprType sa, ExprType sb) =>
-                    (a -> b -> d) -> Proxy sa -> Proxy sb -> Maybe SomeExpr
-                tryop op pe pf = msum
-                    [ SomeExpr <$> applyBinOp op e f
-                    , do Refl <- eqT' op
-                         ExprListUnpacker _ une <- exprListUnpacker pe
-                         ExprListUnpacker _ unf <- exprListUnpacker pf
+                    (a -> b -> d) -> Proxy sa -> Proxy sb -> TestParser SomeExpr
+                tryop op pe pf = foldl1 (<|>) $
+                    [ SomeExpr <$> applyBinOp off op e f
+                    , do Refl <- maybe (parseError err) return $ eqT' op
+                         ExprListUnpacker _ une <- maybe (parseError err) return $ exprListUnpacker pe
+                         ExprListUnpacker _ unf <- maybe (parseError err) return $ exprListUnpacker pf
                          tryop (listmap op) (une pe) (unf pf)
                     ]
 
-            let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-                    [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "' and '", textExprType f, T.pack "'"]
-            maybe err return $ listToMaybe $ catMaybes $ map (\(SomeBinOp op) -> tryop op (proxyOf e) (proxyOf f)) ops
+            region (const err) $
+                foldl1 (<|>) $ map (\(SomeBinOp op) -> tryop op (proxyOf e) (proxyOf f)) ops
 
     recordSelector :: Operator TestParser (TestParser SomeExpr)
     recordSelector = Postfix $ fmap (foldl1 (flip (.))) $ some $ do
@@ -315,16 +319,13 @@ someExpr = join inner <?> "expression"
         ]
 
     variable = label "variable" $ do
+        off <- stateOffset <$> getParserState
         name <- varName
-        SomeExprType (_ :: Proxy a) <- lookupVarType name
-        return $ return $ SomeExpr $ Variable @a name
+        e <- lookupVarExpr off name
+        return $ return e
 
 typedExpr :: forall a. ExprType a => TestParser (Expr a)
 typedExpr = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpr
-    let err = do
-            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-                [ T.pack "expected '", textExprType @a Proxy, T.pack "', expression has type '", textExprType e, T.pack "'" ]
-            return $ Undefined "unexpected type"
-    maybe err return $ cast e
+    unifyExpr off Proxy e
