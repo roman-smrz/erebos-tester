@@ -34,11 +34,14 @@ import Parser.Core
 import Test
 
 identifier :: TestParser Text
-identifier = do
-    lexeme $ TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
+identifier = label "identifier" $ do
+    lexeme $ do
+        lead <- lowerChar
+        rest <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_')
+        return $ TL.toStrict $ TL.fromChunks $ (T.singleton lead :) $ TL.toChunks rest
 
 varName :: TestParser VarName
-varName = VarName <$> identifier
+varName = label "variable name" $ VarName <$> identifier
 
 newVarName :: forall a. ExprType a => TestParser (TypedVarName a)
 newVarName = do
