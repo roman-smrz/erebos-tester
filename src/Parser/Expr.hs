@@ -245,6 +245,22 @@ someExpr = join inner <?> "expression"
                               , SomeBinOp ((/=) @Scientific)
                               , SomeBinOp ((/=) @Text)
                               ]
+              , binary ">" $
+                  [ SomeBinOp ((>) @Integer)
+                  , SomeBinOp ((>) @Scientific)
+                  ]
+              , binary ">=" $
+                  [ SomeBinOp ((>=) @Integer)
+                  , SomeBinOp ((>=) @Scientific)
+                  ]
+              , binary "<=" $
+                  [ SomeBinOp ((<=) @Integer)
+                  , SomeBinOp ((<=) @Scientific)
+                  ]
+              , binary "<" $
+                  [ SomeBinOp ((<) @Integer)
+                  , SomeBinOp ((<) @Scientific)
+                  ]
               ]
             ]
 
