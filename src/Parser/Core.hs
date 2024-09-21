@@ -60,6 +60,7 @@ lookupVarExpr off name = do
     lookupVarType off name >>= \case
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable name :: Expr a)
         ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar name
+        ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args name :: Expr (FunctionType a))
 
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do
@@ -122,24 +123,32 @@ unify off a b = do
 
 
 unifyExpr :: forall a b proxy. (ExprType a, ExprType b) => Int -> proxy a -> Expr b -> TestParser (Expr a)
-unifyExpr off pa x = if
+unifyExpr off pa expr = if
     | Just (Refl :: a :~: b) <- eqT
-    -> return x
+    -> return expr
 
-    | DynVariable tvar name <- x
+    | DynVariable tvar name <- expr
     -> do
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) (ExprTypeVar tvar)
         return $ Variable name
 
+    | Just (Refl :: FunctionType a :~: b) <- eqT
+    -> do
+        case exprArgs expr of
+            remaining
+                | anull remaining -> return (FunctionEval expr)
+                | otherwise -> parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+                    "missing function arguments"
+
     | Just (Refl :: DynamicType :~: b) <- eqT
-    , Undefined msg <- x
+    , Undefined msg <- expr
     -> do
         return $ Undefined msg
 
     | otherwise
     -> do
         parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-            "couldn't match expected type `" <> textExprType pa <> "' with actual type `" <> textExprType x <> "'"
+            "couldn't match expected type `" <> textExprType pa <> "' with actual type `" <> textExprType expr <> "'"
 
 
 skipLineComment :: TestParser ()

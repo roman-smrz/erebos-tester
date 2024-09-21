@@ -9,22 +9,29 @@ module Test (
     VarName(..), TypedVarName(..), textVarName, unpackVarName,
     ExprType(..), SomeExpr(..),
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
-    DynamicType,
+    FunctionType, DynamicType,
     SomeVarValue(..), fromSomeVarValue, textSomeVarValue, someVarValueType,
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
-    Expr(..), eval, gatherVars,
+    Expr(..), eval, gatherVars, evalSome,
     AppAnnotation(..),
+
+    ArgumentKeyword(..), FunctionArguments(..),
+    anull, exprArgs,
 
     Regex(RegexPart, RegexString), regexMatch,
 ) where
 
+import Control.Monad
+
 import Data.Char
 import Data.List
+import Data.Map (Map)
+import Data.Map qualified as M
 import Data.Scientific
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
 import Data.Typeable
 
 import Text.Regex.TDFA qualified as RE
@@ -130,6 +137,12 @@ instance ExprType TestBlock where
     textExprValue _ = "<test block>"
 
 
+data FunctionType a = FunctionType (FunctionArguments SomeExpr -> a)
+
+instance ExprType a => ExprType (FunctionType a) where
+    textExprType _ = "function type"
+    textExprValue _ = "<function type>"
+
 data DynamicType
 
 instance ExprType DynamicType where
@@ -144,26 +157,42 @@ newtype TypeVar = TypeVar Text
 data SomeExprType
     = forall a. ExprType a => ExprTypePrim (Proxy a)
     | ExprTypeVar TypeVar
+    | forall a. ExprType a => ExprTypeFunction (FunctionArguments SomeExprType) (Proxy a)
 
 someExprType :: SomeExpr -> SomeExprType
+someExprType (SomeExpr (DynVariable tvar _)) = ExprTypeVar tvar
+someExprType (SomeExpr fun@(FunVariable params _)) = ExprTypeFunction params (proxyOfFunctionType fun)
+  where
+    proxyOfFunctionType :: Expr (FunctionType a) -> Proxy a
+    proxyOfFunctionType _ = Proxy
 someExprType (SomeExpr (_ :: Expr a)) = ExprTypePrim (Proxy @a)
 
 textSomeExprType :: SomeExprType -> Text
 textSomeExprType (ExprTypePrim p) = textExprType p
 textSomeExprType (ExprTypeVar (TypeVar name)) = name
+textSomeExprType (ExprTypeFunction _ r) = "function:" <> textExprType r
 
 
-data SomeVarValue = forall a. ExprType a => SomeVarValue a
+data SomeVarValue = forall a. ExprType a => SomeVarValue (FunctionArguments SomeExprType) (FunctionArguments SomeExpr -> a)
 
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m a
-fromSomeVarValue name (SomeVarValue value) = maybe (fail err) return $ cast value
-  where err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has type ", textExprType (Just value) ]
+fromSomeVarValue name (SomeVarValue args (value :: args -> b)) = do
+    maybe (fail err) return $ do
+        guard $ anull args
+        cast $ value mempty
+  where
+    err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has type ",
+            if anull args then textExprType @b Proxy else "function type" ]
 
 textSomeVarValue :: SomeVarValue -> Text
-textSomeVarValue (SomeVarValue value) = textExprValue value
+textSomeVarValue (SomeVarValue args value)
+    | anull args = textExprValue $ value mempty
+    | otherwise  =  "<function>"
 
 someVarValueType :: SomeVarValue -> SomeExprType
-someVarValueType (SomeVarValue (_ :: a)) = ExprTypePrim (Proxy @a)
+someVarValueType (SomeVarValue args (_ :: args -> a))
+    | anull args = ExprTypePrim (Proxy @a)
+    | otherwise  = ExprTypeFunction args (Proxy @a)
 
 
 data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
@@ -176,6 +205,9 @@ data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 data Expr a where
     Variable :: ExprType a => VarName -> Expr a
     DynVariable :: TypeVar -> VarName -> Expr DynamicType
+    FunVariable :: ExprType a => FunctionArguments SomeExprType -> VarName -> Expr (FunctionType a)
+    ArgsApp :: FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
+    FunctionEval :: Expr (FunctionType a) -> Expr a
     Pure :: a -> Expr a
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
     Concat :: [Expr Text] -> Expr Text
@@ -196,6 +228,13 @@ instance Applicative Expr where
 eval :: MonadEval m => Expr a -> m a
 eval (Variable name) = fromSomeVarValue name =<< lookupVar name
 eval (DynVariable _ _) = fail "ambiguous type"
+eval (FunVariable _ name) = funFromSomeVarValue name =<< lookupVar name
+eval (ArgsApp args efun) = do
+    FunctionType fun <- eval efun
+    return $ FunctionType $ \args' -> fun (args <> args')
+eval (FunctionEval efun) = do
+    FunctionType fun <- eval efun
+    return $ fun mempty
 eval (Pure value) = return value
 eval (App _ f x) = eval f <*> eval x
 eval (Concat xs) = T.concat <$> mapM eval xs
@@ -207,16 +246,25 @@ eval (Regex xs) = mapM eval xs >>= \case
 eval (RootNetwork) = rootNetwork
 eval (Undefined err) = fail err
 
+evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
+evalSome (SomeExpr expr) = SomeVarValue mempty . const <$> eval expr
+
 gatherVars :: forall a m. MonadEval m => Expr a -> m [((VarName, [Text]), SomeVarValue)]
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m [((VarName, [Text]), SomeVarValue)]
     helper (Variable var) = (:[]) . ((var, []),) <$> lookupVar var
     helper (DynVariable _ var) = (:[]) . ((var, []),) <$> lookupVar var
+    helper (FunVariable _ var) = (:[]) . ((var, []),) <$> lookupVar var
+    helper (ArgsApp (FunctionArguments args) fun) = do
+        v <- helper fun
+        vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
+        return $ concat (v : vs)
+    helper (FunctionEval efun) = helper efun
     helper (Pure _) = return []
     helper e@(App (AnnRecord sel) _ x)
         | Just (var, sels) <- gatherSelectors x
-        = do val <- SomeVarValue <$> eval e
+        = do val <- SomeVarValue mempty . const <$> eval e
              return [((var, sels ++ [sel]), val)]
         | otherwise = helper x
     helper (App _ f x) = (++) <$> helper f <*> helper x
@@ -232,6 +280,33 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
             (var, sels) <- gatherSelectors x
             return (var, sels ++ [sel])
         _ -> Nothing
+
+
+data ArgumentKeyword = ArgumentKeyword Text
+    deriving (Show, Eq, Ord)
+
+newtype FunctionArguments a = FunctionArguments (Map (Maybe ArgumentKeyword) a)
+    deriving (Show, Semigroup, Monoid)
+
+anull :: FunctionArguments a -> Bool
+anull (FunctionArguments args) = M.null args
+
+exprArgs :: Expr (FunctionType a) -> FunctionArguments SomeExprType
+exprArgs (FunVariable args _) = args
+exprArgs (ArgsApp (FunctionArguments applied) expr) =
+    let FunctionArguments args = exprArgs expr
+     in FunctionArguments (args `M.difference` applied)
+exprArgs _ = error "exprArgs on unexpected type"
+
+funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m (FunctionType a)
+funFromSomeVarValue name (SomeVarValue args (value :: args -> b)) = do
+    maybe (fail err) return $ do
+        guard $ not $ anull args
+        FunctionType <$> cast value
+  where
+    err = T.unpack $ T.concat [ T.pack "expected function returning ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has ",
+            (if anull args then "type" else "function type returting ") <> textExprType @b Proxy ]
+
 
 data Regex = RegexCompiled Text RE.Regex
            | RegexPart Text

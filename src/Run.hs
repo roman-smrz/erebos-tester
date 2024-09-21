@@ -188,7 +188,7 @@ evalSteps = mapM_ $ \case
 
 
 withVar :: ExprType e => VarName -> e -> TestRun a -> TestRun a
-withVar name value = local (fmap $ \s -> s { tsVars = (name, SomeVarValue value) : tsVars s })
+withVar name value = local (fmap $ \s -> s { tsVars = ( name, SomeVarValue mempty $ const value ) : tsVars s })
 
 withInternet :: (Network -> TestRun a) -> TestRun a
 withInternet inner = do
@@ -310,7 +310,7 @@ expect (SourceLine sline) p expr tvars inner = do
                      throwError Failed
 
              outProc OutputMatch p line
-             local (fmap $ \s -> s { tsVars = zip vars (map SomeVarValue capture) ++ tsVars s }) inner
+             local (fmap $ \s -> s { tsVars = zip vars (map (SomeVarValue mempty . const) capture) ++ tsVars s }) inner
 
          Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
 

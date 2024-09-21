@@ -7,6 +7,8 @@ module Parser.Expr (
 
     someExpr,
     typedExpr,
+
+    functionArguments,
 ) where
 
 import Control.Applicative (liftA2)
@@ -15,12 +17,13 @@ import Control.Monad
 import Control.Monad.State
 
 import Data.Char
+import Data.Map qualified as M
 import Data.Maybe
 import Data.Scientific
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.Text (Text)
 import Data.Text qualified as T
-import qualified Data.Text.Lazy as TL
+import Data.Text.Lazy qualified as TL
 import Data.Typeable
 import Data.Void
 
@@ -211,7 +214,11 @@ someExpr = join inner <?> "expression"
 
     parens = between (symbol "(") (symbol ")")
 
-    term = parens inner <|> literal <|> variable <?> "term"
+    term = label "term" $ choice
+        [ parens inner
+        , return <$> literal
+        , return <$> variable
+        ]
 
     table = [ [ recordSelector
               ]
@@ -330,21 +337,81 @@ someExpr = join inner <?> "expression"
     applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
     applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
 
-    literal = label "literal" $ choice
-        [ return <$> numberLiteral
-        , return . SomeExpr <$> quotedString
-        , return . SomeExpr <$> regex
-        , return <$> list
-        ]
+literal :: TestParser SomeExpr
+literal = label "literal" $ choice
+    [ numberLiteral
+    , SomeExpr <$> quotedString
+    , SomeExpr <$> regex
+    , list
+    ]
 
-    variable = label "variable" $ do
-        off <- stateOffset <$> getParserState
-        name <- varName
-        e <- lookupVarExpr off name
-        return $ return e
+variable :: TestParser SomeExpr
+variable = label "variable" $ do
+    off <- stateOffset <$> getParserState
+    name <- varName
+    lookupVarExpr off name >>= \case
+        SomeExpr e'@(FunVariable (FunctionArguments argTypes) _) -> do
+            let check poff kw expr = do
+                    case M.lookup kw argTypes of
+                        Just expected -> do
+                            withRecovery registerParseError $ do
+                                void $ unify poff expected (someExprType expr)
+                            return expr
+                        Nothing -> do
+                            registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
+                                case kw of
+                                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword `" <> tkw <> "'"
+                                    Nothing                    -> "unexpected parameter"
+                            return expr
+
+            args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff . VarName)
+            return $ SomeExpr $ ArgsApp args e'
+        e -> do
+            return e
 
 typedExpr :: forall a. ExprType a => TestParser (Expr a)
 typedExpr = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpr
     unifyExpr off Proxy e
+
+
+functionArguments :: (Int -> Maybe ArgumentKeyword -> a -> TestParser b) -> TestParser a -> TestParser a -> (Int -> Text -> TestParser a) -> TestParser (FunctionArguments b)
+functionArguments check param lit promote = do
+    args <- parseArgs True
+    return $ FunctionArguments args
+  where
+    parseArgs allowUnnamed = choice
+        [do off <- stateOffset <$> getParserState
+            x <- pparam
+            if allowUnnamed
+              then do
+                  checkAndInsert off Nothing x $ parseArgs False
+              else do
+                  registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                      [ T.pack "multiple unnamed parameters" ]
+                  parseArgs False
+
+        ,do off <- stateOffset <$> getParserState
+            x <- identifier
+            choice
+                [do off' <- stateOffset <$> getParserState
+                    y <- pparam <|> (promote off' =<< identifier)
+                    checkAndInsert off' (Just (ArgumentKeyword x)) y $ parseArgs allowUnnamed
+
+                ,if allowUnnamed
+                  then do
+                    y <- promote off x
+                    checkAndInsert off Nothing y $ return M.empty
+                  else do
+                    registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                        [ T.pack "multiple unnamed parameters" ]
+                    return M.empty
+                ]
+
+        ,do return M.empty
+        ]
+
+    pparam = between (symbol "(") (symbol ")") param <|> lit
+
+    checkAndInsert off kw x cont = M.insert kw <$> check off kw x <*> cont

@@ -6,8 +6,8 @@ import Test
 
 builtins :: [ ( VarName, SomeVarValue ) ]
 builtins =
-    [ ( VarName "wait", SomeVarValue builtinWait )
+    [ ( VarName "wait", builtinWait )
     ]
 
-builtinWait :: TestBlock
-builtinWait = TestBlock [ Wait ]
+builtinWait :: SomeVarValue
+builtinWait = SomeVarValue mempty $ const $ TestBlock [ Wait ]
