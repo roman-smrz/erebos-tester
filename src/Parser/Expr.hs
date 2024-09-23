@@ -66,8 +66,9 @@ someExpansion = do
     void $ char '$'
     choice
         [do off <- stateOffset <$> getParserState
+            sline <- getSourceLine
             name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
-            lookupVarExpr off name
+            lookupVarExpr off sline name
         , between (char '{') (char '}') someExpr
         ]
 
@@ -348,9 +349,10 @@ literal = label "literal" $ choice
 variable :: TestParser SomeExpr
 variable = label "variable" $ do
     off <- stateOffset <$> getParserState
+    sline <- getSourceLine
     name <- varName
-    lookupVarExpr off name >>= \case
-        SomeExpr e'@(FunVariable (FunctionArguments argTypes) _) -> do
+    lookupVarExpr off sline name >>= \case
+        SomeExpr e'@(FunVariable (FunctionArguments argTypes) _ _) -> do
             let check poff kw expr = do
                     case M.lookup kw argTypes of
                         Just expected -> do
@@ -364,7 +366,7 @@ variable = label "variable" $ do
                                     Nothing                    -> "unexpected parameter"
                             return expr
 
-            args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff . VarName)
+            args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
             return $ SomeExpr $ ArgsApp args e'
         e -> do
             return e

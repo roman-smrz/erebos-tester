@@ -55,12 +55,12 @@ lookupVarType off name = do
             gets (fromMaybe t . M.lookup tvar . testTypeUnif)
         Just x -> return x
 
-lookupVarExpr :: Int -> VarName -> TestParser SomeExpr
-lookupVarExpr off name = do
+lookupVarExpr :: Int -> SourceLine -> VarName -> TestParser SomeExpr
+lookupVarExpr off sline name = do
     lookupVarType off name >>= \case
-        ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable name :: Expr a)
-        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar name
-        ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args name :: Expr (FunctionType a))
+        ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline name :: Expr a)
+        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline name
+        ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline name :: Expr (FunctionType a))
 
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do
@@ -127,10 +127,10 @@ unifyExpr off pa expr = if
     | Just (Refl :: a :~: b) <- eqT
     -> return expr
 
-    | DynVariable tvar name <- expr
+    | DynVariable tvar sline name <- expr
     -> do
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) (ExprTypeVar tvar)
-        return $ Variable name
+        return $ Variable sline name
 
     | Just (Refl :: FunctionType a :~: b) <- eqT
     -> do
@@ -198,3 +198,13 @@ listOf :: TestParser a -> TestParser [a]
 listOf item = do
     x <- item
     (x:) <$> choice [ symbol "," >> listOf item, return [] ]
+
+
+getSourceLine :: TestParser SourceLine
+getSourceLine = do
+    pstate <- statePosState <$> getParserState
+    return $ SourceLine $ T.concat
+        [ T.pack $ sourcePosPretty $ pstateSourcePos pstate
+        , T.pack ": "
+        , TL.toStrict $ TL.takeWhile (/='\n') $ pstateInput pstate
+        ]

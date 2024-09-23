@@ -188,7 +188,7 @@ evalSteps = mapM_ $ \case
 
 
 withVar :: ExprType e => VarName -> e -> TestRun a -> TestRun a
-withVar name value = local (fmap $ \s -> s { tsVars = ( name, SomeVarValue mempty $ const value ) : tsVars s })
+withVar name value = local (fmap $ \s -> s { tsVars = ( name, SomeVarValue mempty $ const $ const value ) : tsVars s })
 
 withInternet :: (Network -> TestRun a) -> TestRun a
 withInternet inner = do
@@ -280,7 +280,10 @@ exprFailed desc (SourceLine sline) pname expr = do
     exprVars <- gatherVars expr
     outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", sline]
     forM_ exprVars $ \((name, sel), value) ->
-        outLine OutputMatchFail (Just prompt) $ T.concat ["  ", textVarName name, T.concat (map ("."<>) sel), " = ", textSomeVarValue value]
+        outLine OutputMatchFail (Just prompt) $ T.concat
+            [ "  ", textVarName name, T.concat (map ("."<>) sel)
+            , " = ", textSomeVarValue (SourceLine sline) value
+            ]
     throwError Failed
 
 expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
@@ -310,7 +313,7 @@ expect (SourceLine sline) p expr tvars inner = do
                      throwError Failed
 
              outProc OutputMatch p line
-             local (fmap $ \s -> s { tsVars = zip vars (map (SomeVarValue mempty . const) capture) ++ tsVars s }) inner
+             local (fmap $ \s -> s { tsVars = zip vars (map (SomeVarValue mempty . const . const) capture) ++ tsVars s }) inner
 
          Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
 

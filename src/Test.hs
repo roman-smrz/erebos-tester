@@ -160,8 +160,8 @@ data SomeExprType
     | forall a. ExprType a => ExprTypeFunction (FunctionArguments SomeExprType) (Proxy a)
 
 someExprType :: SomeExpr -> SomeExprType
-someExprType (SomeExpr (DynVariable tvar _)) = ExprTypeVar tvar
-someExprType (SomeExpr fun@(FunVariable params _)) = ExprTypeFunction params (proxyOfFunctionType fun)
+someExprType (SomeExpr (DynVariable tvar _ _)) = ExprTypeVar tvar
+someExprType (SomeExpr fun@(FunVariable params _ _)) = ExprTypeFunction params (proxyOfFunctionType fun)
   where
     proxyOfFunctionType :: Expr (FunctionType a) -> Proxy a
     proxyOfFunctionType _ = Proxy
@@ -173,24 +173,24 @@ textSomeExprType (ExprTypeVar (TypeVar name)) = name
 textSomeExprType (ExprTypeFunction _ r) = "function:" <> textExprType r
 
 
-data SomeVarValue = forall a. ExprType a => SomeVarValue (FunctionArguments SomeExprType) (FunctionArguments SomeExpr -> a)
+data SomeVarValue = forall a. ExprType a => SomeVarValue (FunctionArguments SomeExprType) (SourceLine -> FunctionArguments SomeExpr -> a)
 
-fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m a
-fromSomeVarValue name (SomeVarValue args (value :: args -> b)) = do
+fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m a
+fromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -> b)) = do
     maybe (fail err) return $ do
         guard $ anull args
-        cast $ value mempty
+        cast $ value sline mempty
   where
     err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has type ",
             if anull args then textExprType @b Proxy else "function type" ]
 
-textSomeVarValue :: SomeVarValue -> Text
-textSomeVarValue (SomeVarValue args value)
-    | anull args = textExprValue $ value mempty
+textSomeVarValue :: SourceLine -> SomeVarValue -> Text
+textSomeVarValue sline (SomeVarValue args value)
+    | anull args = textExprValue $ value sline mempty
     | otherwise  =  "<function>"
 
 someVarValueType :: SomeVarValue -> SomeExprType
-someVarValueType (SomeVarValue args (_ :: args -> a))
+someVarValueType (SomeVarValue args (_ :: SourceLine -> args -> a))
     | anull args = ExprTypePrim (Proxy @a)
     | otherwise  = ExprTypeFunction args (Proxy @a)
 
@@ -203,9 +203,9 @@ data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 
 
 data Expr a where
-    Variable :: ExprType a => VarName -> Expr a
-    DynVariable :: TypeVar -> VarName -> Expr DynamicType
-    FunVariable :: ExprType a => FunctionArguments SomeExprType -> VarName -> Expr (FunctionType a)
+    Variable :: ExprType a => SourceLine -> VarName -> Expr a
+    DynVariable :: TypeVar -> SourceLine -> VarName -> Expr DynamicType
+    FunVariable :: ExprType a => FunctionArguments SomeExprType -> SourceLine -> VarName -> Expr (FunctionType a)
     ArgsApp :: FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
     FunctionEval :: Expr (FunctionType a) -> Expr a
     Pure :: a -> Expr a
@@ -226,9 +226,9 @@ instance Applicative Expr where
     (<*>) = App AnnNone
 
 eval :: MonadEval m => Expr a -> m a
-eval (Variable name) = fromSomeVarValue name =<< lookupVar name
-eval (DynVariable _ _) = fail "ambiguous type"
-eval (FunVariable _ name) = funFromSomeVarValue name =<< lookupVar name
+eval (Variable sline name) = fromSomeVarValue sline name =<< lookupVar name
+eval (DynVariable _ _ _) = fail "ambiguous type"
+eval (FunVariable _ sline name) = funFromSomeVarValue sline name =<< lookupVar name
 eval (ArgsApp args efun) = do
     FunctionType fun <- eval efun
     return $ FunctionType $ \args' -> fun (args <> args')
@@ -247,15 +247,15 @@ eval (RootNetwork) = rootNetwork
 eval (Undefined err) = fail err
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
-evalSome (SomeExpr expr) = SomeVarValue mempty . const <$> eval expr
+evalSome (SomeExpr expr) = SomeVarValue mempty . const . const <$> eval expr
 
 gatherVars :: forall a m. MonadEval m => Expr a -> m [((VarName, [Text]), SomeVarValue)]
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m [((VarName, [Text]), SomeVarValue)]
-    helper (Variable var) = (:[]) . ((var, []),) <$> lookupVar var
-    helper (DynVariable _ var) = (:[]) . ((var, []),) <$> lookupVar var
-    helper (FunVariable _ var) = (:[]) . ((var, []),) <$> lookupVar var
+    helper (Variable _ var) = (:[]) . ((var, []),) <$> lookupVar var
+    helper (DynVariable _ _ var) = (:[]) . ((var, []),) <$> lookupVar var
+    helper (FunVariable _ _ var) = (:[]) . ((var, []),) <$> lookupVar var
     helper (ArgsApp (FunctionArguments args) fun) = do
         v <- helper fun
         vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
@@ -264,7 +264,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
     helper (Pure _) = return []
     helper e@(App (AnnRecord sel) _ x)
         | Just (var, sels) <- gatherSelectors x
-        = do val <- SomeVarValue mempty . const <$> eval e
+        = do val <- SomeVarValue mempty . const . const <$> eval e
              return [((var, sels ++ [sel]), val)]
         | otherwise = helper x
     helper (App _ f x) = (++) <$> helper f <*> helper x
@@ -275,7 +275,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
 
     gatherSelectors :: forall b. Expr b -> Maybe (VarName, [Text])
     gatherSelectors = \case
-        Variable var -> Just (var, [])
+        Variable _ var -> Just (var, [])
         App (AnnRecord sel) _ x -> do
             (var, sels) <- gatherSelectors x
             return (var, sels ++ [sel])
@@ -292,17 +292,17 @@ anull :: FunctionArguments a -> Bool
 anull (FunctionArguments args) = M.null args
 
 exprArgs :: Expr (FunctionType a) -> FunctionArguments SomeExprType
-exprArgs (FunVariable args _) = args
+exprArgs (FunVariable args _ _) = args
 exprArgs (ArgsApp (FunctionArguments applied) expr) =
     let FunctionArguments args = exprArgs expr
      in FunctionArguments (args `M.difference` applied)
 exprArgs _ = error "exprArgs on unexpected type"
 
-funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => VarName -> SomeVarValue -> m (FunctionType a)
-funFromSomeVarValue name (SomeVarValue args (value :: args -> b)) = do
+funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m (FunctionType a)
+funFromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -> b)) = do
     maybe (fail err) return $ do
         guard $ not $ anull args
-        FunctionType <$> cast value
+        FunctionType <$> cast (value sline)
   where
     err = T.unpack $ T.concat [ T.pack "expected function returning ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has ",
             (if anull args then "type" else "function type returting ") <> textExprType @b Proxy ]

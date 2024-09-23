@@ -8,9 +8,8 @@ import Control.Monad.State
 
 import Data.Kind
 import Data.Maybe
-import qualified Data.Set as S
+import Data.Set qualified as S
 import Data.Text qualified as T
-import qualified Data.Text.Lazy as TL
 import Data.Typeable
 
 import Text.Megaparsec hiding (State)
@@ -23,16 +22,6 @@ import Parser.Expr
 import Process (Process)
 import Test
 import Util
-
-getSourceLine :: TestParser SourceLine
-getSourceLine = do
-    pstate <- statePosState <$> getParserState
-    return $ SourceLine $ T.concat
-        [ T.pack $ sourcePosPretty $ pstateSourcePos pstate
-        , T.pack ": "
-        , TL.toStrict $ TL.takeWhile (/='\n') $ pstateInput pstate
-        ]
-
 
 letStatement :: TestParser [TestStep]
 letStatement = do
@@ -313,11 +302,6 @@ testFlush = command "flush" $ Flush
     <$> paramOrContext "from"
     <*> param ""
 
-testGuard :: TestParser [TestStep]
-testGuard = command "guard" $ Guard
-    <$> cmdLine
-    <*> param ""
-
 testDisconnectNode :: TestParser [TestStep]
 testDisconnectNode = command "disconnect_node" $ DisconnectNode
     <$> paramOrContext ""
@@ -364,7 +348,6 @@ testStep = choice
     , testSend
     , testExpect
     , testFlush
-    , testGuard
     , testDisconnectNode
     , testDisconnectNodes
     , testDisconnectUpstream
