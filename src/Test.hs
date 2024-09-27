@@ -19,6 +19,7 @@ module Test (
 
     ArgumentKeyword(..), FunctionArguments(..),
     anull, exprArgs,
+    SomeArgumentType(..), ArgumentType(..),
 
     Regex(RegexPart, RegexString), regexMatch,
 ) where
@@ -30,6 +31,7 @@ import Data.List
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Scientific
+import Data.String
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Typeable
@@ -157,7 +159,7 @@ newtype TypeVar = TypeVar Text
 data SomeExprType
     = forall a. ExprType a => ExprTypePrim (Proxy a)
     | ExprTypeVar TypeVar
-    | forall a. ExprType a => ExprTypeFunction (FunctionArguments SomeExprType) (Proxy a)
+    | forall a. ExprType a => ExprTypeFunction (FunctionArguments SomeArgumentType) (Proxy a)
 
 someExprType :: SomeExpr -> SomeExprType
 someExprType (SomeExpr (DynVariable tvar _ _)) = ExprTypeVar tvar
@@ -173,7 +175,7 @@ textSomeExprType (ExprTypeVar (TypeVar name)) = name
 textSomeExprType (ExprTypeFunction _ r) = "function:" <> textExprType r
 
 
-data SomeVarValue = forall a. ExprType a => SomeVarValue (FunctionArguments SomeExprType) (SourceLine -> FunctionArguments SomeExpr -> a)
+data SomeVarValue = forall a. ExprType a => SomeVarValue (FunctionArguments SomeArgumentType) (SourceLine -> FunctionArguments SomeExpr -> a)
 
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m a
 fromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -> b)) = do
@@ -205,7 +207,7 @@ data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 data Expr a where
     Variable :: ExprType a => SourceLine -> VarName -> Expr a
     DynVariable :: TypeVar -> SourceLine -> VarName -> Expr DynamicType
-    FunVariable :: ExprType a => FunctionArguments SomeExprType -> SourceLine -> VarName -> Expr (FunctionType a)
+    FunVariable :: ExprType a => FunctionArguments SomeArgumentType -> SourceLine -> VarName -> Expr (FunctionType a)
     ArgsApp :: FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
     FunctionEval :: Expr (FunctionType a) -> Expr a
     Pure :: a -> Expr a
@@ -282,8 +284,8 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         _ -> Nothing
 
 
-data ArgumentKeyword = ArgumentKeyword Text
-    deriving (Show, Eq, Ord)
+newtype ArgumentKeyword = ArgumentKeyword Text
+    deriving (Show, Eq, Ord, IsString)
 
 newtype FunctionArguments a = FunctionArguments (Map (Maybe ArgumentKeyword) a)
     deriving (Show, Semigroup, Monoid)
@@ -291,7 +293,7 @@ newtype FunctionArguments a = FunctionArguments (Map (Maybe ArgumentKeyword) a)
 anull :: FunctionArguments a -> Bool
 anull (FunctionArguments args) = M.null args
 
-exprArgs :: Expr (FunctionType a) -> FunctionArguments SomeExprType
+exprArgs :: Expr (FunctionType a) -> FunctionArguments SomeArgumentType
 exprArgs (FunVariable args _ _) = args
 exprArgs (ArgsApp (FunctionArguments applied) expr) =
     let FunctionArguments args = exprArgs expr
@@ -306,6 +308,13 @@ funFromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -
   where
     err = T.unpack $ T.concat [ T.pack "expected function returning ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has ",
             (if anull args then "type" else "function type returting ") <> textExprType @b Proxy ]
+
+data SomeArgumentType = forall a. ExprType a => SomeArgumentType (ArgumentType a)
+
+data ArgumentType a
+    = NoDefault
+    | ExprDefault (Expr a)
+    | ContextDefault
 
 
 data Regex = RegexCompiled Text RE.Regex

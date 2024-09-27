@@ -20,7 +20,7 @@ getArg (FunctionArguments args) kw =
         _ -> error "parameter mismatch"
 
 builtinGuard :: SomeVarValue
-builtinGuard = SomeVarValue (FunctionArguments $ M.singleton Nothing (ExprTypePrim (Proxy @Bool))) $
+builtinGuard = SomeVarValue (FunctionArguments $ M.singleton Nothing (SomeArgumentType (NoDefault @Bool))) $
     \sline args -> TestBlock [ Guard sline (getArg args Nothing) ]
 
 builtinWait :: SomeVarValue

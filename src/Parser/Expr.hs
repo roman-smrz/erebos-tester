@@ -355,9 +355,9 @@ variable = label "variable" $ do
         SomeExpr e'@(FunVariable (FunctionArguments argTypes) _ _) -> do
             let check poff kw expr = do
                     case M.lookup kw argTypes of
-                        Just expected -> do
+                        Just (SomeArgumentType (_ :: ArgumentType expected)) -> do
                             withRecovery registerParseError $ do
-                                void $ unify poff expected (someExprType expr)
+                                void $ unify poff (ExprTypePrim (Proxy @expected)) (someExprType expr)
                             return expr
                         Nothing -> do
                             registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $

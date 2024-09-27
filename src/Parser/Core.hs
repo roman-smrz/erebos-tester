@@ -134,11 +134,19 @@ unifyExpr off pa expr = if
 
     | Just (Refl :: FunctionType a :~: b) <- eqT
     -> do
-        case exprArgs expr of
-            remaining
-                | anull remaining -> return (FunctionEval expr)
-                | otherwise -> parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-                    "missing function arguments"
+        let FunctionArguments remaining = exprArgs expr
+            showType ( Nothing, SomeArgumentType atype ) = "`<" <> textExprType atype <> ">'"
+            showType ( Just (ArgumentKeyword kw), SomeArgumentType atype ) = "`" <> kw <> " <" <> textExprType atype <> ">'"
+            err = parseError . FancyError off . S.singleton . ErrorFail . T.unpack
+
+        defaults <- forM (M.toAscList remaining) $ \case
+            arg@(_, SomeArgumentType NoDefault) -> err $ "missing " <> showType arg <> " argument"
+            (kw, SomeArgumentType (ExprDefault def)) -> return (kw, SomeExpr def)
+            (kw, SomeArgumentType atype@ContextDefault) -> do
+                SomeExpr context <- gets testContext
+                context' <- unifyExpr off atype context
+                return (kw, SomeExpr context')
+        return (FunctionEval $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
 
     | Just (Refl :: DynamicType :~: b) <- eqT
     , Undefined msg <- expr
