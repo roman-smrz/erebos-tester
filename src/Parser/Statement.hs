@@ -312,11 +312,6 @@ testSpawn = command "spawn" $ Spawn
     <*> paramOrContext "on"
     <*> innerBlock
 
-testSend :: TestParser [TestStep]
-testSend = command "send" $ Send
-    <$> paramOrContext "to"
-    <*> param ""
-
 testExpect :: TestParser [TestStep]
 testExpect = command "expect" $ Expect
     <$> cmdLine
@@ -376,7 +371,6 @@ testStep = choice
     , testSubnet
     , testNode
     , testSpawn
-    , testSend
     , testExpect
     , testFlush
     , testDisconnectNode
