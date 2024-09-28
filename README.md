@@ -248,10 +248,11 @@ In that case the expect command has to have the `capture` clause with matching n
 Results of the captures are then assigned to the newly created variables as strings.
 
 ```
-flush [from <proc>]
+flush [from <proc>] [matching <regex>]
 ```
 
 Flush memory of `<proc>` output, so no following `expect` command will match anything produced up to this point.
+If the `matching` clause is used, discard only output lines matching `<regex>`.
 
 ```
 guard <expr>

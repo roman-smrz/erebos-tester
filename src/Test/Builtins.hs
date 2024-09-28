@@ -37,11 +37,11 @@ builtinSend = SomeVarValue (FunctionArguments $ M.fromList atypes) $
 
 builtinFlush :: SomeVarValue
 builtinFlush = SomeVarValue (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlock [ Flush (getArg args (Just "from")) (getArgMb args Nothing) ]
+    \_ args -> TestBlock [ Flush (getArg args (Just "from")) (getArgMb args (Just "matching")) ]
   where
     atypes =
         [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
-        , ( Nothing, SomeArgumentType (OptionalArgument @Regex) )
+        , ( Just "matching", SomeArgumentType (OptionalArgument @Regex) )
         ]
 
 builtinGuard :: SomeVarValue
