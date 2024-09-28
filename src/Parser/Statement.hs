@@ -65,9 +65,34 @@ forStatement = do
         return [For line tname (unpack <$> e) body]
 
 exprStatement :: TestParser [ TestStep ]
-exprStatement  = do
-    expr <- typedExpr
-    return [ ExprStatement expr ]
+exprStatement = do
+    ref <- L.indentLevel
+    off <- stateOffset <$> getParserState
+    SomeExpr expr <- someExpr
+    choice
+        [ do
+            continuePartial off ref expr
+        , do
+            stmt <- unifyExpr off Proxy expr
+            return [ ExprStatement stmt ]
+        ]
+  where
+    continuePartial :: ExprType a => Int -> Pos -> Expr a -> TestParser [ TestStep ]
+    continuePartial off ref expr = do
+        symbol ":"
+        void eol
+        (fun :: Expr (FunctionType TestBlock)) <- unifyExpr off Proxy expr
+        scn
+        indent <- L.indentGuard scn GT ref
+        blockOf indent $ do
+            coff <- stateOffset <$> getParserState
+            sline <- getSourceLine
+            args <- functionArguments (checkFunctionArguments (exprArgs fun)) someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
+            let fun' = ArgsApp args fun
+            choice
+                [ continuePartial coff indent fun'
+                , (: []) . ExprStatement <$> unifyExpr coff Proxy fun'
+                ]
 
 class (Typeable a, Typeable (ParamRep a)) => ParamType a where
     type ParamRep a :: Type
@@ -327,8 +352,11 @@ testPacketLoss = command "packet_loss" $ PacketLoss
     <*> innerBlock
 
 
-testBlock :: Pos -> TestParser [TestStep]
-testBlock indent = concat <$> go
+testBlock :: Pos -> TestParser [ TestStep ]
+testBlock indent = blockOf indent testStep
+
+blockOf :: Pos -> TestParser [ a ] -> TestParser [ a ]
+blockOf indent step = concat <$> go
   where
     go = do
         scn
@@ -336,7 +364,7 @@ testBlock indent = concat <$> go
         optional eof >>= \case
             Just _ -> return []
             _ | pos <  indent -> return []
-              | pos == indent -> (:) <$> testStep <*> go
+              | pos == indent -> (:) <$> step <*> go
               | otherwise     -> L.incorrectIndent EQ indent pos
 
 testStep :: TestParser [TestStep]

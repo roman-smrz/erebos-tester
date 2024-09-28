@@ -10,6 +10,7 @@ module Parser.Expr (
     literal,
     variable,
 
+    checkFunctionArguments,
     functionArguments,
 ) where
 
@@ -344,20 +345,8 @@ variable = label "variable" $ do
     sline <- getSourceLine
     name <- varName
     lookupVarExpr off sline name >>= \case
-        SomeExpr e'@(FunVariable (FunctionArguments argTypes) _ _) -> do
-            let check poff kw expr = do
-                    case M.lookup kw argTypes of
-                        Just (SomeArgumentType (_ :: ArgumentType expected)) -> do
-                            withRecovery registerParseError $ do
-                                void $ unify poff (ExprTypePrim (Proxy @expected)) (someExprType expr)
-                            return expr
-                        Nothing -> do
-                            registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
-                                case kw of
-                                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword `" <> tkw <> "'"
-                                    Nothing                    -> "unexpected parameter"
-                            return expr
-
+        SomeExpr e'@(FunVariable argTypes _ _) -> do
+            let check = checkFunctionArguments argTypes
             args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
             return $ SomeExpr $ ArgsApp args e'
         e -> do
@@ -376,6 +365,22 @@ variable = label "variable" $ do
 
     applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
     applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
+
+
+checkFunctionArguments :: FunctionArguments SomeArgumentType
+                       -> Int -> Maybe ArgumentKeyword -> SomeExpr -> TestParser SomeExpr
+checkFunctionArguments (FunctionArguments argTypes) poff kw expr = do
+    case M.lookup kw argTypes of
+        Just (SomeArgumentType (_ :: ArgumentType expected)) -> do
+            withRecovery registerParseError $ do
+                void $ unify poff (ExprTypePrim (Proxy @expected)) (someExprType expr)
+            return expr
+        Nothing -> do
+            registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
+                case kw of
+                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword `" <> tkw <> "'"
+                    Nothing                    -> "unexpected parameter"
+            return expr
 
 
 functionArguments :: (Int -> Maybe ArgumentKeyword -> a -> TestParser b) -> TestParser a -> TestParser a -> (Int -> Text -> TestParser a) -> TestParser (FunctionArguments b)
