@@ -10,7 +10,6 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 
-import Data.Either
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
@@ -323,7 +322,7 @@ flush p mbexpr = do
     atomicallyTest $ do
         writeTVar (procOutput p) =<< case mbre of
             Nothing -> return []
-            Just re -> filter (isLeft . regexMatch re) <$> readTVar (procOutput p)
+            Just re -> filter (either error isNothing . regexMatch re) <$> readTVar (procOutput p)
 
 testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
 testStepGuard sline expr = do
