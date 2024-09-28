@@ -3,6 +3,7 @@ module Test.Builtins (
 ) where
 
 import Data.Map qualified as M
+import Data.Maybe
 import Data.Text (Text)
 import Data.Typeable
 
@@ -12,15 +13,18 @@ import Test
 builtins :: [ ( VarName, SomeVarValue ) ]
 builtins =
     [ ( VarName "send", builtinSend )
+    , ( VarName "flush", builtinFlush )
     , ( VarName "guard", builtinGuard )
     , ( VarName "wait", builtinWait )
     ]
 
-getArg :: Typeable a => FunctionArguments SomeExpr -> Maybe ArgumentKeyword -> a
-getArg (FunctionArguments args) kw =
-    case M.lookup kw args of
-        Just (SomeExpr expr) | Just expr' <- cast expr -> expr'
-        _ -> error "parameter mismatch"
+getArg :: Typeable a => FunctionArguments SomeExpr -> Maybe ArgumentKeyword -> (Expr a)
+getArg args = fromMaybe (error "parameter mismatch") . getArgMb args
+
+getArgMb :: Typeable a => FunctionArguments SomeExpr -> Maybe ArgumentKeyword -> Maybe (Expr a)
+getArgMb (FunctionArguments args) kw = do
+    SomeExpr expr <- M.lookup kw args
+    cast expr
 
 builtinSend :: SomeVarValue
 builtinSend = SomeVarValue (FunctionArguments $ M.fromList atypes) $
@@ -28,11 +32,20 @@ builtinSend = SomeVarValue (FunctionArguments $ M.fromList atypes) $
   where
     atypes =
         [ ( Just "to", SomeArgumentType (ContextDefault @Process) )
-        , ( Nothing, SomeArgumentType (NoDefault @Text) )
+        , ( Nothing, SomeArgumentType (RequiredArgument @Text) )
+        ]
+
+builtinFlush :: SomeVarValue
+builtinFlush = SomeVarValue (FunctionArguments $ M.fromList atypes) $
+    \_ args -> TestBlock [ Flush (getArg args (Just "from")) (getArgMb args Nothing) ]
+  where
+    atypes =
+        [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
+        , ( Nothing, SomeArgumentType (OptionalArgument @Regex) )
         ]
 
 builtinGuard :: SomeVarValue
-builtinGuard = SomeVarValue (FunctionArguments $ M.singleton Nothing (SomeArgumentType (NoDefault @Bool))) $
+builtinGuard = SomeVarValue (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
     \sline args -> TestBlock [ Guard sline (getArg args Nothing) ]
 
 builtinWait :: SomeVarValue

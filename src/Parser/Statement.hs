@@ -320,11 +320,6 @@ testExpect = command "expect" $ Expect
     <*> param "capture"
     <*> innerBlock
 
-testFlush :: TestParser [TestStep]
-testFlush = command "flush" $ Flush
-    <$> paramOrContext "from"
-    <*> param ""
-
 testDisconnectNode :: TestParser [TestStep]
 testDisconnectNode = command "disconnect_node" $ DisconnectNode
     <$> paramOrContext ""
@@ -372,7 +367,6 @@ testStep = choice
     , testNode
     , testSpawn
     , testExpect
-    , testFlush
     , testDisconnectNode
     , testDisconnectNodes
     , testDisconnectUpstream

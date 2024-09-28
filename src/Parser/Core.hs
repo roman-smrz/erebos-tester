@@ -139,13 +139,14 @@ unifyExpr off pa expr = if
             showType ( Just (ArgumentKeyword kw), SomeArgumentType atype ) = "`" <> kw <> " <" <> textExprType atype <> ">'"
             err = parseError . FancyError off . S.singleton . ErrorFail . T.unpack
 
-        defaults <- forM (M.toAscList remaining) $ \case
-            arg@(_, SomeArgumentType NoDefault) -> err $ "missing " <> showType arg <> " argument"
-            (kw, SomeArgumentType (ExprDefault def)) -> return (kw, SomeExpr def)
+        defaults <- fmap catMaybes $ forM (M.toAscList remaining) $ \case
+            arg@(_, SomeArgumentType RequiredArgument) -> err $ "missing " <> showType arg <> " argument"
+            (_, SomeArgumentType OptionalArgument) -> return Nothing
+            (kw, SomeArgumentType (ExprDefault def)) -> return $ Just ( kw, SomeExpr def )
             (kw, SomeArgumentType atype@ContextDefault) -> do
                 SomeExpr context <- gets testContext
                 context' <- unifyExpr off atype context
-                return (kw, SomeExpr context')
+                return $ Just ( kw, SomeExpr context' )
         return (FunctionEval $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
 
     | Just (Refl :: DynamicType :~: b) <- eqT

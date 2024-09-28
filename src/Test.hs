@@ -312,7 +312,8 @@ funFromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -
 data SomeArgumentType = forall a. ExprType a => SomeArgumentType (ArgumentType a)
 
 data ArgumentType a
-    = NoDefault
+    = RequiredArgument
+    | OptionalArgument
     | ExprDefault (Expr a)
     | ContextDefault
 
