@@ -91,7 +91,10 @@ instance ExprType a => ParamType (TypedVarName a) where
     showParamType _ = "<variable>"
 
 instance ExprType a => ParamType (Expr a) where
-    parseParam _ = typedExpr
+    parseParam _ = do
+        off <- stateOffset <$> getParserState
+        SomeExpr e <- literal <|> variable <|> between (symbol "(") (symbol ")") someExpr
+        unifyExpr off Proxy e
     showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
 
 instance ParamType a => ParamType [a] where

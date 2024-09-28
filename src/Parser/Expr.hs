@@ -7,6 +7,8 @@ module Parser.Expr (
 
     someExpr,
     typedExpr,
+    literal,
+    variable,
 
     functionArguments,
 ) where
@@ -221,9 +223,7 @@ someExpr = join inner <?> "expression"
         , return <$> variable
         ]
 
-    table = [ [ recordSelector
-              ]
-            , [ prefix "-" $ [ SomeUnOp (negate @Integer)
+    table = [ [ prefix "-" $ [ SomeUnOp (negate @Integer)
                              , SomeUnOp (negate @Scientific)
                              ]
               ]
@@ -324,19 +324,11 @@ someExpr = join inner <?> "expression"
             region (const err) $
                 foldl1 (<|>) $ map (\(SomeBinOp op) -> tryop op (proxyOf e) (proxyOf f)) ops
 
-    recordSelector :: Operator TestParser (TestParser SomeExpr)
-    recordSelector = Postfix $ fmap (foldl1 (flip (.))) $ some $ do
-        void $ osymbol "."
-        off <- stateOffset <$> getParserState
-        m <- identifier
-        return $ \p -> do
-            SomeExpr e <- p
-            let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-                    [ T.pack "value of type ", textExprType e, T.pack " does not have member '", m, T.pack "'" ]
-            maybe err return $ applyRecordSelector m e <$> lookup m recordMembers
-
-    applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
-    applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
+typedExpr :: forall a. ExprType a => TestParser (Expr a)
+typedExpr = do
+    off <- stateOffset <$> getParserState
+    SomeExpr e <- someExpr
+    unifyExpr off Proxy e
 
 literal :: TestParser SomeExpr
 literal = label "literal" $ choice
@@ -369,13 +361,21 @@ variable = label "variable" $ do
             args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
             return $ SomeExpr $ ArgsApp args e'
         e -> do
-            return e
+            recordSelector e <|> return e
 
-typedExpr :: forall a. ExprType a => TestParser (Expr a)
-typedExpr = do
-    off <- stateOffset <$> getParserState
-    SomeExpr e <- someExpr
-    unifyExpr off Proxy e
+  where
+    recordSelector :: SomeExpr -> TestParser SomeExpr
+    recordSelector (SomeExpr e) = do
+        void $ osymbol "."
+        off <- stateOffset <$> getParserState
+        m <- identifier
+        let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+                [ T.pack "value of type ", textExprType e, T.pack " does not have member '", m, T.pack "'" ]
+        e' <- maybe err return $ applyRecordSelector m e <$> lookup m recordMembers
+        recordSelector e' <|> return e'
+
+    applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
+    applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
 
 
 functionArguments :: (Int -> Maybe ArgumentKeyword -> a -> TestParser b) -> TestParser a -> TestParser a -> (Int -> Text -> TestParser a) -> TestParser (FunctionArguments b)
