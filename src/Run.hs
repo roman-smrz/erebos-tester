@@ -33,8 +33,8 @@ import Run.Monad
 import Test
 import Test.Builtins
 
-runTest :: Output -> TestOptions -> Test -> IO Bool
-runTest out opts test = do
+runTest :: Output -> TestOptions -> Test -> [ ( VarName, SomeVarValue ) ] -> IO Bool
+runTest out opts test variables = do
     let testDir = optTestDir opts
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
@@ -60,7 +60,7 @@ runTest out opts test = do
             }
         tstate = TestState
             { tsNetwork = error "network not initialized"
-            , tsVars = builtins
+            , tsVars = builtins ++ variables
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty

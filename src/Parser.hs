@@ -6,7 +6,6 @@ module Parser (
 
 import Control.Monad
 import Control.Monad.State
-import Control.Monad.Writer
 
 import Data.Map qualified as M
 import Data.Maybe
@@ -17,6 +16,7 @@ import Data.Text.Lazy.IO qualified as TL
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
+import Text.Megaparsec.Char.Lexer qualified as L
 
 import System.Directory
 import System.Exit
@@ -28,12 +28,28 @@ import Parser.Statement
 import Test
 import Test.Builtins
 
-parseTestDefinition :: TestParser ()
+parseTestDefinition :: TestParser Toplevel
 parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
     block (\name steps -> return $ Test name $ concat steps) header testStep
     where header = do
               wsymbol "test"
               lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
+
+parseDefinition :: TestParser Toplevel
+parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
+    def <- localState $ L.indentBlock scn $ do
+        wsymbol "def"
+        name <- varName
+        choice
+            [ do
+                symbol ":"
+                let finish steps = do
+                        return $ ( name, ) $ SomeVarValue mempty $ \_ _ -> TestBlock $
+                            concat steps
+                return $ L.IndentSome Nothing finish testStep
+            ]
+    modify $ \s -> s { testVars = fmap someVarValueType def : testVars s }
+    return def
 
 parseTestModule :: FilePath -> TestParser Module
 parseTestModule absPath = do
@@ -51,12 +67,14 @@ parseTestModule absPath = do
         , do
             return $ [ T.pack $ takeBaseName absPath ]
         ]
-    (_, toplevels) <- listen $ many $ choice
+    toplevels <- many $ choice
         [ parseTestDefinition
+        , parseDefinition
         ]
-    let moduleTests = catMaybes $ map (\case ToplevelTest x -> Just x; {- _ -> Nothing -}) toplevels
+    let moduleTests = catMaybes $ map (\case ToplevelTest x -> Just x; _ -> Nothing) toplevels
+        moduleDefinitions = catMaybes $ map (\case ToplevelDefinition x -> Just x; _ -> Nothing) toplevels
     eof
-    return Module { .. }
+    return Module {..}
 
 parseTestFile :: FilePath -> IO Module
 parseTestFile path = do
@@ -70,7 +88,7 @@ parseTestFile path = do
             , testNextTypeVar = 0
             , testTypeUnif = M.empty
             }
-        (res, _) = runWriter $ flip (flip runParserT path) content $ flip evalStateT initState $ parseTestModule absPath
+        res = runTestParser path content initState $ parseTestModule absPath
 
     case res of
          Left err -> putStr (errorBundlePretty err) >> exitFailure

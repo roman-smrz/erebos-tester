@@ -149,11 +149,11 @@ main = do
     out <- startOutput (optVerbose opts) useColor
 
     tests <- forM files $ \(path, mbTestName) -> do
-        Module { .. } <- parseTestFile path
-        return $ case mbTestName of
+        Module {..} <- parseTestFile path
+        return $ map ( , moduleDefinitions ) $ case mbTestName of
             Nothing -> moduleTests
             Just name -> filter ((==name) . testName) moduleTests
 
-    ok <- allM (runTest out $ optTest opts) $
+    ok <- allM (uncurry $ runTest out $ optTest opts) $
         concat $ replicate (optRepeat opts) $ concat tests
     when (not ok) exitFailure

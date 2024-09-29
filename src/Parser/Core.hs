@@ -1,8 +1,9 @@
 module Parser.Core where
 
+import Control.Applicative
 import Control.Monad
+import Control.Monad.Identity
 import Control.Monad.State
-import Control.Monad.Writer
 
 import Data.Map (Map)
 import Data.Map qualified as M
@@ -20,14 +21,25 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Network ()
 import Test
 
-type TestParser = StateT TestParserState (ParsecT Void TestStream (Writer [ Toplevel ]))
+newtype TestParser a = TestParser (StateT TestParserState (ParsecT Void TestStream Identity) a)
+    deriving
+        ( Functor, Applicative, Alternative, Monad
+        , MonadState TestParserState
+        , MonadPlus
+        , MonadFail
+        , MonadParsec Void TestStream
+        )
 
 type TestStream = TL.Text
 
 type TestParseError = ParseError TestStream Void
 
+runTestParser :: String -> TestStream -> TestParserState -> TestParser a -> Either (ParseErrorBundle TestStream Void) a
+runTestParser path content initState (TestParser parser) = runIdentity . flip (flip runParserT path) content . flip evalStateT initState $ parser
+
 data Toplevel
     = ToplevelTest Test
+    | ToplevelDefinition ( VarName, SomeVarValue )
 
 data TestParserState = TestParserState
     { testVars :: [ ( VarName, SomeExprType ) ]
@@ -191,8 +203,8 @@ localState inner = do
     put s
     return x
 
-toplevel :: (a -> Toplevel) -> TestParser a -> TestParser ()
-toplevel f = tell . (: []) . f <=< L.nonIndented scn
+toplevel :: (a -> Toplevel) -> TestParser a -> TestParser Toplevel
+toplevel f = return . f <=< L.nonIndented scn
 
 block :: (a -> [b] -> TestParser c) -> TestParser a -> TestParser b -> TestParser c
 block merge header item = L.indentBlock scn $ do

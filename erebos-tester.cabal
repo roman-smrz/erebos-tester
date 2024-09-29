@@ -94,24 +94,28 @@ executable erebos-tester-core
 
   autogen-modules:     Paths_erebos_tester
 
-  other-extensions:    TemplateHaskell
-  default-extensions:  ExistentialQuantification
-                       FlexibleContexts
-                       FlexibleInstances
-                       GADTs
-                       GeneralizedNewtypeDeriving
-                       ImportQualifiedPost
-                       LambdaCase
-                       MultiParamTypeClasses
-                       MultiWayIf
-                       OverloadedStrings
-                       RankNTypes
-                       RecordWildCards
-                       ScopedTypeVariables
-                       TupleSections
-                       TypeApplications
-                       TypeFamilies
-                       TypeOperators
+  other-extensions:
+        TemplateHaskell
+  default-extensions:
+        DeriveTraversable
+        ExistentialQuantification
+        FlexibleContexts
+        FlexibleInstances
+        GADTs
+        GeneralizedNewtypeDeriving
+        ImportQualifiedPost
+        LambdaCase
+        MultiParamTypeClasses
+        MultiWayIf
+        OverloadedStrings
+        RankNTypes
+        RecordWildCards
+        ScopedTypeVariables
+        TupleSections
+        TypeApplications
+        TypeFamilies
+        TypeOperators
+
   build-depends:
         bytestring      ^>= { 0.10, 0.11, 0.12 },
         containers      ^>= { 0.6.2.1, 0.7 },

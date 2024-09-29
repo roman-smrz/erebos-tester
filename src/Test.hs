@@ -46,6 +46,7 @@ import Util
 data Module = Module
     { moduleName :: [ Text ]
     , moduleTests :: [ Test ]
+    , moduleDefinitions :: [ ( VarName, SomeVarValue ) ]
     }
 
 data Test = Test
