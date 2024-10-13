@@ -157,3 +157,7 @@ main = do
     ok <- allM (uncurry $ runTest out $ optTest opts) $
         concat $ replicate (optRepeat opts) $ concat tests
     when (not ok) exitFailure
+
+foreign export ccall testerMain :: IO ()
+testerMain :: IO ()
+testerMain = main
