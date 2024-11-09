@@ -186,9 +186,6 @@ evalSteps = mapM_ $ \case
         void $ outPromptGetLine "Waiting..."
 
 
-withVar :: ExprType e => VarName -> e -> TestRun a -> TestRun a
-withVar name value = local (fmap $ \s -> s { tsVars = ( name, SomeVarValue mempty $ const $ const value ) : tsVars s })
-
 withInternet :: (Network -> TestRun a) -> TestRun a
 withInternet inner = do
     testDir <- asks $ optTestDir . teOptions . fst

@@ -76,8 +76,9 @@ newtype SourceLine = SourceLine Text
 
 
 class MonadFail m => MonadEval m where
-  lookupVar :: VarName -> m SomeVarValue
-  rootNetwork :: m Network
+    lookupVar :: VarName -> m SomeVarValue
+    rootNetwork :: m Network
+    withVar :: ExprType e => VarName -> e -> m a -> m a
 
 
 newtype VarName = VarName Text

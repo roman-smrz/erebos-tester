@@ -96,6 +96,8 @@ instance MonadEval TestRun where
     lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< asks (lookup name . tsVars . snd)
     rootNetwork = asks $ tsNetwork . snd
 
+    withVar name value = local (fmap $ \s -> s { tsVars = ( name, SomeVarValue mempty $ const $ const value ) : tsVars s })
+
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
 
