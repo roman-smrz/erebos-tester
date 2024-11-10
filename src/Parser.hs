@@ -30,7 +30,7 @@ import Test.Builtins
 
 parseTestDefinition :: TestParser Toplevel
 parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
-    block (\name steps -> return $ Test name $ concat steps) header testStep
+    block (\name steps -> return $ Test name $ mconcat steps) header testStep
     where header = do
               wsymbol "test"
               lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
@@ -44,11 +44,10 @@ parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
             [ do
                 symbol ":"
                 let finish steps = do
-                        return $ ( name, ) $ SomeVarValue mempty $ \_ _ -> TestBlock $
-                            concat steps
+                        return $ ( name, SomeExpr $ mconcat steps )
                 return $ L.IndentSome Nothing finish testStep
             ]
-    modify $ \s -> s { testVars = fmap someVarValueType def : testVars s }
+    modify $ \s -> s { testVars = fmap someExprType def : testVars s }
     return def
 
 parseTestModule :: FilePath -> TestParser Module

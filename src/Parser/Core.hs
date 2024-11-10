@@ -39,7 +39,7 @@ runTestParser path content initState (TestParser parser) = runIdentity . flip (f
 
 data Toplevel
     = ToplevelTest Test
-    | ToplevelDefinition ( VarName, SomeVarValue )
+    | ToplevelDefinition ( VarName, SomeExpr )
 
 data TestParserState = TestParserState
     { testVars :: [ ( VarName, SomeExprType ) ]

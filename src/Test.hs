@@ -46,30 +46,30 @@ import Util
 data Module = Module
     { moduleName :: [ Text ]
     , moduleTests :: [ Test ]
-    , moduleDefinitions :: [ ( VarName, SomeVarValue ) ]
+    , moduleDefinitions :: [ ( VarName, SomeExpr ) ]
     }
 
 data Test = Test
     { testName :: Text
-    , testSteps :: [TestStep]
+    , testSteps :: Expr TestBlock
     }
 
 newtype TestBlock = TestBlock [ TestStep ]
+    deriving (Semigroup, Monoid)
 
-data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) [TestStep]
-              | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [a]) [TestStep]
-              | ExprStatement (Expr TestBlock)
-              | Subnet (TypedVarName Network) (Expr Network) [TestStep]
-              | DeclNode (TypedVarName Node) (Expr Network) [TestStep]
-              | Spawn (TypedVarName Process) (Either (Expr Network) (Expr Node)) [TestStep]
+data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) (Expr TestBlock)
+              | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [ a ]) (Expr TestBlock)
+              | Subnet (TypedVarName Network) (Expr Network) (Expr TestBlock)
+              | DeclNode (TypedVarName Node) (Expr Network) (Expr TestBlock)
+              | Spawn (TypedVarName Process) (Either (Expr Network) (Expr Node)) (Expr TestBlock)
               | Send (Expr Process) (Expr Text)
-              | Expect SourceLine (Expr Process) (Expr Regex) [TypedVarName Text] [TestStep]
+              | Expect SourceLine (Expr Process) (Expr Regex) [ TypedVarName Text ] (Expr TestBlock)
               | Flush (Expr Process) (Maybe (Expr Regex))
               | Guard SourceLine (Expr Bool)
-              | DisconnectNode (Expr Node) [TestStep]
-              | DisconnectNodes (Expr Network) [TestStep]
-              | DisconnectUpstream (Expr Network) [TestStep]
-              | PacketLoss (Expr Scientific) (Expr Node) [TestStep]
+              | DisconnectNode (Expr Node) (Expr TestBlock)
+              | DisconnectNodes (Expr Network) (Expr TestBlock)
+              | DisconnectUpstream (Expr Network) (Expr TestBlock)
+              | PacketLoss (Expr Scientific) (Expr Node) (Expr TestBlock)
               | Wait
 
 newtype SourceLine = SourceLine Text
@@ -228,6 +228,12 @@ instance Functor Expr where
 instance Applicative Expr where
     pure = Pure
     (<*>) = App AnnNone
+
+instance Semigroup a => Semigroup (Expr a) where
+    e <> f = (<>) <$> e <*> f
+
+instance Monoid a => Monoid (Expr a) where
+    mempty = Pure mempty
 
 eval :: MonadEval m => Expr a -> m a
 eval (Variable sline name) = fromSomeVarValue sline name =<< lookupVar name

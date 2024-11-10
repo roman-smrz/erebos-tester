@@ -33,7 +33,7 @@ import Run.Monad
 import Test
 import Test.Builtins
 
-runTest :: Output -> TestOptions -> Test -> [ ( VarName, SomeVarValue ) ] -> IO Bool
+runTest :: Output -> TestOptions -> Test -> [ ( VarName, SomeExpr ) ] -> IO Bool
 runTest out opts test variables = do
     let testDir = optTestDir opts
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
@@ -60,7 +60,7 @@ runTest out opts test variables = do
             }
         tstate = TestState
             { tsNetwork = error "network not initialized"
-            , tsVars = builtins ++ variables
+            , tsVars = builtins
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty
@@ -83,11 +83,18 @@ runTest out opts test variables = do
                         Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
+    let withVarExprList (( name, expr ) : rest) act = do
+            value <- evalSome expr
+            local (fmap $ \s -> s { tsVars = ( name, value ) : tsVars s }) $ do
+                withVarExprList rest act
+        withVarExprList [] act = act
+
     res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
-        withInternet $ \_ -> do
-            evalSteps (testSteps test)
-            when (optWait opts) $ do
-                void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
+        withVarExprList variables $ do
+            withInternet $ \_ -> do
+                evalBlock =<< eval (testSteps test)
+                when (optWait opts) $ do
+                    void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
 
     void $ installHandler processStatusChanged oldHandler Nothing
 
@@ -102,15 +109,15 @@ runTest out opts test variables = do
             return True
         _ -> return False
 
-evalSteps :: [TestStep] -> TestRun ()
-evalSteps = mapM_ $ \case
+evalBlock :: TestBlock -> TestRun ()
+evalBlock (TestBlock steps) = forM_ steps $ \case
     Let (SourceLine sline) (TypedVarName name) expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
             outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
             throwError Failed
         value <- eval expr
-        withVar name value $ evalSteps inner
+        withVar name value $ evalBlock =<< eval inner
 
     For (SourceLine sline) (TypedVarName name) expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
@@ -119,20 +126,16 @@ evalSteps = mapM_ $ \case
             throwError Failed
         value <- eval expr
         forM_ value $ \i -> do
-            withVar name i $ evalSteps inner
-
-    ExprStatement expr -> do
-        TestBlock steps <- eval expr
-        evalSteps steps
+            withVar name i $ evalBlock =<< eval inner
 
     Subnet name@(TypedVarName vname) parentExpr inner -> do
         parent <- eval parentExpr
         withSubnet parent (Just name) $ \net -> do
-            withVar vname net $ evalSteps inner
+            withVar vname net $ evalBlock =<< eval inner
 
     DeclNode name@(TypedVarName vname) net inner -> do
         withNode net (Left name) $ \node -> do
-            withVar vname node $ evalSteps inner
+            withVar vname node $ evalBlock =<< eval inner
 
     Spawn tvname@(TypedVarName vname@(VarName tname)) target inner -> do
         case target of
@@ -144,7 +147,7 @@ evalSteps = mapM_ $ \case
             let pname = ProcName tname
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
             withProcess (Right node) pname Nothing tool $ \p -> do
-                withVar vname p (evalSteps inner)
+                withVar vname p $ evalBlock =<< eval inner
 
     Send pname expr -> do
         p <- eval pname
@@ -154,7 +157,7 @@ evalSteps = mapM_ $ \case
 
     Expect line pname expr captures inner -> do
         p <- eval pname
-        expect line p expr captures $ evalSteps inner
+        expect line p expr captures $ evalBlock =<< eval inner
 
     Flush pname expr -> do
         p <- eval pname
@@ -165,22 +168,22 @@ evalSteps = mapM_ $ \case
 
     DisconnectNode node inner -> do
         n <- eval node
-        withDisconnectedUp (nodeUpstream n) $ evalSteps inner
+        withDisconnectedUp (nodeUpstream n) $ evalBlock =<< eval inner
 
     DisconnectNodes net inner -> do
         n <- eval net
-        withDisconnectedBridge (netBridge n) $ evalSteps inner
+        withDisconnectedBridge (netBridge n) $ evalBlock =<< eval inner
 
     DisconnectUpstream net inner -> do
         n <- eval net
         case netUpstream n of
-            Just link -> withDisconnectedUp link $ evalSteps inner
-            Nothing -> evalSteps inner
+            Just link -> withDisconnectedUp link $ evalBlock =<< eval inner
+            Nothing -> evalBlock =<< eval inner
 
     PacketLoss loss node inner -> do
         l <- eval loss
         n <- eval node
-        withNodePacketLoss n l $ evalSteps inner
+        withNodePacketLoss n l $ evalBlock =<< eval inner
 
     Wait -> do
         void $ outPromptGetLine "Waiting..."
