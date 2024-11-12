@@ -235,53 +235,57 @@ instance Semigroup a => Semigroup (Expr a) where
 instance Monoid a => Monoid (Expr a) where
     mempty = Pure mempty
 
-eval :: MonadEval m => Expr a -> m a
-eval (Variable sline name) = fromSomeVarValue sline name =<< lookupVar name
-eval (DynVariable _ _ _) = fail "ambiguous type"
-eval (FunVariable _ sline name) = funFromSomeVarValue sline name =<< lookupVar name
-eval (ArgsApp args efun) = do
-    FunctionType fun <- eval efun
-    return $ FunctionType $ \args' -> fun (args <> args')
-eval (FunctionEval efun) = do
-    FunctionType fun <- eval efun
-    return $ fun mempty
-eval (Pure value) = return value
-eval (App _ f x) = eval f <*> eval x
-eval (Concat xs) = T.concat <$> mapM eval xs
-eval (Regex xs) = mapM eval xs >>= \case
-    [re@RegexCompiled {}] -> return re
-    parts -> case regexCompile $ T.concat $ map regexSource parts of
-        Left err -> fail err
-        Right re -> return re
-eval (RootNetwork) = rootNetwork
-eval (Undefined err) = fail err
+eval :: forall m a. MonadEval m => Expr a -> m a
+eval = \case
+    Variable sline name -> fromSomeVarValue sline name =<< lookupVar name
+    DynVariable _ _ _ -> fail "ambiguous type"
+    FunVariable _ sline name -> funFromSomeVarValue sline name =<< lookupVar name
+    ArgsApp args efun -> do
+        FunctionType fun <- eval efun
+        return $ FunctionType $ \args' -> fun (args <> args')
+    FunctionEval efun -> do
+        FunctionType fun <- eval efun
+        return $ fun mempty
+    Pure value -> return value
+    App _ f x -> eval f <*> eval x
+    Concat xs -> T.concat <$> mapM eval xs
+    Regex xs -> mapM eval xs >>= \case
+        [ re@RegexCompiled {} ] -> return re
+        parts -> case regexCompile $ T.concat $ map regexSource parts of
+            Left err -> fail err
+            Right re -> return re
+    RootNetwork -> rootNetwork
+    Undefined err -> fail err
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
 evalSome (SomeExpr expr) = SomeVarValue mempty . const . const <$> eval expr
 
-gatherVars :: forall a m. MonadEval m => Expr a -> m [((VarName, [Text]), SomeVarValue)]
+gatherVars :: forall a m. MonadEval m => Expr a -> m [ (( VarName, [ Text ] ), SomeVarValue ) ]
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
-    helper :: forall b. Expr b -> m [((VarName, [Text]), SomeVarValue)]
-    helper (Variable _ var) = (:[]) . ((var, []),) <$> lookupVar var
-    helper (DynVariable _ _ var) = (:[]) . ((var, []),) <$> lookupVar var
-    helper (FunVariable _ _ var) = (:[]) . ((var, []),) <$> lookupVar var
-    helper (ArgsApp (FunctionArguments args) fun) = do
-        v <- helper fun
-        vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
-        return $ concat (v : vs)
-    helper (FunctionEval efun) = helper efun
-    helper (Pure _) = return []
-    helper e@(App (AnnRecord sel) _ x)
-        | Just (var, sels) <- gatherSelectors x
-        = do val <- SomeVarValue mempty . const . const <$> eval e
-             return [((var, sels ++ [sel]), val)]
-        | otherwise = helper x
-    helper (App _ f x) = (++) <$> helper f <*> helper x
-    helper (Concat es) = concat <$> mapM helper es
-    helper (Regex es) = concat <$> mapM helper es
-    helper (RootNetwork) = return []
-    helper (Undefined {}) = return []
+    helper :: forall b. Expr b -> m [ (( VarName, [ Text ] ), SomeVarValue ) ]
+    helper = \case
+        Variable _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
+        DynVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
+        FunVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
+        ArgsApp (FunctionArguments args) fun -> do
+            v <- helper fun
+            vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
+            return $ concat (v : vs)
+        FunctionEval efun -> helper efun
+        Pure _ -> return []
+        e@(App (AnnRecord sel) _ x)
+            | Just (var, sels) <- gatherSelectors x
+            -> do
+                val <- SomeVarValue mempty . const . const <$> eval e
+                return [ (( var, sels ++ [ sel ] ), val ) ]
+            | otherwise -> do
+                helper x
+        App _ f x -> (++) <$> helper f <*> helper x
+        Concat es -> concat <$> mapM helper es
+        Regex es -> concat <$> mapM helper es
+        RootNetwork -> return []
+        Undefined {} -> return []
 
     gatherSelectors :: forall b. Expr b -> Maybe (VarName, [Text])
     gatherSelectors = \case
