@@ -159,12 +159,11 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
         p <- eval pname
         expect line p expr captures $ evalBlock =<< eval inner
 
-    Flush pname expr -> do
-        p <- eval pname
-        flush p expr
+    Flush p regex -> do
+        flush p regex
 
-    Guard line expr -> do
-        testStepGuard line expr
+    Guard line vars expr -> do
+        testStepGuard line vars expr
 
     DisconnectNode node inner -> do
         n <- eval node
@@ -273,10 +272,9 @@ tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just (
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-exprFailed :: Text -> SourceLine -> Maybe ProcName -> Expr a -> TestRun ()
-exprFailed desc (SourceLine sline) pname expr = do
+exprFailed :: Text -> SourceLine -> Maybe ProcName -> EvalTrace -> TestRun ()
+exprFailed desc (SourceLine sline) pname exprVars = do
     let prompt = maybe T.empty textProcName pname
-    exprVars <- gatherVars expr
     outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", sline]
     forM_ exprVars $ \((name, sel), value) ->
         outLine OutputMatchFail (Just prompt) $ T.concat
@@ -312,19 +310,17 @@ expect (SourceLine sline) p expr tvars inner = do
                      throwError Failed
 
              outProc OutputMatch p line
-             local (fmap $ \s -> s { tsVars = zip vars (map (SomeVarValue mempty . const . const) capture) ++ tsVars s }) inner
+             local (fmap $ \s -> s { tsVars = zip vars (map (SomeVarValue [] mempty . const . const) capture) ++ tsVars s }) inner
 
-         Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) expr
+         Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) =<< gatherVars expr
 
-flush :: Process -> Maybe (Expr Regex) -> TestRun ()
-flush p mbexpr = do
-    mbre <- sequence $ fmap eval mbexpr
+flush :: Process -> Maybe Regex -> TestRun ()
+flush p mbre = do
     atomicallyTest $ do
         writeTVar (procOutput p) =<< case mbre of
             Nothing -> return []
             Just re -> filter (either error isNothing . regexMatch re) <$> readTVar (procOutput p)
 
-testStepGuard :: SourceLine -> Expr Bool -> TestRun ()
-testStepGuard sline expr = do
-    x <- eval expr
-    when (not x) $ exprFailed (T.pack "guard") sline Nothing expr
+testStepGuard :: SourceLine -> EvalTrace -> Bool -> TestRun ()
+testStepGuard sline vars x = do
+    when (not x) $ exprFailed (T.pack "guard") sline Nothing vars

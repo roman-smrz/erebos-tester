@@ -14,7 +14,8 @@ module Test (
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
-    Expr(..), eval, gatherVars, evalSome,
+    Expr(..), eval, evalSome,
+    EvalTrace, VarNameSelectors, gatherVars,
     AppAnnotation(..),
 
     ArgumentKeyword(..), FunctionArguments(..),
@@ -64,8 +65,8 @@ data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a)
               | Spawn (TypedVarName Process) (Either (Expr Network) (Expr Node)) (Expr TestBlock)
               | Send (Expr Process) (Expr Text)
               | Expect SourceLine (Expr Process) (Expr Regex) [ TypedVarName Text ] (Expr TestBlock)
-              | Flush (Expr Process) (Maybe (Expr Regex))
-              | Guard SourceLine (Expr Bool)
+              | Flush Process (Maybe Regex)
+              | Guard SourceLine EvalTrace Bool
               | DisconnectNode (Expr Node) (Expr TestBlock)
               | DisconnectNodes (Expr Network) (Expr TestBlock)
               | DisconnectUpstream (Expr Network) (Expr TestBlock)
@@ -141,7 +142,7 @@ instance ExprType TestBlock where
     textExprValue _ = "<test block>"
 
 
-data FunctionType a = FunctionType (FunctionArguments SomeExpr -> a)
+data FunctionType a = FunctionType (FunctionArguments SomeVarValue -> a)
 
 instance ExprType a => ExprType (FunctionType a) where
     textExprType _ = "function type"
@@ -177,10 +178,14 @@ textSomeExprType (ExprTypeVar (TypeVar name)) = name
 textSomeExprType (ExprTypeFunction _ r) = "function:" <> textExprType r
 
 
-data SomeVarValue = forall a. ExprType a => SomeVarValue (FunctionArguments SomeArgumentType) (SourceLine -> FunctionArguments SomeExpr -> a)
+data SomeVarValue = forall a. ExprType a => SomeVarValue
+    { svvVariables :: EvalTrace
+    , svvArguments :: FunctionArguments SomeArgumentType
+    , svvFunction :: SourceLine -> FunctionArguments SomeVarValue -> a
+    }
 
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m a
-fromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -> b)) = do
+fromSomeVarValue sline name (SomeVarValue _ args (value :: SourceLine -> args -> b)) = do
     maybe (fail err) return $ do
         guard $ anull args
         cast $ value sline mempty
@@ -189,12 +194,12 @@ fromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -> b
             if anull args then textExprType @b Proxy else "function type" ]
 
 textSomeVarValue :: SourceLine -> SomeVarValue -> Text
-textSomeVarValue sline (SomeVarValue args value)
+textSomeVarValue sline (SomeVarValue _ args value)
     | anull args = textExprValue $ value sline mempty
     | otherwise  =  "<function>"
 
 someVarValueType :: SomeVarValue -> SomeExprType
-someVarValueType (SomeVarValue args (_ :: SourceLine -> args -> a))
+someVarValueType (SomeVarValue _ args (_ :: SourceLine -> args -> a))
     | anull args = ExprTypePrim (Proxy @a)
     | otherwise  = ExprTypeFunction args (Proxy @a)
 
@@ -240,8 +245,9 @@ eval = \case
     Variable sline name -> fromSomeVarValue sline name =<< lookupVar name
     DynVariable _ _ _ -> fail "ambiguous type"
     FunVariable _ sline name -> funFromSomeVarValue sline name =<< lookupVar name
-    ArgsApp args efun -> do
+    ArgsApp eargs efun -> do
         FunctionType fun <- eval efun
+        args <- mapM evalSome eargs
         return $ FunctionType $ \args' -> fun (args <> args')
     FunctionEval efun -> do
         FunctionType fun <- eval efun
@@ -258,12 +264,18 @@ eval = \case
     Undefined err -> fail err
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
-evalSome (SomeExpr expr) = SomeVarValue mempty . const . const <$> eval expr
+evalSome (SomeExpr expr) = SomeVarValue
+    <$> gatherVars expr
+    <*> pure mempty
+    <*> (const . const <$> eval expr)
 
-gatherVars :: forall a m. MonadEval m => Expr a -> m [ (( VarName, [ Text ] ), SomeVarValue ) ]
+type VarNameSelectors = ( VarName, [ Text ] )
+type EvalTrace = [ ( VarNameSelectors, SomeVarValue ) ]
+
+gatherVars :: forall a m. MonadEval m => Expr a -> m EvalTrace
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
-    helper :: forall b. Expr b -> m [ (( VarName, [ Text ] ), SomeVarValue ) ]
+    helper :: forall b. Expr b -> m EvalTrace
     helper = \case
         Variable _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
         DynVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
@@ -277,7 +289,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         e@(App (AnnRecord sel) _ x)
             | Just (var, sels) <- gatherSelectors x
             -> do
-                val <- SomeVarValue mempty . const . const <$> eval e
+                val <- SomeVarValue [] mempty . const . const <$> eval e
                 return [ (( var, sels ++ [ sel ] ), val ) ]
             | otherwise -> do
                 helper x
@@ -300,7 +312,7 @@ newtype ArgumentKeyword = ArgumentKeyword Text
     deriving (Show, Eq, Ord, IsString)
 
 newtype FunctionArguments a = FunctionArguments (Map (Maybe ArgumentKeyword) a)
-    deriving (Show, Semigroup, Monoid)
+    deriving (Show, Semigroup, Monoid, Functor, Foldable, Traversable)
 
 anull :: FunctionArguments a -> Bool
 anull (FunctionArguments args) = M.null args
@@ -313,7 +325,7 @@ exprArgs (ArgsApp (FunctionArguments applied) expr) =
 exprArgs _ = error "exprArgs on unexpected type"
 
 funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m (FunctionType a)
-funFromSomeVarValue sline name (SomeVarValue args (value :: SourceLine -> args -> b)) = do
+funFromSomeVarValue sline name (SomeVarValue _ args (value :: SourceLine -> args -> b)) = do
     maybe (fail err) return $ do
         guard $ not $ anull args
         FunctionType <$> cast (value sline)

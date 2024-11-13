@@ -5,7 +5,6 @@ module Test.Builtins (
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Text (Text)
-import Data.Typeable
 
 import Process (Process)
 import Test
@@ -18,17 +17,20 @@ builtins =
     , ( VarName "wait", builtinWait )
     ]
 
-getArg :: Typeable a => FunctionArguments SomeExpr -> Maybe ArgumentKeyword -> (Expr a)
+getArg :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> a
 getArg args = fromMaybe (error "parameter mismatch") . getArgMb args
 
-getArgMb :: Typeable a => FunctionArguments SomeExpr -> Maybe ArgumentKeyword -> Maybe (Expr a)
+getArgMb :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> Maybe a
 getArgMb (FunctionArguments args) kw = do
-    SomeExpr expr <- M.lookup kw args
-    cast expr
+    fromSomeVarValue (SourceLine "") (VarName "") =<< M.lookup kw args
+
+getArgVars :: FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> [ (( VarName, [ Text ] ), SomeVarValue ) ]
+getArgVars (FunctionArguments args) kw = do
+    maybe [] svvVariables $ M.lookup kw args
 
 builtinSend :: SomeVarValue
-builtinSend = SomeVarValue (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlock [ Send (getArg args (Just "to")) (getArg args Nothing) ]
+builtinSend = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
+    \_ args -> TestBlock [ Send (Pure (getArg args (Just "to"))) (Pure (getArg args Nothing)) ]
   where
     atypes =
         [ ( Just "to", SomeArgumentType (ContextDefault @Process) )
@@ -36,7 +38,7 @@ builtinSend = SomeVarValue (FunctionArguments $ M.fromList atypes) $
         ]
 
 builtinFlush :: SomeVarValue
-builtinFlush = SomeVarValue (FunctionArguments $ M.fromList atypes) $
+builtinFlush = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
     \_ args -> TestBlock [ Flush (getArg args (Just "from")) (getArgMb args (Just "matching")) ]
   where
     atypes =
@@ -45,8 +47,8 @@ builtinFlush = SomeVarValue (FunctionArguments $ M.fromList atypes) $
         ]
 
 builtinGuard :: SomeVarValue
-builtinGuard = SomeVarValue (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
-    \sline args -> TestBlock [ Guard sline (getArg args Nothing) ]
+builtinGuard = SomeVarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
+    \sline args -> TestBlock [ Guard sline (getArgVars args Nothing) (getArg args Nothing) ]
 
 builtinWait :: SomeVarValue
-builtinWait = SomeVarValue mempty $ const . const $ TestBlock [ Wait ]
+builtinWait = SomeVarValue [] mempty $ const . const $ TestBlock [ Wait ]
