@@ -128,8 +128,7 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
         forM_ value $ \i -> do
             withVar name i $ evalBlock =<< eval inner
 
-    Subnet name@(TypedVarName vname) parentExpr inner -> do
-        parent <- eval parentExpr
+    Subnet name@(TypedVarName vname) parent inner -> do
         withSubnet parent (Just name) $ \net -> do
             withVar vname net $ evalBlock =<< eval inner
 
@@ -140,7 +139,7 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
     Spawn tvname@(TypedVarName vname@(VarName tname)) target inner -> do
         case target of
             Left net -> withNode net (Right tvname) go
-            Right node -> go =<< eval node
+            Right node -> go node
       where
         go node = do
             opts <- asks $ teOptions . fst
@@ -149,14 +148,11 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
             withProcess (Right node) pname Nothing tool $ \p -> do
                 withVar vname p $ evalBlock =<< eval inner
 
-    Send pname expr -> do
-        p <- eval pname
-        line <- eval expr
+    Send p line -> do
         outProc OutputChildStdin p line
         send p line
 
-    Expect line pname expr captures inner -> do
-        p <- eval pname
+    Expect line p expr captures inner -> do
         expect line p expr captures $ evalBlock =<< eval inner
 
     Flush p regex -> do
@@ -166,23 +162,18 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
         testStepGuard line vars expr
 
     DisconnectNode node inner -> do
-        n <- eval node
-        withDisconnectedUp (nodeUpstream n) $ evalBlock =<< eval inner
+        withDisconnectedUp (nodeUpstream node) $ evalBlock =<< eval inner
 
     DisconnectNodes net inner -> do
-        n <- eval net
-        withDisconnectedBridge (netBridge n) $ evalBlock =<< eval inner
+        withDisconnectedBridge (netBridge net) $ evalBlock =<< eval inner
 
     DisconnectUpstream net inner -> do
-        n <- eval net
-        case netUpstream n of
+        case netUpstream net of
             Just link -> withDisconnectedUp link $ evalBlock =<< eval inner
             Nothing -> evalBlock =<< eval inner
 
     PacketLoss loss node inner -> do
-        l <- eval loss
-        n <- eval node
-        withNodePacketLoss n l $ evalBlock =<< eval inner
+        withNodePacketLoss node loss $ evalBlock =<< eval inner
 
     Wait -> do
         void $ outPromptGetLine "Waiting..."
@@ -211,9 +202,8 @@ withNetwork net inner = do
 
     tcpdump $ inner net
 
-withNode :: Expr Network -> Either (TypedVarName Node) (TypedVarName Process) -> (Node -> TestRun a) -> TestRun a
-withNode netexpr tvname inner = do
-    net <- eval netexpr
+withNode :: Network -> Either (TypedVarName Node) (TypedVarName Process) -> (Node -> TestRun a) -> TestRun a
+withNode net tvname inner = do
     node <- newNode net (either fromTypedVarName fromTypedVarName tvname)
     either (flip withVar node . fromTypedVarName) (const id) tvname $ inner node
 

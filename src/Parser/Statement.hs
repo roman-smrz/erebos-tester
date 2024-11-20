@@ -6,6 +6,7 @@ import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
 
+import Data.Bifunctor
 import Data.Kind
 import Data.Maybe
 import Data.Set qualified as S
@@ -104,6 +105,10 @@ class (Typeable a, Typeable (ParamRep a)) => ParamType a where
     paramFromSomeExpr :: proxy a -> SomeExpr -> Maybe (ParamRep a)
     paramFromSomeExpr _ (SomeExpr e) = cast e
 
+    paramExpr :: ParamRep a -> Expr a
+    default paramExpr :: ParamRep a ~ a => ParamRep a -> Expr a
+    paramExpr = Pure
+
 instance ParamType SourceLine where
     parseParam _ = mzero
     showParamType _ = "<source line>"
@@ -125,6 +130,7 @@ instance ParamType a => ParamType [a] where
     showParamType _ = showParamType @a Proxy ++ " [, " ++ showParamType @a Proxy ++ " ...]"
     paramDefault _ = return []
     paramFromSomeExpr _ se@(SomeExpr e) = cast e <|> ((:[]) <$> paramFromSomeExpr @a Proxy se)
+    paramExpr = sequenceA . fmap paramExpr
 
 instance ParamType a => ParamType (Maybe a) where
     type ParamRep (Maybe a) = Maybe (ParamRep a)
@@ -132,6 +138,7 @@ instance ParamType a => ParamType (Maybe a) where
     showParamType _ = showParamType @a Proxy
     paramDefault _ = return Nothing
     paramFromSomeExpr _ se = Just <$> paramFromSomeExpr @a Proxy se
+    paramExpr = sequenceA . fmap paramExpr
 
 instance (ParamType a, ParamType b) => ParamType (Either a b) where
     type ParamRep (Either a b) = Either (ParamRep a) (ParamRep b)
@@ -144,49 +151,49 @@ instance (ParamType a, ParamType b) => ParamType (Either a b) where
                 (_ : _) -> fail ""
     showParamType _ = showParamType @a Proxy ++ " or " ++ showParamType @b Proxy
     paramFromSomeExpr _ se = (Left <$> paramFromSomeExpr @a Proxy se) <|> (Right <$> paramFromSomeExpr @b Proxy se)
+    paramExpr = either (fmap Left . paramExpr) (fmap Right . paramExpr)
 
 data SomeParam f = forall a. ParamType a => SomeParam (Proxy a) (f (ParamRep a))
 
-data CommandDef a = CommandDef [(String, SomeParam Proxy)] ([SomeParam Identity] -> a)
+data CommandDef a = CommandDef [(String, SomeParam Proxy)] ([SomeParam Identity] -> Expr a)
 
 instance Functor CommandDef where
-  fmap f (CommandDef types ctor) = CommandDef types (f . ctor)
+    fmap f (CommandDef types ctor) = CommandDef types (fmap f . ctor)
 
 instance Applicative CommandDef where
-  pure x = CommandDef [] (\case [] -> x; _ -> error "command arguments mismatch")
-  CommandDef types1 ctor1 <*> CommandDef types2 ctor2 =
-      CommandDef (types1 ++ types2) $ \params ->
-          let (params1, params2) = splitAt (length types1) params
-           in ctor1 params1 $ ctor2 params2
+    pure x = CommandDef [] (\case [] -> Pure x; _ -> error "command arguments mismatch")
+    CommandDef types1 ctor1 <*> CommandDef types2 ctor2 =
+        CommandDef (types1 ++ types2) $ \params ->
+            let (params1, params2) = splitAt (length types1) params
+             in ctor1 params1 <*> ctor2 params2
 
 param :: forall a. ParamType a => String -> CommandDef a
 param name = CommandDef [(name, SomeParam (Proxy @a) Proxy)] $ \case
-    [SomeParam Proxy (Identity x)] -> fromJust $ cast x
+    [SomeParam Proxy (Identity x)] -> paramExpr $ fromJust $ cast x
     _ -> error "command arguments mismatch"
 
-data ParamOrContext a
+newtype ParamOrContext a = ParamOrContext { fromParamOrContext :: a }
+    deriving (Functor, Foldable, Traversable)
 
 instance ParamType a => ParamType (ParamOrContext a) where
-    type ParamRep (ParamOrContext a) = ParamRep a
-    parseParam _ = parseParam @a Proxy
+    type ParamRep (ParamOrContext a) = ParamOrContext (ParamRep a)
+    parseParam _ = ParamOrContext <$> parseParam @a Proxy
     showParamType _ = showParamType @a Proxy
     paramDefault _ = gets testContext >>= \case
         se@(SomeExpr ctx)
-            | Just e <- paramFromSomeExpr @a Proxy se -> return e
+            | Just e <- paramFromSomeExpr @a Proxy se -> return (ParamOrContext e)
             | otherwise -> fail $ showParamType @a Proxy <> " not available from context type '" <> T.unpack (textExprType ctx) <> "'"
+    paramExpr = sequenceA . fmap paramExpr
 
 paramOrContext :: forall a. ParamType a => String -> CommandDef a
-paramOrContext name = CommandDef [(name, SomeParam (Proxy @(ParamOrContext a)) Proxy)] $ \case
-    [SomeParam Proxy (Identity x)] -> fromJust $ cast x
-    _ -> error "command arguments mismatch"
+paramOrContext name = fromParamOrContext <$> param name
 
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
 
-data InnerBlock
+newtype InnerBlock = InnerBlock { fromInnerBlock :: Expr TestBlock }
 
 instance ParamType InnerBlock where
-    type ParamRep InnerBlock = Expr TestBlock
     parseParam _ = mzero
     showParamType _ = "<code block>"
 
@@ -195,9 +202,19 @@ instance ParamType TestStep where
     showParamType _ = "<code line>"
 
 innerBlock :: CommandDef (Expr TestBlock)
-innerBlock = CommandDef [("", SomeParam (Proxy @InnerBlock) Proxy)] $ \case
-    [SomeParam Proxy (Identity x)] -> fromJust $ cast x
-    _ -> error "command arguments mismatch"
+innerBlock = fromInnerBlock <$> param ""
+
+newtype ExprParam a = ExprParam { fromExprParam :: a }
+    deriving (Functor, Foldable, Traversable)
+
+instance ExprType a => ParamType (ExprParam a) where
+    type ParamRep (ExprParam a) = Expr a
+    parseParam _ = do
+        off <- stateOffset <$> getParserState
+        SomeExpr e <- literal <|> variable <|> between (symbol "(") (symbol ")") someExpr
+        unifyExpr off Proxy e
+    showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
+    paramExpr = fmap ExprParam
 
 command :: String -> CommandDef TestStep -> TestParser (Expr TestBlock)
 command name (CommandDef types ctor) = do
@@ -213,13 +230,13 @@ command name (CommandDef types ctor) = do
             iparams <- forM params $ \case
                 (_, SomeParam (p :: Proxy p) Nothing)
                     | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam p $ Identity line
-                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam p . Identity <$> restOfParts cmdi partials
+                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam p . Identity . InnerBlock <$> restOfParts cmdi partials
                 (sym, SomeParam p Nothing) -> choice
                     [ SomeParam p . Identity <$> paramDefault p
                     , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType p
                     ]
                 (_, SomeParam (p :: Proxy p) (Just x)) -> return $ SomeParam p $ Identity x
-            return $ Pure $ TestBlock [ ctor iparams ]
+            return $ (TestBlock . (: [])) <$> ctor iparams
 
         ,do symbol ":"
             scn
@@ -294,48 +311,48 @@ testWith = do
 testSubnet :: TestParser (Expr TestBlock)
 testSubnet = command "subnet" $ Subnet
     <$> param ""
-    <*> paramOrContext "of"
+    <*> (fromExprParam <$> paramOrContext "of")
     <*> innerBlock
 
 testNode :: TestParser (Expr TestBlock)
 testNode = command "node" $ DeclNode
     <$> param ""
-    <*> paramOrContext "on"
+    <*> (fromExprParam <$> paramOrContext "on")
     <*> innerBlock
 
 testSpawn :: TestParser (Expr TestBlock)
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
-    <*> paramOrContext "on"
+    <*> (bimap fromExprParam fromExprParam <$> paramOrContext "on")
     <*> innerBlock
 
 testExpect :: TestParser (Expr TestBlock)
 testExpect = command "expect" $ Expect
     <$> cmdLine
-    <*> paramOrContext "from"
+    <*> (fromExprParam <$> paramOrContext "from")
     <*> param ""
     <*> param "capture"
     <*> innerBlock
 
 testDisconnectNode :: TestParser (Expr TestBlock)
 testDisconnectNode = command "disconnect_node" $ DisconnectNode
-    <$> paramOrContext ""
+    <$> (fromExprParam <$> paramOrContext "")
     <*> innerBlock
 
 testDisconnectNodes :: TestParser (Expr TestBlock)
 testDisconnectNodes = command "disconnect_nodes" $ DisconnectNodes
-    <$> paramOrContext ""
+    <$> (fromExprParam <$> paramOrContext "")
     <*> innerBlock
 
 testDisconnectUpstream :: TestParser (Expr TestBlock)
 testDisconnectUpstream = command "disconnect_upstream" $ DisconnectUpstream
-    <$> paramOrContext ""
+    <$> (fromExprParam <$> paramOrContext "")
     <*> innerBlock
 
 testPacketLoss :: TestParser (Expr TestBlock)
 testPacketLoss = command "packet_loss" $ PacketLoss
-    <$> param ""
-    <*> paramOrContext "on"
+    <$> (fromExprParam <$> paramOrContext "")
+    <*> (fromExprParam <$> paramOrContext "on")
     <*> innerBlock
 
 

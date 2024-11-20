@@ -30,7 +30,7 @@ getArgVars (FunctionArguments args) kw = do
 
 builtinSend :: SomeVarValue
 builtinSend = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlock [ Send (Pure (getArg args (Just "to"))) (Pure (getArg args Nothing)) ]
+    \_ args -> TestBlock [ Send (getArg args (Just "to")) (getArg args Nothing) ]
   where
     atypes =
         [ ( Just "to", SomeArgumentType (ContextDefault @Process) )

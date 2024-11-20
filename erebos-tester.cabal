@@ -72,6 +72,7 @@ executable erebos-tester
   other-extensions:
         TemplateHaskell
   default-extensions:
+        DefaultSignatures
         DeriveTraversable
         ExistentialQuantification
         FlexibleContexts
