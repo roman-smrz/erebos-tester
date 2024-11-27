@@ -162,18 +162,18 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
         testStepGuard line vars expr
 
     DisconnectNode node inner -> do
-        withDisconnectedUp (nodeUpstream node) $ evalBlock =<< eval inner
+        withDisconnectedUp (nodeUpstream node) $ evalBlock inner
 
     DisconnectNodes net inner -> do
-        withDisconnectedBridge (netBridge net) $ evalBlock =<< eval inner
+        withDisconnectedBridge (netBridge net) $ evalBlock inner
 
     DisconnectUpstream net inner -> do
         case netUpstream net of
-            Just link -> withDisconnectedUp link $ evalBlock =<< eval inner
-            Nothing -> evalBlock =<< eval inner
+            Just link -> withDisconnectedUp link $ evalBlock inner
+            Nothing -> evalBlock inner
 
     PacketLoss loss node inner -> do
-        withNodePacketLoss node loss $ evalBlock =<< eval inner
+        withNodePacketLoss node loss $ evalBlock inner
 
     Wait -> do
         void $ outPromptGetLine "Waiting..."

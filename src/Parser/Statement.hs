@@ -191,18 +191,21 @@ paramOrContext name = fromParamOrContext <$> param name
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
 
-newtype InnerBlock = InnerBlock { fromInnerBlock :: Expr TestBlock }
+newtype InnerBlock = InnerBlock { fromInnerBlock :: TestBlock }
 
 instance ParamType InnerBlock where
+    type ParamRep InnerBlock = Expr TestBlock
     parseParam _ = mzero
     showParamType _ = "<code block>"
+    paramExpr = fmap InnerBlock
 
-instance ParamType TestStep where
-    parseParam _ = mzero
-    showParamType _ = "<code line>"
-
-innerBlock :: CommandDef (Expr TestBlock)
+innerBlock :: CommandDef TestBlock
 innerBlock = fromInnerBlock <$> param ""
+
+innerBlockExpr :: CommandDef (Expr TestBlock)
+innerBlockExpr =
+    let CommandDef args fun = param ""
+     in CommandDef args (Pure . fmap fromInnerBlock . fun)
 
 newtype ExprParam a = ExprParam { fromExprParam :: a }
     deriving (Functor, Foldable, Traversable)
@@ -230,7 +233,7 @@ command name (CommandDef types ctor) = do
             iparams <- forM params $ \case
                 (_, SomeParam (p :: Proxy p) Nothing)
                     | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam p $ Identity line
-                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam p . Identity . InnerBlock <$> restOfParts cmdi partials
+                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam p . Identity <$> restOfParts cmdi partials
                 (sym, SomeParam p Nothing) -> choice
                     [ SomeParam p . Identity <$> paramDefault p
                     , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType p
@@ -312,19 +315,19 @@ testSubnet :: TestParser (Expr TestBlock)
 testSubnet = command "subnet" $ Subnet
     <$> param ""
     <*> (fromExprParam <$> paramOrContext "of")
-    <*> innerBlock
+    <*> innerBlockExpr
 
 testNode :: TestParser (Expr TestBlock)
 testNode = command "node" $ DeclNode
     <$> param ""
     <*> (fromExprParam <$> paramOrContext "on")
-    <*> innerBlock
+    <*> innerBlockExpr
 
 testSpawn :: TestParser (Expr TestBlock)
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
     <*> (bimap fromExprParam fromExprParam <$> paramOrContext "on")
-    <*> innerBlock
+    <*> innerBlockExpr
 
 testExpect :: TestParser (Expr TestBlock)
 testExpect = command "expect" $ Expect
@@ -332,7 +335,7 @@ testExpect = command "expect" $ Expect
     <*> (fromExprParam <$> paramOrContext "from")
     <*> param ""
     <*> param "capture"
-    <*> innerBlock
+    <*> innerBlockExpr
 
 testDisconnectNode :: TestParser (Expr TestBlock)
 testDisconnectNode = command "disconnect_node" $ DisconnectNode

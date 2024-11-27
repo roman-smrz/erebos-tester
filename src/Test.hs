@@ -58,20 +58,21 @@ data Test = Test
 newtype TestBlock = TestBlock [ TestStep ]
     deriving (Semigroup, Monoid)
 
-data TestStep = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) (Expr TestBlock)
-              | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [ a ]) (Expr TestBlock)
-              | Subnet (TypedVarName Network) Network (Expr TestBlock)
-              | DeclNode (TypedVarName Node) Network (Expr TestBlock)
-              | Spawn (TypedVarName Process) (Either Network Node) (Expr TestBlock)
-              | Send Process Text
-              | Expect SourceLine Process (Expr Regex) [ TypedVarName Text ] (Expr TestBlock)
-              | Flush Process (Maybe Regex)
-              | Guard SourceLine EvalTrace Bool
-              | DisconnectNode Node (Expr TestBlock)
-              | DisconnectNodes Network (Expr TestBlock)
-              | DisconnectUpstream Network (Expr TestBlock)
-              | PacketLoss Scientific Node (Expr TestBlock)
-              | Wait
+data TestStep
+    = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) (Expr TestBlock)
+    | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [ a ]) (Expr TestBlock)
+    | Subnet (TypedVarName Network) Network (Expr TestBlock)
+    | DeclNode (TypedVarName Node) Network (Expr TestBlock)
+    | Spawn (TypedVarName Process) (Either Network Node) (Expr TestBlock)
+    | Send Process Text
+    | Expect SourceLine Process (Expr Regex) [ TypedVarName Text ] (Expr TestBlock)
+    | Flush Process (Maybe Regex)
+    | Guard SourceLine EvalTrace Bool
+    | DisconnectNode Node TestBlock
+    | DisconnectNodes Network TestBlock
+    | DisconnectUpstream Network TestBlock
+    | PacketLoss Scientific Node TestBlock
+    | Wait
 
 newtype SourceLine = SourceLine Text
 
