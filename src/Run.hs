@@ -300,7 +300,7 @@ expect (SourceLine sline) p expr tvars inner = do
                      throwError Failed
 
              outProc OutputMatch p line
-             local (fmap $ \s -> s { tsVars = zip vars (map (SomeVarValue [] mempty . const . const) capture) ++ tsVars s }) inner
+             local (fmap $ \s -> s { tsVars = zip vars (map someConstValue capture) ++ tsVars s }) inner
 
          Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) =<< gatherVars expr
 

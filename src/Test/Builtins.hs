@@ -29,7 +29,7 @@ getArgVars (FunctionArguments args) kw = do
     maybe [] svvVariables $ M.lookup kw args
 
 builtinSend :: SomeVarValue
-builtinSend = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
+builtinSend = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
     \_ args -> TestBlock [ Send (getArg args (Just "to")) (getArg args Nothing) ]
   where
     atypes =
@@ -38,7 +38,7 @@ builtinSend = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
         ]
 
 builtinFlush :: SomeVarValue
-builtinFlush = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
+builtinFlush = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
     \_ args -> TestBlock [ Flush (getArg args (Just "from")) (getArgMb args (Just "matching")) ]
   where
     atypes =
@@ -47,8 +47,8 @@ builtinFlush = SomeVarValue [] (FunctionArguments $ M.fromList atypes) $
         ]
 
 builtinGuard :: SomeVarValue
-builtinGuard = SomeVarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
+builtinGuard = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
     \sline args -> TestBlock [ Guard sline (getArgVars args Nothing) (getArg args Nothing) ]
 
 builtinWait :: SomeVarValue
-builtinWait = SomeVarValue [] mempty $ const . const $ TestBlock [ Wait ]
+builtinWait = someConstValue $ TestBlock [ Wait ]

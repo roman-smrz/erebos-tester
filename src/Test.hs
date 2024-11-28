@@ -10,7 +10,12 @@ module Test (
     ExprType(..), SomeExpr(..),
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
     FunctionType, DynamicType,
-    SomeVarValue(..), fromSomeVarValue, textSomeVarValue, someVarValueType,
+
+    VarValue(..), SomeVarValue(..),
+    svvVariables, svvArguments,
+    someConstValue, fromConstValue,
+    fromSomeVarValue, textSomeVarValue, someVarValueType,
+
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
@@ -179,14 +184,34 @@ textSomeExprType (ExprTypeVar (TypeVar name)) = name
 textSomeExprType (ExprTypeFunction _ r) = "function:" <> textExprType r
 
 
-data SomeVarValue = forall a. ExprType a => SomeVarValue
-    { svvVariables :: EvalTrace
-    , svvArguments :: FunctionArguments SomeArgumentType
-    , svvFunction :: SourceLine -> FunctionArguments SomeVarValue -> a
+data SomeVarValue = forall a. ExprType a => SomeVarValue (VarValue a)
+
+svvVariables :: SomeVarValue -> EvalTrace
+svvVariables (SomeVarValue vv) = vvVariables vv
+
+svvArguments :: SomeVarValue -> FunctionArguments SomeArgumentType
+svvArguments (SomeVarValue vv) = vvArguments vv
+
+data VarValue a = VarValue
+    { vvVariables :: EvalTrace
+    , vvArguments :: FunctionArguments SomeArgumentType
+    , vvFunction :: SourceLine -> FunctionArguments SomeVarValue -> a
     }
 
+someConstValue :: ExprType a => a -> SomeVarValue
+someConstValue = SomeVarValue . VarValue [] mempty . const . const
+
+fromConstValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> VarValue a -> m a
+fromConstValue sline name (VarValue _ args value :: VarValue b) = do
+    maybe (fail err) return $ do
+        guard $ anull args
+        cast $ value sline mempty
+  where
+    err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textVarName name, T.pack "' has type ",
+            if anull args then textExprType @b Proxy else "function type" ]
+
 fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m a
-fromSomeVarValue sline name (SomeVarValue _ args (value :: SourceLine -> args -> b)) = do
+fromSomeVarValue sline name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
     maybe (fail err) return $ do
         guard $ anull args
         cast $ value sline mempty
@@ -195,12 +220,12 @@ fromSomeVarValue sline name (SomeVarValue _ args (value :: SourceLine -> args ->
             if anull args then textExprType @b Proxy else "function type" ]
 
 textSomeVarValue :: SourceLine -> SomeVarValue -> Text
-textSomeVarValue sline (SomeVarValue _ args value)
+textSomeVarValue sline (SomeVarValue (VarValue _ args value))
     | anull args = textExprValue $ value sline mempty
     | otherwise  =  "<function>"
 
 someVarValueType :: SomeVarValue -> SomeExprType
-someVarValueType (SomeVarValue _ args (_ :: SourceLine -> args -> a))
+someVarValueType (SomeVarValue (VarValue _ args _ :: VarValue a))
     | anull args = ExprTypePrim (Proxy @a)
     | otherwise  = ExprTypeFunction args (Proxy @a)
 
@@ -265,7 +290,7 @@ eval = \case
     Undefined err -> fail err
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
-evalSome (SomeExpr expr) = SomeVarValue
+evalSome (SomeExpr expr) = fmap SomeVarValue $ VarValue
     <$> gatherVars expr
     <*> pure mempty
     <*> (const . const <$> eval expr)
@@ -290,7 +315,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         e@(App (AnnRecord sel) _ x)
             | Just (var, sels) <- gatherSelectors x
             -> do
-                val <- SomeVarValue [] mempty . const . const <$> eval e
+                val <- SomeVarValue . VarValue [] mempty . const . const <$> eval e
                 return [ (( var, sels ++ [ sel ] ), val ) ]
             | otherwise -> do
                 helper x
@@ -326,7 +351,7 @@ exprArgs (ArgsApp (FunctionArguments applied) expr) =
 exprArgs _ = error "exprArgs on unexpected type"
 
 funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> VarName -> SomeVarValue -> m (FunctionType a)
-funFromSomeVarValue sline name (SomeVarValue _ args (value :: SourceLine -> args -> b)) = do
+funFromSomeVarValue sline name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
     maybe (fail err) return $ do
         guard $ not $ anull args
         FunctionType <$> cast (value sline)
