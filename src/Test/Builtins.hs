@@ -22,7 +22,7 @@ getArg args = fromMaybe (error "parameter mismatch") . getArgMb args
 
 getArgMb :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> Maybe a
 getArgMb (FunctionArguments args) kw = do
-    fromSomeVarValue (SourceLine "") (VarName "") =<< M.lookup kw args
+    fromSomeVarValue SourceLineBuiltin (VarName "") =<< M.lookup kw args
 
 getArgVars :: FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> [ (( VarName, [ Text ] ), SomeVarValue ) ]
 getArgVars (FunctionArguments args) kw = do

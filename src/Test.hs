@@ -3,7 +3,7 @@ module Test (
     Test(..),
     TestStep(..),
     TestBlock(..),
-    SourceLine(..),
+    SourceLine(..), textSourceLine,
 
     MonadEval(..),
     VarName(..), TypedVarName(..), textVarName, unpackVarName,
@@ -79,7 +79,13 @@ data TestStep
     | PacketLoss Scientific Node TestBlock
     | Wait
 
-newtype SourceLine = SourceLine Text
+data SourceLine
+    = SourceLine Text
+    | SourceLineBuiltin
+
+textSourceLine :: SourceLine -> Text
+textSourceLine (SourceLine text) = text
+textSourceLine SourceLineBuiltin = "<builtin>"
 
 
 class MonadFail m => MonadEval m where

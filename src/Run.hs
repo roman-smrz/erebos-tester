@@ -111,18 +111,18 @@ runTest out opts test variables = do
 
 evalBlock :: TestBlock -> TestRun ()
 evalBlock (TestBlock steps) = forM_ steps $ \case
-    Let (SourceLine sline) (TypedVarName name) expr inner -> do
+    Let sline (TypedVarName name) expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
-            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` textSourceLine sline
             throwError Failed
         value <- eval expr
         withVar name value $ evalBlock =<< eval inner
 
-    For (SourceLine sline) (TypedVarName name) expr inner -> do
+    For sline (TypedVarName name) expr inner -> do
         cur <- asks (lookup name . tsVars . snd)
         when (isJust cur) $ do
-            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` textSourceLine sline
             throwError Failed
         value <- eval expr
         forM_ value $ \i -> do
@@ -263,18 +263,18 @@ tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just (
 tryMatch _ [] = Nothing
 
 exprFailed :: Text -> SourceLine -> Maybe ProcName -> EvalTrace -> TestRun ()
-exprFailed desc (SourceLine sline) pname exprVars = do
+exprFailed desc sline pname exprVars = do
     let prompt = maybe T.empty textProcName pname
-    outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", sline]
+    outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", textSourceLine sline]
     forM_ exprVars $ \((name, sel), value) ->
         outLine OutputMatchFail (Just prompt) $ T.concat
             [ "  ", textVarName name, T.concat (map ("."<>) sel)
-            , " = ", textSomeVarValue (SourceLine sline) value
+            , " = ", textSomeVarValue sline value
             ]
     throwError Failed
 
 expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
-expect (SourceLine sline) p expr tvars inner = do
+expect sline p expr tvars inner = do
     re <- eval expr
     timeout <- asks $ optTimeout . teOptions . fst
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
@@ -290,19 +290,19 @@ expect (SourceLine sline) p expr tvars inner = do
              let vars = map (\(TypedVarName n) -> n) tvars
 
              when (length vars /= length capture) $ do
-                 outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` sline
+                 outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` textSourceLine sline
                  throwError Failed
 
              forM_ vars $ \name -> do
                  cur <- asks (lookup name . tsVars . snd)
                  when (isJust cur) $ do
-                     outProc OutputError p $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` sline
+                     outProc OutputError p $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` textSourceLine sline
                      throwError Failed
 
              outProc OutputMatch p line
              local (fmap $ \s -> s { tsVars = zip vars (map someConstValue capture) ++ tsVars s }) inner
 
-         Nothing -> exprFailed (T.pack "expect") (SourceLine sline) (Just $ procName p) =<< gatherVars expr
+         Nothing -> exprFailed (T.pack "expect") sline (Just $ procName p) =<< gatherVars expr
 
 flush :: Process -> Maybe Regex -> TestRun ()
 flush p mbre = do
