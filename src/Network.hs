@@ -5,6 +5,7 @@ module Network (
     NodeName(..), textNodeName, unpackNodeName,
     nextNodeName,
 
+    rootNetworkVar,
     newInternet, delInternet,
     newSubnet,
     newNode,
@@ -111,6 +112,9 @@ instance ExprType Node where
         , ("network", RecordSelector $ nodeNetwork)
         ]
 
+
+rootNetworkVar :: TypedVarName Network
+rootNetworkVar = TypedVarName (VarName "$ROOT_NET")
 
 nextPrefix :: IpPrefix -> [Word8] -> Word8
 nextPrefix _ used = maximum (0 : used) + 1

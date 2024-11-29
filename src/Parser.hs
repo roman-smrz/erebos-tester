@@ -22,6 +22,7 @@ import System.Directory
 import System.Exit
 import System.FilePath
 
+import Network
 import Parser.Core
 import Parser.Expr
 import Parser.Statement
@@ -83,7 +84,7 @@ parseTestFile path = do
             { testVars = concat
                 [ map (fmap someVarValueType) builtins
                 ]
-            , testContext = SomeExpr RootNetwork
+            , testContext = SomeExpr $ varExpr SourceLineBuiltin rootNetworkVar
             , testNextTypeVar = 0
             , testTypeUnif = M.empty
             }

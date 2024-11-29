@@ -21,7 +21,6 @@ import Data.Scientific
 import qualified Data.Text as T
 
 import {-# SOURCE #-} GDB
-import {-# SOURCE #-} Network
 import Network.Ip
 import Output
 import {-# SOURCE #-} Process
@@ -39,8 +38,7 @@ data TestEnv = TestEnv
     }
 
 data TestState = TestState
-    { tsNetwork :: Network
-    , tsVars :: [(VarName, SomeVarValue)]
+    { tsVars :: [(VarName, SomeVarValue)]
     , tsDisconnectedUp :: Set NetworkNamespace
     , tsDisconnectedBridge :: Set NetworkNamespace
     , tsNodePacketLoss :: Map NetworkNamespace Scientific
@@ -94,8 +92,6 @@ instance MonadError Failed TestRun where
 
 instance MonadEval TestRun where
     lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< asks (lookup name . tsVars . snd)
-    rootNetwork = asks $ tsNetwork . snd
-
     withVar name value = local (fmap $ \s -> s { tsVars = ( name, someConstValue value ) : tsVars s })
 
 instance MonadOutput TestRun where

@@ -59,8 +59,7 @@ runTest out opts test variables = do
             , teGDB = fst <$> mgdb
             }
         tstate = TestState
-            { tsNetwork = error "network not initialized"
-            , tsVars = builtins
+            { tsVars = builtins
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty
@@ -184,7 +183,8 @@ withInternet inner = do
     testDir <- asks $ optTestDir . teOptions . fst
     inet <- newInternet testDir
     res <- withNetwork (inetRoot inet) $ \net -> do
-        local (fmap $ \s -> s { tsNetwork = net }) $ inner net
+        withTypedVar rootNetworkVar net $ do
+            inner net
     delInternet inet
     return res
 

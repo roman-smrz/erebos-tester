@@ -6,7 +6,7 @@ module Test (
     SourceLine(..), textSourceLine,
 
     MonadEval(..),
-    VarName(..), TypedVarName(..), textVarName, unpackVarName,
+    VarName(..), TypedVarName(..), textVarName, unpackVarName, withTypedVar,
     ExprType(..), SomeExpr(..),
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
     FunctionType, DynamicType,
@@ -19,7 +19,7 @@ module Test (
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
-    Expr(..), eval, evalSome,
+    Expr(..), varExpr, eval, evalSome,
     EvalTrace, VarNameSelectors, gatherVars,
     AppAnnotation(..),
 
@@ -90,7 +90,6 @@ textSourceLine SourceLineBuiltin = "<builtin>"
 
 class MonadFail m => MonadEval m where
     lookupVar :: VarName -> m SomeVarValue
-    rootNetwork :: m Network
     withVar :: ExprType e => VarName -> e -> m a -> m a
 
 
@@ -105,6 +104,14 @@ textVarName (VarName name ) = name
 
 unpackVarName :: VarName -> String
 unpackVarName = T.unpack . textVarName
+
+isInternalVar :: VarName -> Bool
+isInternalVar (VarName name)
+    | Just ( '$', _ ) <- T.uncons name = True
+    | otherwise                        = False
+
+withTypedVar :: (MonadEval m, ExprType e) => TypedVarName e -> e -> m a -> m a
+withTypedVar (TypedVarName name) = withVar name
 
 
 class Typeable a => ExprType a where
@@ -253,7 +260,6 @@ data Expr a where
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Regex] -> Expr Regex
-    RootNetwork :: Expr Network
     Undefined :: String -> Expr a
 
 data AppAnnotation b = AnnNone
@@ -271,6 +277,9 @@ instance Semigroup a => Semigroup (Expr a) where
 
 instance Monoid a => Monoid (Expr a) where
     mempty = Pure mempty
+
+varExpr :: ExprType a => SourceLine -> TypedVarName a -> Expr a
+varExpr sline (TypedVarName name) = Variable sline name
 
 eval :: forall m a. MonadEval m => Expr a -> m a
 eval = \case
@@ -292,7 +301,6 @@ eval = \case
         parts -> case regexCompile $ T.concat $ map regexSource parts of
             Left err -> fail err
             Right re -> return re
-    RootNetwork -> rootNetwork
     Undefined err -> fail err
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
@@ -309,7 +317,9 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m EvalTrace
     helper = \case
-        Variable _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
+        Variable _ var
+            | isInternalVar var -> return []
+            | otherwise -> (: []) . (( var, [] ), ) <$> lookupVar var
         DynVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
         FunVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
         ArgsApp (FunctionArguments args) fun -> do
@@ -328,7 +338,6 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         App _ f x -> (++) <$> helper f <*> helper x
         Concat es -> concat <$> mapM helper es
         Regex es -> concat <$> mapM helper es
-        RootNetwork -> return []
         Undefined {} -> return []
 
     gatherSelectors :: forall b. Expr b -> Maybe (VarName, [Text])
