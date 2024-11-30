@@ -273,9 +273,8 @@ exprFailed desc sline pname exprVars = do
             ]
     throwError Failed
 
-expect :: SourceLine -> Process -> Expr Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
-expect sline p expr tvars inner = do
-    re <- eval expr
+expect :: SourceLine -> Process -> Traced Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
+expect sline p (Traced trace re) tvars inner = do
     timeout <- asks $ optTimeout . teOptions . fst
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
@@ -302,7 +301,7 @@ expect sline p expr tvars inner = do
              outProc OutputMatch p line
              local (fmap $ \s -> s { tsVars = zip vars (map someConstValue capture) ++ tsVars s }) inner
 
-         Nothing -> exprFailed (T.pack "expect") sline (Just $ procName p) =<< gatherVars expr
+         Nothing -> exprFailed (T.pack "expect") sline (Just $ procName p) trace
 
 flush :: Process -> Maybe Regex -> TestRun ()
 flush p mbre = do

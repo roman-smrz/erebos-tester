@@ -20,7 +20,7 @@ module Test (
     ExprListUnpacker(..),
     ExprEnumerator(..),
     Expr(..), varExpr, eval, evalSome,
-    EvalTrace, VarNameSelectors, gatherVars,
+    Traced(..), EvalTrace, VarNameSelectors, gatherVars,
     AppAnnotation(..),
 
     ArgumentKeyword(..), FunctionArguments(..),
@@ -70,7 +70,7 @@ data TestStep
     | DeclNode (TypedVarName Node) Network (Expr TestBlock)
     | Spawn (TypedVarName Process) (Either Network Node) (Expr TestBlock)
     | Send Process Text
-    | Expect SourceLine Process (Expr Regex) [ TypedVarName Text ] (Expr TestBlock)
+    | Expect SourceLine Process (Traced Regex) [ TypedVarName Text ] (Expr TestBlock)
     | Flush Process (Maybe Regex)
     | Guard SourceLine EvalTrace Bool
     | DisconnectNode Node TestBlock
@@ -261,6 +261,7 @@ data Expr a where
     Concat :: [Expr Text] -> Expr Text
     Regex :: [Expr Regex] -> Expr Regex
     Undefined :: String -> Expr a
+    Trace :: Expr a -> Expr (Traced a)
 
 data AppAnnotation b = AnnNone
                      | ExprType b => AnnRecord Text
@@ -302,12 +303,15 @@ eval = \case
             Left err -> fail err
             Right re -> return re
     Undefined err -> fail err
+    Trace expr -> Traced <$> gatherVars expr <*> eval expr
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
 evalSome (SomeExpr expr) = fmap SomeVarValue $ VarValue
     <$> gatherVars expr
     <*> pure mempty
     <*> (const . const <$> eval expr)
+
+data Traced a = Traced EvalTrace a
 
 type VarNameSelectors = ( VarName, [ Text ] )
 type EvalTrace = [ ( VarNameSelectors, SomeVarValue ) ]
@@ -339,6 +343,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         Concat es -> concat <$> mapM helper es
         Regex es -> concat <$> mapM helper es
         Undefined {} -> return []
+        Trace expr -> helper expr
 
     gatherSelectors :: forall b. Expr b -> Maybe (VarName, [Text])
     gatherSelectors = \case

@@ -153,6 +153,12 @@ instance (ParamType a, ParamType b) => ParamType (Either a b) where
     paramFromSomeExpr _ se = (Left <$> paramFromSomeExpr @a Proxy se) <|> (Right <$> paramFromSomeExpr @b Proxy se)
     paramExpr = either (fmap Left . paramExpr) (fmap Right . paramExpr)
 
+instance ExprType a => ParamType (Traced a) where
+    type ParamRep (Traced a) = Expr a
+    parseParam _ = parseParam (Proxy @(Expr a))
+    showParamType _ = showParamType (Proxy @(Expr a))
+    paramExpr = Trace
+
 data SomeParam f = forall a. ParamType a => SomeParam (Proxy a) (f (ParamRep a))
 
 data CommandDef a = CommandDef [(String, SomeParam Proxy)] ([SomeParam Identity] -> Expr a)
