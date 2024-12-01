@@ -91,7 +91,7 @@ instance MonadError Failed TestRun where
     catchError (TestRun act) handler = TestRun $ catchError act $ fromTestRun . handler
 
 instance MonadEval TestRun where
-    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return =<< asks (lookup name . tsVars . snd)
+    askDictionary = asks (tsVars . snd)
     withVar name value = local (fmap $ \s -> s { tsVars = ( name, someConstValue value ) : tsVars s })
 
 instance MonadOutput TestRun where

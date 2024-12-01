@@ -110,32 +110,13 @@ runTest out opts test variables = do
 
 evalBlock :: TestBlock -> TestRun ()
 evalBlock (TestBlock steps) = forM_ steps $ \case
-    Let sline (TypedVarName name) expr inner -> do
-        cur <- asks (lookup name . tsVars . snd)
-        when (isJust cur) $ do
-            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` textSourceLine sline
-            throwError Failed
-        value <- eval expr
-        withVar name value $ evalBlock =<< eval inner
+    Subnet name parent inner -> do
+        withSubnet parent (Just name) $ evalBlock . inner
 
-    For sline (TypedVarName name) expr inner -> do
-        cur <- asks (lookup name . tsVars . snd)
-        when (isJust cur) $ do
-            outLine OutputError Nothing $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` textSourceLine sline
-            throwError Failed
-        value <- eval expr
-        forM_ value $ \i -> do
-            withVar name i $ evalBlock =<< eval inner
+    DeclNode name net inner -> do
+        withNode net (Left name) $ evalBlock . inner
 
-    Subnet name@(TypedVarName vname) parent inner -> do
-        withSubnet parent (Just name) $ \net -> do
-            withVar vname net $ evalBlock =<< eval inner
-
-    DeclNode name@(TypedVarName vname) net inner -> do
-        withNode net (Left name) $ \node -> do
-            withVar vname node $ evalBlock =<< eval inner
-
-    Spawn tvname@(TypedVarName vname@(VarName tname)) target inner -> do
+    Spawn tvname@(TypedVarName (VarName tname)) target inner -> do
         case target of
             Left net -> withNode net (Right tvname) go
             Right node -> go node
@@ -144,15 +125,14 @@ evalBlock (TestBlock steps) = forM_ steps $ \case
             opts <- asks $ teOptions . fst
             let pname = ProcName tname
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-            withProcess (Right node) pname Nothing tool $ \p -> do
-                withVar vname p $ evalBlock =<< eval inner
+            withProcess (Right node) pname Nothing tool $ evalBlock . inner
 
     Send p line -> do
         outProc OutputChildStdin p line
         send p line
 
     Expect line p expr captures inner -> do
-        expect line p expr captures $ evalBlock =<< eval inner
+        expect line p expr captures $ evalBlock . inner
 
     Flush p regex -> do
         flush p regex
@@ -273,7 +253,7 @@ exprFailed desc sline pname exprVars = do
             ]
     throwError Failed
 
-expect :: SourceLine -> Process -> Traced Regex -> [TypedVarName Text] -> TestRun () -> TestRun ()
+expect :: SourceLine -> Process -> Traced Regex -> [TypedVarName Text] -> ([ Text ] -> TestRun ()) -> TestRun ()
 expect sline p (Traced trace re) tvars inner = do
     timeout <- asks $ optTimeout . teOptions . fst
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
@@ -299,7 +279,7 @@ expect sline p (Traced trace re) tvars inner = do
                      throwError Failed
 
              outProc OutputMatch p line
-             local (fmap $ \s -> s { tsVars = zip vars (map someConstValue capture) ++ tsVars s }) inner
+             inner capture
 
          Nothing -> exprFailed (T.pack "expect") sline (Just $ procName p) trace
 

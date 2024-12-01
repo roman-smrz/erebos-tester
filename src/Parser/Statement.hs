@@ -12,6 +12,7 @@ import Data.Maybe
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Typeable
+import Data.Void
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
@@ -39,11 +40,10 @@ letStatement = do
         addVarName off tname
         void $ eol
         body <- testBlock indent
-        return $ Pure $ TestBlock [ Let line tname e body ]
+        return $ Let line tname e body
 
 forStatement :: TestParser (Expr TestBlock)
 forStatement = do
-    line <- getSourceLine
     ref <- L.indentLevel
     wsymbol "for"
     voff <- stateOffset <$> getParserState
@@ -63,7 +63,9 @@ forStatement = do
         let tname = TypedVarName name
         addVarName voff tname
         body <- testBlock indent
-        return $ Pure $ TestBlock [ For line tname (unpack <$> e) body ]
+        return $ (\xs f -> mconcat $ map f xs)
+            <$> (unpack <$> e)
+            <*> LambdaAbstraction tname body
 
 exprStatement :: TestParser (Expr TestBlock)
 exprStatement = do
@@ -102,6 +104,11 @@ class (Typeable a, Typeable (ParamRep a)) => ParamType a where
     paramDefault :: proxy a -> TestParser (ParamRep a)
     paramDefault _ = mzero
 
+    paramNewVariables :: proxy a -> ParamRep a -> NewVariables
+    paramNewVariables _ _ = NoNewVariables
+    paramNewVariablesEmpty :: proxy a -> NewVariables
+    paramNewVariablesEmpty _ = NoNewVariables -- to keep type info for optional parameters
+
     paramFromSomeExpr :: proxy a -> SomeExpr -> Maybe (ParamRep a)
     paramFromSomeExpr _ (SomeExpr e) = cast e
 
@@ -116,6 +123,8 @@ instance ParamType SourceLine where
 instance ExprType a => ParamType (TypedVarName a) where
     parseParam _ = newVarName
     showParamType _ = "<variable>"
+    paramNewVariables _ var = SomeNewVariables [ var ]
+    paramNewVariablesEmpty _ = SomeNewVariables @a []
 
 instance ExprType a => ParamType (Expr a) where
     parseParam _ = do
@@ -129,6 +138,8 @@ instance ParamType a => ParamType [a] where
     parseParam _ = listOf (parseParam @a Proxy)
     showParamType _ = showParamType @a Proxy ++ " [, " ++ showParamType @a Proxy ++ " ...]"
     paramDefault _ = return []
+    paramNewVariables _ = foldr (<>) (paramNewVariablesEmpty @a Proxy) . fmap (paramNewVariables @a Proxy)
+    paramNewVariablesEmpty _ = paramNewVariablesEmpty @a Proxy
     paramFromSomeExpr _ se@(SomeExpr e) = cast e <|> ((:[]) <$> paramFromSomeExpr @a Proxy se)
     paramExpr = sequenceA . fmap paramExpr
 
@@ -137,6 +148,8 @@ instance ParamType a => ParamType (Maybe a) where
     parseParam _ = Just <$> parseParam @a Proxy
     showParamType _ = showParamType @a Proxy
     paramDefault _ = return Nothing
+    paramNewVariables _ = foldr (<>) (paramNewVariablesEmpty @a Proxy) . fmap (paramNewVariables @a Proxy)
+    paramNewVariablesEmpty _ = paramNewVariablesEmpty @a Proxy
     paramFromSomeExpr _ se = Just <$> paramFromSomeExpr @a Proxy se
     paramExpr = sequenceA . fmap paramExpr
 
@@ -160,6 +173,23 @@ instance ExprType a => ParamType (Traced a) where
     paramExpr = Trace
 
 data SomeParam f = forall a. ParamType a => SomeParam (Proxy a) (f (ParamRep a))
+
+data NewVariables
+    = NoNewVariables
+    | forall a. ExprType a => SomeNewVariables [ TypedVarName a ]
+
+instance Semigroup NewVariables where
+    NoNewVariables <> x = x
+    x <> NoNewVariables = x
+    SomeNewVariables (xs :: [ TypedVarName a ]) <> SomeNewVariables (ys :: [ TypedVarName b ])
+        | Just (Refl :: a :~: b) <- eqT = SomeNewVariables (xs <> ys)
+        | otherwise = error "new variables with different types"
+
+instance Monoid NewVariables where
+    mempty = NoNewVariables
+
+someParamVars :: Foldable f => SomeParam f -> NewVariables
+someParamVars (SomeParam proxy rep) = foldr (\x nvs -> paramNewVariables proxy x <> nvs) (paramNewVariablesEmpty proxy) rep
 
 data CommandDef a = CommandDef [(String, SomeParam Proxy)] ([SomeParam Identity] -> Expr a)
 
@@ -197,21 +227,29 @@ paramOrContext name = fromParamOrContext <$> param name
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
 
-newtype InnerBlock = InnerBlock { fromInnerBlock :: TestBlock }
+newtype InnerBlock a = InnerBlock { fromInnerBlock :: [ a ] -> TestBlock }
 
-instance ParamType InnerBlock where
-    type ParamRep InnerBlock = Expr TestBlock
+instance ExprType a => ParamType (InnerBlock a) where
+    type ParamRep (InnerBlock a) = ( [ TypedVarName a ], Expr TestBlock )
     parseParam _ = mzero
     showParamType _ = "<code block>"
-    paramExpr = fmap InnerBlock
+    paramExpr ( vars, expr ) = fmap InnerBlock $ helper vars $ const <$> expr
+      where
+        helper :: ExprType a => [ TypedVarName a ] -> Expr ([ a ] -> b) -> Expr ([ a ] -> b)
+        helper ( v : vs ) = fmap combine . LambdaAbstraction v . helper vs
+        helper [] = id
+
+        combine f (x : xs) = f x xs
+        combine _ [] = error "inner block parameter count mismatch"
 
 innerBlock :: CommandDef TestBlock
-innerBlock = fromInnerBlock <$> param ""
+innerBlock = ($ ([] :: [ Void ])) <$> innerBlockFun
 
-innerBlockExpr :: CommandDef (Expr TestBlock)
-innerBlockExpr =
-    let CommandDef args fun = param ""
-     in CommandDef args (Pure . fmap fromInnerBlock . fun)
+innerBlockFun :: ExprType a => CommandDef (a -> TestBlock)
+innerBlockFun = (\f x -> f [ x ]) <$> innerBlockFunList
+
+innerBlockFunList :: ExprType a => CommandDef ([ a ] -> TestBlock)
+innerBlockFunList = fromInnerBlock <$> param ""
 
 newtype ExprParam a = ExprParam { fromExprParam :: a }
     deriving (Functor, Foldable, Traversable)
@@ -236,10 +274,15 @@ command name (CommandDef types ctor) = do
     restOfLine :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> SourceLine -> [(String, SomeParam Maybe)] -> TestParser (Expr TestBlock)
     restOfLine cmdi partials line params = choice
         [do void $ lookAhead eol
+            let definedVariables = mconcat $ map (someParamVars . snd) params
             iparams <- forM params $ \case
                 (_, SomeParam (p :: Proxy p) Nothing)
                     | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam p $ Identity line
-                    | Just (Refl :: p :~: InnerBlock) <- eqT -> SomeParam p . Identity <$> restOfParts cmdi partials
+
+                    | SomeNewVariables (vars :: [ TypedVarName a ]) <- definedVariables
+                    , Just (Refl :: p :~: InnerBlock a) <- eqT
+                    -> SomeParam p . Identity . ( vars, ) <$> restOfParts cmdi partials
+
                 (sym, SomeParam p Nothing) -> choice
                     [ SomeParam p . Identity <$> paramDefault p
                     , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType p
@@ -321,19 +364,19 @@ testSubnet :: TestParser (Expr TestBlock)
 testSubnet = command "subnet" $ Subnet
     <$> param ""
     <*> (fromExprParam <$> paramOrContext "of")
-    <*> innerBlockExpr
+    <*> innerBlockFun
 
 testNode :: TestParser (Expr TestBlock)
 testNode = command "node" $ DeclNode
     <$> param ""
     <*> (fromExprParam <$> paramOrContext "on")
-    <*> innerBlockExpr
+    <*> innerBlockFun
 
 testSpawn :: TestParser (Expr TestBlock)
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
     <*> (bimap fromExprParam fromExprParam <$> paramOrContext "on")
-    <*> innerBlockExpr
+    <*> innerBlockFun
 
 testExpect :: TestParser (Expr TestBlock)
 testExpect = command "expect" $ Expect
@@ -341,7 +384,7 @@ testExpect = command "expect" $ Expect
     <*> (fromExprParam <$> paramOrContext "from")
     <*> param ""
     <*> param "capture"
-    <*> innerBlockExpr
+    <*> innerBlockFunList
 
 testDisconnectNode :: TestParser (Expr TestBlock)
 testDisconnectNode = command "disconnect_node" $ DisconnectNode

@@ -31,6 +31,7 @@ module Test (
 ) where
 
 import Control.Monad
+import Control.Monad.Reader
 
 import Data.Char
 import Data.List
@@ -41,6 +42,7 @@ import Data.String
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Typeable
+import Data.Void
 
 import Text.Regex.TDFA qualified as RE
 import Text.Regex.TDFA.Text qualified as RE
@@ -64,13 +66,11 @@ newtype TestBlock = TestBlock [ TestStep ]
     deriving (Semigroup, Monoid)
 
 data TestStep
-    = forall a. ExprType a => Let SourceLine (TypedVarName a) (Expr a) (Expr TestBlock)
-    | forall a. ExprType a => For SourceLine (TypedVarName a) (Expr [ a ]) (Expr TestBlock)
-    | Subnet (TypedVarName Network) Network (Expr TestBlock)
-    | DeclNode (TypedVarName Node) Network (Expr TestBlock)
-    | Spawn (TypedVarName Process) (Either Network Node) (Expr TestBlock)
+    = Subnet (TypedVarName Network) Network (Network -> TestBlock)
+    | DeclNode (TypedVarName Node) Network (Node -> TestBlock)
+    | Spawn (TypedVarName Process) (Either Network Node) (Process -> TestBlock)
     | Send Process Text
-    | Expect SourceLine Process (Traced Regex) [ TypedVarName Text ] (Expr TestBlock)
+    | Expect SourceLine Process (Traced Regex) [ TypedVarName Text ] ([ Text ] -> TestBlock)
     | Flush Process (Maybe Regex)
     | Guard SourceLine EvalTrace Bool
     | DisconnectNode Node TestBlock
@@ -89,9 +89,12 @@ textSourceLine SourceLineBuiltin = "<builtin>"
 
 
 class MonadFail m => MonadEval m where
+    askDictionary :: m VariableDictionary
     lookupVar :: VarName -> m SomeVarValue
+    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return . lookup name =<< askDictionary
     withVar :: ExprType e => VarName -> e -> m a -> m a
 
+type VariableDictionary = [ ( VarName, SomeVarValue ) ]
 
 newtype VarName = VarName Text
     deriving (Eq, Ord, Show)
@@ -149,6 +152,10 @@ instance ExprType Text where
 instance ExprType Regex where
     textExprType _ = T.pack "regex"
     textExprValue _ = T.pack "<regex>"
+
+instance ExprType Void where
+    textExprType _ = T.pack "void"
+    textExprValue _ = T.pack "<void>"
 
 instance ExprType a => ExprType [a] where
     textExprType _ = "[" <> textExprType @a Proxy <> "]"
@@ -251,11 +258,13 @@ data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 
 
 data Expr a where
+    Let :: forall a b. ExprType b => SourceLine -> TypedVarName b -> Expr b -> Expr a -> Expr a
     Variable :: ExprType a => SourceLine -> VarName -> Expr a
     DynVariable :: TypeVar -> SourceLine -> VarName -> Expr DynamicType
     FunVariable :: ExprType a => FunctionArguments SomeArgumentType -> SourceLine -> VarName -> Expr (FunctionType a)
     ArgsApp :: FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
     FunctionEval :: Expr (FunctionType a) -> Expr a
+    LambdaAbstraction :: ExprType a => TypedVarName a -> Expr b -> Expr (a -> b)
     Pure :: a -> Expr a
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
     Concat :: [Expr Text] -> Expr Text
@@ -282,8 +291,26 @@ instance Monoid a => Monoid (Expr a) where
 varExpr :: ExprType a => SourceLine -> TypedVarName a -> Expr a
 varExpr sline (TypedVarName name) = Variable sline name
 
+
+newtype SimpleEval a = SimpleEval (Reader VariableDictionary a)
+    deriving (Functor, Applicative, Monad)
+
+runSimpleEval :: SimpleEval a -> VariableDictionary -> a
+runSimpleEval (SimpleEval x) = runReader x
+
+instance MonadFail SimpleEval where
+    fail = error . ("eval failed: " <>)
+
+instance MonadEval SimpleEval where
+    askDictionary = SimpleEval ask
+    withVar name value (SimpleEval inner) = SimpleEval $ local (( name, someConstValue value ) : ) inner
+
+
 eval :: forall m a. MonadEval m => Expr a -> m a
 eval = \case
+    Let _ (TypedVarName name) valExpr expr -> do
+        val <- eval valExpr
+        withVar name val $ eval expr
     Variable sline name -> fromSomeVarValue sline name =<< lookupVar name
     DynVariable _ _ _ -> fail "ambiguous type"
     FunVariable _ sline name -> funFromSomeVarValue sline name =<< lookupVar name
@@ -294,6 +321,9 @@ eval = \case
     FunctionEval efun -> do
         FunctionType fun <- eval efun
         return $ fun mempty
+    LambdaAbstraction (TypedVarName name) expr -> do
+        dict <- askDictionary
+        return $ \x -> runSimpleEval (eval expr) (( name, someConstValue x ) : dict)
     Pure value -> return value
     App _ f x -> eval f <*> eval x
     Concat xs -> T.concat <$> mapM eval xs
@@ -321,6 +351,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m EvalTrace
     helper = \case
+        Let _ (TypedVarName var) _ expr -> filter ((var /=) . fst . fst) <$> helper expr
         Variable _ var
             | isInternalVar var -> return []
             | otherwise -> (: []) . (( var, [] ), ) <$> lookupVar var
@@ -331,6 +362,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
             vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
             return $ concat (v : vs)
         FunctionEval efun -> helper efun
+        LambdaAbstraction (TypedVarName var) expr -> filter ((var /=) . fst . fst) <$> helper expr
         Pure _ -> return []
         e@(App (AnnRecord sel) _ x)
             | Just (var, sels) <- gatherSelectors x
