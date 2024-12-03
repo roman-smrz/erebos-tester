@@ -5,7 +5,7 @@ module Test (
     TestBlock(..),
     SourceLine(..), textSourceLine,
 
-    MonadEval(..),
+    MonadEval(..), lookupVar, tryLookupVar, withVar,
     VarName(..), TypedVarName(..), textVarName, unpackVarName, withTypedVar,
     ExprType(..), SomeExpr(..),
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
@@ -90,11 +90,18 @@ textSourceLine SourceLineBuiltin = "<builtin>"
 
 class MonadFail m => MonadEval m where
     askDictionary :: m VariableDictionary
-    lookupVar :: VarName -> m SomeVarValue
-    lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return . lookup name =<< askDictionary
-    withVar :: ExprType e => VarName -> e -> m a -> m a
+    withDictionary :: (VariableDictionary -> VariableDictionary) -> m a -> m a
 
 type VariableDictionary = [ ( VarName, SomeVarValue ) ]
+
+lookupVar :: MonadEval m => VarName -> m SomeVarValue
+lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackVarName name ++ "'") return . lookup name =<< askDictionary
+
+tryLookupVar :: MonadEval m => VarName -> m (Maybe SomeVarValue)
+tryLookupVar name = lookup name <$> askDictionary
+
+withVar :: (MonadEval m, ExprType e) => VarName -> e -> m a -> m a
+withVar name value = withDictionary (( name, someConstValue value ) : )
 
 newtype VarName = VarName Text
     deriving (Eq, Ord, Show)
@@ -303,7 +310,7 @@ instance MonadFail SimpleEval where
 
 instance MonadEval SimpleEval where
     askDictionary = SimpleEval ask
-    withVar name value (SimpleEval inner) = SimpleEval $ local (( name, someConstValue value ) : ) inner
+    withDictionary f (SimpleEval inner) = SimpleEval (local f inner)
 
 
 eval :: forall m a. MonadEval m => Expr a -> m a
@@ -351,18 +358,18 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m EvalTrace
     helper = \case
-        Let _ (TypedVarName var) _ expr -> filter ((var /=) . fst . fst) <$> helper expr
+        Let _ (TypedVarName var) _ expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Variable _ var
             | isInternalVar var -> return []
-            | otherwise -> (: []) . (( var, [] ), ) <$> lookupVar var
-        DynVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
-        FunVariable _ _ var -> (: []) . (( var, [] ), ) <$> lookupVar var
+            | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
+        DynVariable _ _ var -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
+        FunVariable _ _ var -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         ArgsApp (FunctionArguments args) fun -> do
             v <- helper fun
             vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
             return $ concat (v : vs)
         FunctionEval efun -> helper efun
-        LambdaAbstraction (TypedVarName var) expr -> filter ((var /=) . fst . fst) <$> helper expr
+        LambdaAbstraction (TypedVarName var) expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Pure _ -> return []
         e@(App (AnnRecord sel) _ x)
             | Just (var, sels) <- gatherSelectors x

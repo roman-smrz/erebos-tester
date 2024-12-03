@@ -92,7 +92,7 @@ instance MonadError Failed TestRun where
 
 instance MonadEval TestRun where
     askDictionary = asks (tsVars . snd)
-    withVar name value = local (fmap $ \s -> s { tsVars = ( name, someConstValue value ) : tsVars s })
+    withDictionary f = local (fmap $ \s -> s { tsVars = f (tsVars s) })
 
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
