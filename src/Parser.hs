@@ -9,6 +9,7 @@ import Control.Monad.State
 
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Proxy
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -41,15 +42,46 @@ parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
     def <- localState $ L.indentBlock scn $ do
         wsymbol "def"
         name <- varName
+        argsDecl <- functionArguments (\off _ -> return . ( off, )) varName mzero (\_ -> return . VarName)
+        atypes <- forM argsDecl $ \( off, vname :: VarName ) -> do
+            tvar <- newTypeVar
+            modify $ \s -> s { testVars = ( vname, ExprTypeVar tvar ) : testVars s }
+            return ( off, vname, tvar )
         choice
             [ do
-                symbol ":"
+                osymbol ":"
                 let finish steps = do
-                        return $ ( name, SomeExpr $ mconcat steps )
+                        atypes' <- getInferredTypes atypes
+                        ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs (mconcat steps)
                 return $ L.IndentSome Nothing finish testStep
             ]
     modify $ \s -> s { testVars = fmap someExprType def : testVars s }
     return def
+  where
+    getInferredTypes atypes = forM atypes $ \( off, vname, tvar@(TypeVar tvarname) ) -> do
+        let err msg = do
+                registerParseError . FancyError off . S.singleton . ErrorFail $ T.unpack msg
+                return ( vname, SomeArgumentType (OptionalArgument @DynamicType) )
+        gets (M.lookup tvar . testTypeUnif) >>= \case
+            Just (ExprTypePrim (_ :: Proxy a)) -> return ( vname, SomeArgumentType (RequiredArgument @a) )
+            Just (ExprTypeVar (TypeVar tvar')) -> err $ "ambiguous type for ‘" <> textVarName vname <> " : " <> tvar' <> "’"
+            Just (ExprTypeFunction {}) -> err $ "unsupported function type of ‘" <> textVarName vname <> "’"
+            Nothing -> err $ "ambiguous type for ‘" <> textVarName vname <> " : " <> tvarname <> "’"
+
+    replaceDynArgs :: forall a. Expr a -> TestParser (Expr a)
+    replaceDynArgs expr = do
+        unif <- gets testTypeUnif
+        return $ mapExpr (go unif) expr
+      where
+        go :: forall b. M.Map TypeVar SomeExprType -> Expr b -> Expr b
+        go unif = \case
+            ArgsApp args body -> ArgsApp (fmap replaceArgs args) body
+              where
+                replaceArgs (SomeExpr (DynVariable tvar sline vname))
+                    | Just (ExprTypePrim (Proxy :: Proxy v)) <- M.lookup tvar unif
+                    = SomeExpr (Variable sline vname :: Expr v)
+                replaceArgs (SomeExpr e) = SomeExpr (go unif e)
+            e -> e
 
 parseTestModule :: FilePath -> TestParser Module
 parseTestModule absPath = do

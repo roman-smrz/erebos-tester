@@ -200,7 +200,8 @@ localState :: TestParser a -> TestParser a
 localState inner = do
     s <- get
     x <- inner
-    put s
+    s' <- get
+    put s { testNextTypeVar = testNextTypeVar s', testTypeUnif = testTypeUnif s' }
     return x
 
 toplevel :: (a -> Toplevel) -> TestParser a -> TestParser Toplevel
