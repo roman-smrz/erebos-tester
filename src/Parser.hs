@@ -54,6 +54,11 @@ parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
                         atypes' <- getInferredTypes atypes
                         ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs (mconcat steps)
                 return $ L.IndentSome Nothing finish testStep
+            , do
+                osymbol "="
+                SomeExpr (expr :: Expr e) <- someExpr
+                atypes' <- getInferredTypes atypes
+                L.IndentNone . ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs expr
             ]
     modify $ \s -> s { testVars = fmap someExprType def : testVars s }
     return def
