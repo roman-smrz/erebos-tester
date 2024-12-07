@@ -14,6 +14,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
+import Data.Void
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
@@ -32,10 +33,15 @@ import Test.Builtins
 
 parseTestDefinition :: TestParser Toplevel
 parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
-    block (\name steps -> return $ Test name $ mconcat steps) header testStep
-    where header = do
-              wsymbol "test"
-              lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
+    localState $ do
+        modify $ \s -> s
+            { testContext = SomeExpr $ varExpr SourceLineBuiltin rootNetworkVar
+            }
+        block (\name steps -> return $ Test name $ mconcat steps) header testStep
+  where
+    header = do
+        wsymbol "test"
+        lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
 
 parseDefinition :: TestParser Toplevel
 parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
@@ -121,7 +127,7 @@ parseTestFile path = do
             { testVars = concat
                 [ map (fmap someVarValueType) builtins
                 ]
-            , testContext = SomeExpr $ varExpr SourceLineBuiltin rootNetworkVar
+            , testContext = SomeExpr (Undefined "void" :: Expr Void)
             , testNextTypeVar = 0
             , testTypeUnif = M.empty
             }
