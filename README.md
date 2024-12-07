@@ -316,6 +316,61 @@ wait
 Wait for user input before continuing. Useful mostly for debugging or test development.
 
 
+### Functions
+
+When calling a function, parameters are usually passed using argument keywords
+(in the case of built-in commands, those keywords are typically prepositions
+like `on`, `from`, etc.), and apart from those, there can be at most one
+parameter passed without a keyword. This is done in order to avoid the need to
+remember parameter order and to make the behavior of each call as clear as
+possible, even without looking up the documentation.
+
+To make the syntax unambiguous, the keywordless parameter can be passed as the
+last parameter, as a literal (number, string, etc.), or using parentheses. So this is ok:
+
+```
+expect /something/ from p
+```
+
+but if the regular expression is stored in a variable, the parameter needs to move to the end:
+```
+let re = /something/
+expect from p re
+```
+
+or be enclosed in parentheses:
+```
+expect (re) from p
+```
+or in a literal:
+```
+expect /$re/ from p
+```
+
+### Defining functions
+
+Custom functions can be defined on the top level using `def` keyword, and with
+the parameters either followed by `=` sign to return a value:
+```
+def twice x = 2 * x
+```
+
+or followed by `:` to define test block:
+```
+def greet p:
+    send "hello" to p
+    expect /hi/ from p
+```
+
+Those then can be invoked elsewhere:
+```
+test:
+    spawn as p
+    greet p
+```
+
+
+
 Optional dependencies
 ---------------------
 
