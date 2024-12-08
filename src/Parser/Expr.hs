@@ -33,18 +33,30 @@ import Data.Void
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 import Text.Megaparsec.Char.Lexer qualified as L
+import Text.Megaparsec.Error.Builder qualified as Err
 import Text.Regex.TDFA qualified as RE
 import Text.Regex.TDFA.Text qualified as RE
 
 import Parser.Core
 import Test
 
+reservedWords :: [ Text ]
+reservedWords =
+    [ "test", "def", "let"
+    , "module", "export", "import"
+    ]
+
 identifier :: TestParser Text
 identifier = label "identifier" $ do
-    lexeme $ do
+    lexeme $ try $ do
+        off <- stateOffset <$> getParserState
         lead <- lowerChar
         rest <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_')
-        return $ TL.toStrict $ TL.fromChunks $ (T.singleton lead :) $ TL.toChunks rest
+        let ident = TL.toStrict $ TL.fromChunks $ (T.singleton lead :) $ TL.toChunks rest
+        when (ident `elem` reservedWords) $ parseError $ Err.err off $ mconcat
+            [ Err.utoks $ TL.fromStrict ident
+            ]
+        return ident
 
 varName :: TestParser VarName
 varName = label "variable name" $ VarName <$> identifier
