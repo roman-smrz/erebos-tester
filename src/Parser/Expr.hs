@@ -233,7 +233,7 @@ someExpr = join inner <?> "expression"
     term = label "term" $ choice
         [ parens inner
         , return <$> literal
-        , return <$> variable
+        , return <$> functionCall
         ]
 
     table = [ [ prefix "-" $ [ SomeUnOp (negate @Integer)
@@ -356,25 +356,29 @@ variable = label "variable" $ do
     off <- stateOffset <$> getParserState
     sline <- getSourceLine
     name <- varName
-    lookupVarExpr off sline name >>= \case
+    e <- lookupVarExpr off sline name
+    recordSelector e <|> return e
+
+functionCall :: TestParser SomeExpr
+functionCall = do
+    sline <- getSourceLine
+    variable >>= \case
         SomeExpr e'@(FunVariable argTypes _ _) -> do
             let check = checkFunctionArguments argTypes
             args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
             return $ SomeExpr $ ArgsApp args e'
-        e -> do
-            recordSelector e <|> return e
+        e -> return e
 
+recordSelector :: SomeExpr -> TestParser SomeExpr
+recordSelector (SomeExpr expr) = do
+    void $ osymbol "."
+    off <- stateOffset <$> getParserState
+    m <- identifier
+    let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
+            [ T.pack "value of type ", textExprType expr, T.pack " does not have member '", m, T.pack "'" ]
+    e' <- maybe err return $ applyRecordSelector m expr <$> lookup m recordMembers
+    recordSelector e' <|> return e'
   where
-    recordSelector :: SomeExpr -> TestParser SomeExpr
-    recordSelector (SomeExpr e) = do
-        void $ osymbol "."
-        off <- stateOffset <$> getParserState
-        m <- identifier
-        let err = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-                [ T.pack "value of type ", textExprType e, T.pack " does not have member '", m, T.pack "'" ]
-        e' <- maybe err return $ applyRecordSelector m e <$> lookup m recordMembers
-        recordSelector e' <|> return e'
-
     applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
     applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
 
