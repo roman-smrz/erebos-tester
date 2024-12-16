@@ -177,7 +177,7 @@ withNetwork :: Network -> (Network -> TestRun a) -> TestRun a
 withNetwork net inner = do
     tcpdump <- liftIO (findExecutable "tcpdump") >>= return . \case
         Just path -> withProcess (Left net) ProcNameTcpdump (Just softwareTermination)
-            (path ++ " -i br0 -w '" ++ netDir net ++ "/br0.pcap' -U -Z root") . const
+            (path ++ " -i br0 -w './br0.pcap' -U -Z root") . const
         Nothing -> id
 
     tcpdump $ inner net

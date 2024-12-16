@@ -93,7 +93,8 @@ spawnOn target pname killWith cmd = do
     let prefix = T.unpack $ "ip netns exec \"" <> textNetnsName netns <> "\" "
     (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
-        , env = Just [("EREBOS_DIR", either netDir nodeDir target)]
+        , cwd = Just (either netDir nodeDir target)
+        , env = Just [ ( "EREBOS_DIR", "." ) ]
         }
     pout <- liftIO $ newTVarIO []
 
