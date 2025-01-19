@@ -40,6 +40,7 @@ runTestParser path content initState (TestParser parser) = runIdentity . flip (f
 data Toplevel
     = ToplevelTest Test
     | ToplevelDefinition ( VarName, SomeExpr )
+    | ToplevelExport VarName
 
 data TestParserState = TestParserState
     { testVars :: [ ( VarName, SomeExprType ) ]
@@ -204,7 +205,7 @@ localState inner = do
     put s { testNextTypeVar = testNextTypeVar s', testTypeUnif = testTypeUnif s' }
     return x
 
-toplevel :: (a -> Toplevel) -> TestParser a -> TestParser Toplevel
+toplevel :: (a -> b) -> TestParser a -> TestParser b
 toplevel f = return . f <=< L.nonIndented scn
 
 block :: (a -> [b] -> TestParser c) -> TestParser a -> TestParser b -> TestParser c

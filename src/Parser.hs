@@ -43,8 +43,8 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
         wsymbol "test"
         lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
 
-parseDefinition :: TestParser Toplevel
-parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
+parseDefinition :: TestParser ( VarName, SomeExpr )
+parseDefinition = label "symbol definition" $ do
     def <- localState $ L.indentBlock scn $ do
         wsymbol "def"
         name <- varName
@@ -94,6 +94,19 @@ parseDefinition = label "symbol definition" $ toplevel ToplevelDefinition $ do
                 replaceArgs (SomeExpr e) = SomeExpr (go unif e)
             e -> e
 
+parseExport :: TestParser [ Toplevel ]
+parseExport = label "export declaration" $ toplevel id $ do
+    wsymbol "export"
+    choice
+      [ do
+        def@( name, _ ) <- parseDefinition
+        return [ ToplevelDefinition def, ToplevelExport name ]
+      , do
+        names <- listOf varName
+        void eol
+        return $ map ToplevelExport names
+      ]
+
 parseTestModule :: FilePath -> TestParser Module
 parseTestModule absPath = do
     moduleName <- choice
@@ -110,9 +123,10 @@ parseTestModule absPath = do
         , do
             return $ [ T.pack $ takeBaseName absPath ]
         ]
-    toplevels <- many $ choice
-        [ parseTestDefinition
-        , parseDefinition
+    toplevels <- fmap concat $ many $ choice
+        [ (: []) <$> parseTestDefinition
+        , (: []) <$> toplevel ToplevelDefinition parseDefinition
+        , parseExport
         ]
     let moduleTests = catMaybes $ map (\case ToplevelTest x -> Just x; _ -> Nothing) toplevels
         moduleDefinitions = catMaybes $ map (\case ToplevelDefinition x -> Just x; _ -> Nothing) toplevels
