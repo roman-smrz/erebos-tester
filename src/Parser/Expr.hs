@@ -415,22 +415,10 @@ functionArguments check param lit promote = do
                       [ T.pack "multiple unnamed parameters" ]
                   parseArgs False
 
-        ,do off <- stateOffset <$> getParserState
-            x <- identifier
-            choice
-                [do off' <- stateOffset <$> getParserState
-                    y <- pparam <|> (promote off' =<< identifier)
-                    checkAndInsert off' (Just (ArgumentKeyword x)) y $ parseArgs allowUnnamed
-
-                ,if allowUnnamed
-                  then do
-                    y <- promote off x
-                    checkAndInsert off Nothing y $ return M.empty
-                  else do
-                    registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
-                        [ T.pack "multiple unnamed parameters" ]
-                    return M.empty
-                ]
+        ,do x <- identifier
+            off <- stateOffset <$> getParserState
+            y <- pparam <|> (promote off =<< identifier)
+            checkAndInsert off (Just (ArgumentKeyword x)) y $ parseArgs allowUnnamed
 
         ,do return M.empty
         ]

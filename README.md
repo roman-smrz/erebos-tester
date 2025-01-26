@@ -325,20 +325,15 @@ parameter passed without a keyword. This is done in order to avoid the need to
 remember parameter order and to make the behavior of each call as clear as
 possible, even without looking up the documentation.
 
-To make the syntax unambiguous, the keywordless parameter can be passed as the
-last parameter, as a literal (number, string, etc.), or using parentheses. So this is ok:
+To make the syntax unambiguous, the keywordless parameter can be passed as
+a literal (number, string, etc.), or using parentheses. So this is ok:
 
 ```
 expect /something/ from p
 ```
 
-but if the regular expression is stored in a variable, the parameter needs to move to the end:
-```
-let re = /something/
-expect from p re
-```
-
-or be enclosed in parentheses:
+but if the regular expression is stored in a variable, the parameter needs to
+be enclosed in parentheses:
 ```
 expect (re) from p
 ```
@@ -352,12 +347,12 @@ expect /$re/ from p
 Custom functions can be defined on the top level using `def` keyword, and with
 the parameters either followed by `=` sign to return a value:
 ```
-def twice x = 2 * x
+def quadruple of x = 4 * x
 ```
 
 or followed by `:` to define test block:
 ```
-def greet p:
+def say_hello to p:
     send "hello" to p
     expect /hi/ from p
 ```
@@ -366,9 +361,14 @@ Those then can be invoked elsewhere:
 ```
 test:
     spawn as p
-    greet p
+    say_hello to p
 ```
 
+When defining a function, the unnamed parameter, if any, must be enclosed in
+parentheses:
+```
+def twice (x) = 2 * x
+```
 
 
 Optional dependencies
