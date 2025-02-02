@@ -1,5 +1,6 @@
 module Parser.Expr (
     identifier,
+    parseModuleName,
 
     varName,
     newVarName,
@@ -57,6 +58,11 @@ identifier = label "identifier" $ do
             [ Err.utoks $ TL.fromStrict ident
             ]
         return ident
+
+parseModuleName :: TestParser ModuleName
+parseModuleName = do
+    x <- identifier
+    ModuleName . (x :) <$> many (symbol "." >> identifier)
 
 varName :: TestParser VarName
 varName = label "variable name" $ VarName <$> identifier

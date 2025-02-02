@@ -2,7 +2,6 @@ module Parser.Core where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Identity
 import Control.Monad.State
 
 import Data.Map (Map)
@@ -12,7 +11,6 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Typeable
-import Data.Void
 
 import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
@@ -21,32 +19,54 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Network ()
 import Test
 
-newtype TestParser a = TestParser (StateT TestParserState (ParsecT Void TestStream Identity) a)
+newtype TestParser a = TestParser (StateT TestParserState (ParsecT CustomTestError TestStream IO) a)
     deriving
         ( Functor, Applicative, Alternative, Monad
         , MonadState TestParserState
         , MonadPlus
         , MonadFail
-        , MonadParsec Void TestStream
+        , MonadParsec CustomTestError TestStream
         )
 
 type TestStream = TL.Text
 
-type TestParseError = ParseError TestStream Void
+type TestParseError = ParseError TestStream CustomTestError
 
-runTestParser :: String -> TestStream -> TestParserState -> TestParser a -> Either (ParseErrorBundle TestStream Void) a
-runTestParser path content initState (TestParser parser) = runIdentity . flip (flip runParserT path) content . flip evalStateT initState $ parser
+data CustomTestError
+    = ModuleNotFound ModuleName
+    | ImportModuleError (ParseErrorBundle TestStream CustomTestError)
+    deriving (Eq)
+
+instance Ord CustomTestError where
+    compare (ModuleNotFound a) (ModuleNotFound b) = compare a b
+    compare (ModuleNotFound _) _                  = LT
+    compare _                  (ModuleNotFound _) = GT
+
+    -- Ord instance is required to store errors in Set, but there shouldn't be
+    -- two ImportModuleErrors at the same possition, so "dummy" comparison
+    -- should be ok.
+    compare (ImportModuleError _) (ImportModuleError _) = EQ
+
+instance ShowErrorComponent CustomTestError where
+    showErrorComponent (ModuleNotFound name) = "module `" <> T.unpack (textModuleName name) <> "' not found"
+    showErrorComponent (ImportModuleError bundle) = "error parsing imported module:\n" <> errorBundlePretty bundle
+
+runTestParser :: String -> TestStream -> TestParserState -> TestParser a -> IO (Either (ParseErrorBundle TestStream CustomTestError) a)
+runTestParser path content initState (TestParser parser) = flip (flip runParserT path) content . flip evalStateT initState $ parser
 
 data Toplevel
     = ToplevelTest Test
     | ToplevelDefinition ( VarName, SomeExpr )
     | ToplevelExport VarName
+    | ToplevelImport ( ModuleName, VarName )
 
 data TestParserState = TestParserState
     { testVars :: [ ( VarName, SomeExprType ) ]
     , testContext :: SomeExpr
     , testNextTypeVar :: Int
     , testTypeUnif :: Map TypeVar SomeExprType
+    , testCurrentModuleName :: ModuleName
+    , testParseModule :: ModuleName -> ModuleName -> IO (Either CustomTestError Module)
     }
 
 newTypeVar :: TestParser TypeVar
@@ -231,3 +251,12 @@ getSourceLine = do
         , T.pack ": "
         , TL.toStrict $ TL.takeWhile (/='\n') $ pstateInput pstate
         ]
+
+
+getOrParseModule :: ModuleName -> TestParser Module
+getOrParseModule name = do
+    current <- gets testCurrentModuleName
+    parseModule <- gets testParseModule
+    (TestParser $ lift $ lift $ parseModule current name) >>= \case
+        Right parsed -> return parsed
+        Left err -> customFailure err

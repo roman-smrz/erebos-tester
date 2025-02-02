@@ -1,12 +1,13 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Parser (
-    parseTestFile,
+    parseTestFiles,
 ) where
 
 import Control.Monad
 import Control.Monad.State
 
+import Data.IORef
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Proxy
@@ -23,6 +24,7 @@ import Text.Megaparsec.Char.Lexer qualified as L
 import System.Directory
 import System.Exit
 import System.FilePath
+import System.IO.Error
 
 import Network
 import Parser.Core
@@ -103,9 +105,18 @@ parseExport = label "export declaration" $ toplevel id $ do
         return [ ToplevelDefinition def, ToplevelExport name ]
       , do
         names <- listOf varName
-        void eol
+        eol >> scn
         return $ map ToplevelExport names
       ]
+
+parseImport :: TestParser [ Toplevel ]
+parseImport = label "import declaration" $ toplevel (\() -> []) $ do
+    wsymbol "import"
+    name <- parseModuleName
+    importedModule <- getOrParseModule name
+    let importedDefs = filter ((`elem` moduleExports importedModule) . fst) (moduleDefinitions importedModule)
+    modify $ \s -> s { testVars = map (fmap someExprType) importedDefs ++ testVars s }
+    eol >> scn
 
 parseTestModule :: FilePath -> TestParser Module
 parseTestModule absPath = do
@@ -113,40 +124,68 @@ parseTestModule absPath = do
         [ label "module declaration" $ do
             wsymbol "module"
             off <- stateOffset <$> getParserState
-            x <- identifier
-            name <- (x:) <$> many (symbol "." >> identifier)
-            when (or (zipWith (/=) (reverse name) (reverse $ map T.pack $ splitDirectories $ dropExtension $ absPath))) $ do
+            name@(ModuleName tname) <- parseModuleName
+            when (or (zipWith (/=) (reverse tname) (reverse $ map T.pack $ splitDirectories $ dropExtension $ absPath))) $ do
                 registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
                     "module name does not match file path"
             eol >> scn
             return name
         , do
-            return $ [ T.pack $ takeBaseName absPath ]
+            return $ ModuleName [ T.pack $ takeBaseName absPath ]
         ]
+    modify $ \s -> s { testCurrentModuleName = moduleName }
     toplevels <- fmap concat $ many $ choice
         [ (: []) <$> parseTestDefinition
         , (: []) <$> toplevel ToplevelDefinition parseDefinition
         , parseExport
+        , parseImport
         ]
     let moduleTests = catMaybes $ map (\case ToplevelTest x -> Just x; _ -> Nothing) toplevels
         moduleDefinitions = catMaybes $ map (\case ToplevelDefinition x -> Just x; _ -> Nothing) toplevels
+        moduleExports = catMaybes $ map (\case ToplevelExport x -> Just x; _ -> Nothing) toplevels
     eof
     return Module {..}
 
-parseTestFile :: FilePath -> IO Module
-parseTestFile path = do
-    content <- TL.readFile path
-    absPath <- makeAbsolute path
-    let initState = TestParserState
-            { testVars = concat
-                [ map (fmap someVarValueType) builtins
-                ]
-            , testContext = SomeExpr (Undefined "void" :: Expr Void)
-            , testNextTypeVar = 0
-            , testTypeUnif = M.empty
-            }
-        res = runTestParser path content initState $ parseTestModule absPath
+parseTestFiles :: [ FilePath ] -> IO [ Module ]
+parseTestFiles paths = do
+    parsedModules <- newIORef []
+    reverse <$> foldM (go parsedModules) [] paths
+  where
+    go parsedModules res path = do
+        let moduleName = error "current module name should be set at the beginning of parseTestModule"
+        parseTestFile parsedModules moduleName path >>= \case
+            Left err -> do
+                putStr (showErrorComponent err)
+                exitFailure
+            Right cur -> do
+                return $ cur : res
 
-    case res of
-         Left err -> putStr (errorBundlePretty err) >> exitFailure
-         Right testModule -> return testModule
+parseTestFile :: IORef [ ( FilePath, Module ) ] -> ModuleName -> FilePath -> IO (Either CustomTestError Module)
+parseTestFile parsedModules moduleName path = do
+    absPath <- makeAbsolute path
+    (lookup absPath <$> readIORef parsedModules) >>= \case
+        Just found -> return $ Right found
+        Nothing -> do
+            let initState = TestParserState
+                    { testVars = concat
+                        [ map (fmap someVarValueType) builtins
+                        ]
+                    , testContext = SomeExpr (Undefined "void" :: Expr Void)
+                    , testNextTypeVar = 0
+                    , testTypeUnif = M.empty
+                    , testCurrentModuleName = moduleName
+                    , testParseModule = \(ModuleName current) mname@(ModuleName imported) -> do
+                        let projectRoot = iterate takeDirectory absPath !! length current
+                        parseTestFile parsedModules mname $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
+                    }
+            mbContent <- (Just <$> TL.readFile path) `catchIOError` \e ->
+                if isDoesNotExistError e then return Nothing else ioError e
+            case mbContent of
+                Just content -> do
+                    runTestParser path content initState (parseTestModule absPath) >>= \case
+                        Left bundle -> do
+                            return $ Left $ ImportModuleError bundle
+                        Right testModule -> do
+                            modifyIORef parsedModules (( absPath, testModule ) : )
+                            return $ Right testModule
+                Nothing -> return $ Left $ ModuleNotFound moduleName

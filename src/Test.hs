@@ -1,5 +1,5 @@
 module Test (
-    Module(..),
+    Module(..), ModuleName(..), textModuleName,
     Test(..),
     TestStep(..),
     TestBlock(..),
@@ -53,10 +53,17 @@ import {-# SOURCE #-} Process
 import Util
 
 data Module = Module
-    { moduleName :: [ Text ]
+    { moduleName :: ModuleName
     , moduleTests :: [ Test ]
     , moduleDefinitions :: [ ( VarName, SomeExpr ) ]
+    , moduleExports :: [ VarName ]
     }
+
+newtype ModuleName = ModuleName [ Text ]
+    deriving (Eq, Ord)
+
+textModuleName :: ModuleName -> Text
+textModuleName (ModuleName parts) = T.intercalate "." parts
 
 data Test = Test
     { testName :: Text

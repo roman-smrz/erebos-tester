@@ -148,8 +148,8 @@ main = do
         Nothing -> queryTerminal (Fd 1)
     out <- startOutput (optVerbose opts) useColor
 
-    tests <- forM files $ \(path, mbTestName) -> do
-        Module {..} <- parseTestFile path
+    modules <- parseTestFiles $ map fst files
+    tests <- forM (zip modules $ map snd files) $ \( Module {..}, mbTestName ) -> do
         return $ map ( , moduleDefinitions ) $ case mbTestName of
             Nothing -> moduleTests
             Just name -> filter ((==name) . testName) moduleTests
