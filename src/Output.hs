@@ -2,6 +2,7 @@ module Output (
     Output, OutputType(..),
     MonadOutput(..),
     startOutput,
+    resetOutputTime,
     outLine,
     outPromptGetLine,
     outPromptGetLineCompletion,
@@ -19,10 +20,14 @@ import Data.Text.Lazy.IO qualified as TL
 
 import System.Console.Haskeline
 import System.Console.Haskeline.History
+import System.Clock
+
+import Text.Printf
 
 data Output = Output
     { outState :: MVar OutputState
     , outConfig :: OutputConfig
+    , outStartedAt :: MVar TimeSpec
     }
 
 data OutputConfig = OutputConfig
@@ -52,9 +57,15 @@ instance MonadIO m => MonadOutput (ReaderT Output m) where
     getOutput = ask
 
 startOutput :: Bool -> Bool -> IO Output
-startOutput outVerbose outUseColor = Output
-    <$> newMVar OutputState { outPrint = TL.putStrLn, outHistory = emptyHistory }
-    <*> pure OutputConfig { .. }
+startOutput outVerbose outUseColor = do
+    outState <- newMVar OutputState { outPrint = TL.putStrLn, outHistory = emptyHistory }
+    outConfig <- pure OutputConfig {..}
+    outStartedAt <- newMVar =<< getTime Monotonic
+    return Output {..}
+
+resetOutputTime :: Output -> IO ()
+resetOutputTime Output {..} = do
+    modifyMVar_ outStartedAt . const $ getTime Monotonic
 
 outColor :: OutputType -> Text
 outColor OutputChildStdout = T.pack "0"
@@ -97,9 +108,12 @@ ioWithOutput act = liftIO . act =<< getOutput
 outLine :: MonadOutput m => OutputType -> Maybe Text -> Text -> m ()
 outLine otype prompt line = ioWithOutput $ \out ->
     when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
+        stime <- readMVar (outStartedAt out)
+        nsecs <- toNanoSecs . (`diffTimeSpec` stime) <$> getTime Monotonic
         withMVar (outState out) $ \st -> do
             outPrint st $ TL.fromChunks $ concat
-                [ if outUseColor (outConfig out)
+                [ [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
+                , if outUseColor (outConfig out)
                     then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
                     else []
                 , [ maybe "" (<> outSign otype <> outArr otype <> " ") prompt ]

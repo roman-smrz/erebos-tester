@@ -88,6 +88,7 @@ runTest out opts test variables = do
                 withVarExprList rest act
         withVarExprList [] act = act
 
+    resetOutputTime out
     res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
         withVarExprList variables $ do
             withInternet $ \_ -> do
