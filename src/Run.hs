@@ -33,7 +33,7 @@ import Run.Monad
 import Test
 import Test.Builtins
 
-runTest :: Output -> TestOptions -> Test -> [ ( VarName, SomeExpr ) ] -> IO Bool
+runTest :: Output -> TestOptions -> Test -> [ ( FqVarName, SomeExpr ) ] -> IO Bool
 runTest out opts test variables = do
     let testDir = optTestDir opts
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
@@ -249,7 +249,7 @@ exprFailed desc sline pname exprVars = do
     outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", textSourceLine sline]
     forM_ exprVars $ \((name, sel), value) ->
         outLine OutputMatchFail (Just prompt) $ T.concat
-            [ "  ", textVarName name, T.concat (map ("."<>) sel)
+            [ "  ", textFqVarName name, T.concat (map ("."<>) sel)
             , " = ", textSomeVarValue sline value
             ]
     throwError Failed
@@ -272,12 +272,6 @@ expect sline p (Traced trace re) tvars inner = do
              when (length vars /= length capture) $ do
                  outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` textSourceLine sline
                  throwError Failed
-
-             forM_ vars $ \name -> do
-                 cur <- asks (lookup name . tsVars . snd)
-                 when (isJust cur) $ do
-                     outProc OutputError p $ T.pack "variable '" `T.append` textVarName name `T.append` T.pack "' already exists on " `T.append` textSourceLine sline
-                     throwError Failed
 
              outProc OutputMatch p line
              inner capture

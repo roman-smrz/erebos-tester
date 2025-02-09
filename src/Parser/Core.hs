@@ -61,7 +61,7 @@ data Toplevel
     | ToplevelImport ( ModuleName, VarName )
 
 data TestParserState = TestParserState
-    { testVars :: [ ( VarName, SomeExprType ) ]
+    { testVars :: [ ( VarName, ( FqVarName, SomeExprType )) ]
     , testContext :: SomeExpr
     , testNextTypeVar :: Int
     , testTypeUnif :: Map TypeVar SomeExprType
@@ -75,25 +75,27 @@ newTypeVar = do
     modify $ \s -> s { testNextTypeVar = idx + 1 }
     return $ TypeVar $ T.pack $ 'a' : show idx
 
-lookupVarType :: Int -> VarName -> TestParser SomeExprType
+lookupVarType :: Int -> VarName -> TestParser ( FqVarName, SomeExprType )
 lookupVarType off name = do
     gets (lookup name . testVars) >>= \case
         Nothing -> do
             registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
                 "variable not in scope: `" <> textVarName name <> "'"
             vtype <- ExprTypeVar <$> newTypeVar
-            modify $ \s -> s { testVars = ( name, vtype ) : testVars s }
-            return vtype
-        Just t@(ExprTypeVar tvar) -> do
-            gets (fromMaybe t . M.lookup tvar . testTypeUnif)
+            let fqName = LocalVarName name
+            modify $ \s -> s { testVars = ( name, ( fqName, vtype )) : testVars s }
+            return ( fqName, vtype )
+        Just ( fqName, t@(ExprTypeVar tvar) ) -> do
+            ( fqName, ) <$> gets (fromMaybe t . M.lookup tvar . testTypeUnif)
         Just x -> return x
 
 lookupVarExpr :: Int -> SourceLine -> VarName -> TestParser SomeExpr
 lookupVarExpr off sline name = do
-    lookupVarType off name >>= \case
-        ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline name :: Expr a)
-        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline name
-        ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline name :: Expr (FunctionType a))
+    ( fqn, etype ) <- lookupVarType off name
+    case etype of
+        ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
+        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
+        ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
 
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do

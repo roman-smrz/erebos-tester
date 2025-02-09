@@ -38,7 +38,7 @@ data TestEnv = TestEnv
     }
 
 data TestState = TestState
-    { tsVars :: [(VarName, SomeVarValue)]
+    { tsVars :: [ ( FqVarName, SomeVarValue ) ]
     , tsDisconnectedUp :: Set NetworkNamespace
     , tsDisconnectedBridge :: Set NetworkNamespace
     , tsNodePacketLoss :: Map NetworkNamespace Scientific

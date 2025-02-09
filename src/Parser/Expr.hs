@@ -80,7 +80,7 @@ addVarName off (TypedVarName name) = do
         Just _ -> registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             T.pack "variable '" <> textVarName name <> T.pack "' already exists"
         Nothing -> return ()
-    modify $ \s -> s { testVars = ( name, ExprTypePrim @a Proxy ) : testVars s }
+    modify $ \s -> s { testVars = ( name, ( LocalVarName name, ExprTypePrim @a Proxy )) : testVars s }
 
 someExpansion :: TestParser SomeExpr
 someExpansion = do

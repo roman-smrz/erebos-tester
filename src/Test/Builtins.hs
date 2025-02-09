@@ -9,22 +9,24 @@ import Data.Text (Text)
 import Process (Process)
 import Test
 
-builtins :: [ ( VarName, SomeVarValue ) ]
+builtins :: [ ( FqVarName, SomeVarValue ) ]
 builtins =
-    [ ( VarName "send", builtinSend )
-    , ( VarName "flush", builtinFlush )
-    , ( VarName "guard", builtinGuard )
-    , ( VarName "wait", builtinWait )
+    [ fq "send" builtinSend
+    , fq "flush" builtinFlush
+    , fq "guard" builtinGuard
+    , fq "wait" builtinWait
     ]
+  where
+    fq name impl = ( GlobalVarName (ModuleName [ "$" ]) (VarName name), impl )
 
 getArg :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> a
 getArg args = fromMaybe (error "parameter mismatch") . getArgMb args
 
 getArgMb :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> Maybe a
 getArgMb (FunctionArguments args) kw = do
-    fromSomeVarValue SourceLineBuiltin (VarName "") =<< M.lookup kw args
+    fromSomeVarValue SourceLineBuiltin (LocalVarName (VarName "")) =<< M.lookup kw args
 
-getArgVars :: FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> [ (( VarName, [ Text ] ), SomeVarValue ) ]
+getArgVars :: FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> [ (( FqVarName, [ Text ] ), SomeVarValue ) ]
 getArgVars (FunctionArguments args) kw = do
     maybe [] svvVariables $ M.lookup kw args
 

@@ -47,13 +47,13 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
 
 parseDefinition :: TestParser ( VarName, SomeExpr )
 parseDefinition = label "symbol definition" $ do
-    def <- localState $ L.indentBlock scn $ do
+    def@( name, expr ) <- localState $ L.indentBlock scn $ do
         wsymbol "def"
         name <- varName
         argsDecl <- functionArguments (\off _ -> return . ( off, )) varName mzero (\_ -> return . VarName)
         atypes <- forM argsDecl $ \( off, vname :: VarName ) -> do
             tvar <- newTypeVar
-            modify $ \s -> s { testVars = ( vname, ExprTypeVar tvar ) : testVars s }
+            modify $ \s -> s { testVars = ( vname, ( LocalVarName vname, ExprTypeVar tvar )) : testVars s }
             return ( off, vname, tvar )
         choice
             [ do
@@ -68,7 +68,7 @@ parseDefinition = label "symbol definition" $ do
                 atypes' <- getInferredTypes atypes
                 L.IndentNone . ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs expr
             ]
-    modify $ \s -> s { testVars = fmap someExprType def : testVars s }
+    modify $ \s -> s { testVars = ( name, ( LocalVarName name, someExprType expr )) : testVars s }
     return def
   where
     getInferredTypes atypes = forM atypes $ \( off, vname, tvar@(TypeVar tvarname) ) -> do
@@ -112,10 +112,9 @@ parseExport = label "export declaration" $ toplevel id $ do
 parseImport :: TestParser [ Toplevel ]
 parseImport = label "import declaration" $ toplevel (\() -> []) $ do
     wsymbol "import"
-    name <- parseModuleName
-    importedModule <- getOrParseModule name
-    let importedDefs = filter ((`elem` moduleExports importedModule) . fst) (moduleDefinitions importedModule)
-    modify $ \s -> s { testVars = map (fmap someExprType) importedDefs ++ testVars s }
+    modName <- parseModuleName
+    importedModule <- getOrParseModule modName
+    modify $ \s -> s { testVars = map (fmap (fmap someExprType)) (moduleExportedDefinitions importedModule) ++ testVars s }
     eol >> scn
 
 parseTestModule :: FilePath -> TestParser Module
@@ -146,10 +145,12 @@ parseTestModule absPath = do
     eof
     return Module {..}
 
-parseTestFiles :: [ FilePath ] -> IO [ Module ]
+parseTestFiles :: [ FilePath ] -> IO ( [ Module ], [ Module ] )
 parseTestFiles paths = do
     parsedModules <- newIORef []
-    reverse <$> foldM (go parsedModules) [] paths
+    requestedModules <- reverse <$> foldM (go parsedModules) [] paths
+    allModules <- map snd <$> readIORef parsedModules
+    return ( requestedModules, allModules )
   where
     go parsedModules res path = do
         let moduleName = error "current module name should be set at the beginning of parseTestModule"
@@ -168,7 +169,7 @@ parseTestFile parsedModules moduleName path = do
         Nothing -> do
             let initState = TestParserState
                     { testVars = concat
-                        [ map (fmap someVarValueType) builtins
+                        [ map (\( name, value ) -> ( unqualifyName name, ( name, someVarValueType value ))) builtins
                         ]
                     , testContext = SomeExpr (Undefined "void" :: Expr Void)
                     , testNextTypeVar = 0

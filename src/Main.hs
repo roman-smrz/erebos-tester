@@ -2,8 +2,9 @@ module Main (main) where
 
 import Control.Monad
 
+import Data.Bifunctor
 import Data.Maybe
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 import Text.Read (readMaybe)
 
@@ -148,13 +149,14 @@ main = do
         Nothing -> queryTerminal (Fd 1)
     out <- startOutput (optVerbose opts) useColor
 
-    modules <- parseTestFiles $ map fst files
+    ( modules, allModules ) <- parseTestFiles $ map fst files
     tests <- forM (zip modules $ map snd files) $ \( Module {..}, mbTestName ) -> do
-        return $ map ( , moduleDefinitions ) $ case mbTestName of
+        return $ map ( , map (first LocalVarName) moduleDefinitions ) $ case mbTestName of
             Nothing -> moduleTests
             Just name -> filter ((==name) . testName) moduleTests
+    let globalDefs = concatMap (map snd . moduleExportedDefinitions) allModules
 
-    ok <- allM (uncurry $ runTest out $ optTest opts) $
+    ok <- allM (\( test, defs ) -> runTest out (optTest opts) test (defs ++ globalDefs)) $
         concat $ replicate (optRepeat opts) $ concat tests
     when (not ok) exitFailure
 
