@@ -529,7 +529,6 @@ exprArgs = \case
 funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> FqVarName -> SomeVarValue -> m (FunctionType a)
 funFromSomeVarValue sline name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
     maybe (fail err) return $ do
-        guard $ not $ anull args
         FunctionType <$> cast (value sline)
   where
     err = T.unpack $ T.concat [ T.pack "expected function returning ", textExprType @a Proxy, T.pack ", but variable '", textFqVarName name, T.pack "' has ",
