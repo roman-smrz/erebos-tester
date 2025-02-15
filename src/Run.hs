@@ -1,6 +1,7 @@
 module Run (
     module Run.Monad,
     runTest,
+    evalGlobalDefs,
 ) where
 
 import Control.Applicative
@@ -33,8 +34,8 @@ import Run.Monad
 import Test
 import Test.Builtins
 
-runTest :: Output -> TestOptions -> Test -> [ ( FqVarName, SomeExpr ) ] -> IO Bool
-runTest out opts test variables = do
+runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool
+runTest out opts gdefs test = do
     let testDir = optTestDir opts
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
@@ -59,7 +60,8 @@ runTest out opts test variables = do
             , teGDB = fst <$> mgdb
             }
         tstate = TestState
-            { tsVars = builtins
+            { tsGlobals = gdefs
+            , tsLocals = []
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty
@@ -82,19 +84,12 @@ runTest out opts test variables = do
                         Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
-    let withVarExprList (( name, expr ) : rest) act = do
-            value <- evalSome expr
-            local (fmap $ \s -> s { tsVars = ( name, value ) : tsVars s }) $ do
-                withVarExprList rest act
-        withVarExprList [] act = act
-
     resetOutputTime out
     res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
-        withVarExprList variables $ do
-            withInternet $ \_ -> do
-                evalBlock =<< eval (testSteps test)
-                when (optWait opts) $ do
-                    void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
+        withInternet $ \_ -> do
+            evalBlock =<< eval (testSteps test)
+            when (optWait opts) $ do
+                void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
 
     void $ installHandler processStatusChanged oldHandler Nothing
 
@@ -108,6 +103,11 @@ runTest out opts test variables = do
             when (not $ optKeep opts) $ removeDirectoryRecursive testDir
             return True
         _ -> return False
+
+
+evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
+evalGlobalDefs exprs = fix $ \gdefs ->
+    builtins `M.union` M.fromList (map (fmap (evalSomeWith gdefs)) exprs)
 
 evalBlock :: TestBlock -> TestRun ()
 evalBlock (TestBlock steps) = forM_ steps $ \case

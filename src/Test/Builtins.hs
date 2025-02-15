@@ -9,15 +9,15 @@ import Data.Text (Text)
 import Process (Process)
 import Test
 
-builtins :: [ ( FqVarName, SomeVarValue ) ]
-builtins =
+builtins :: GlobalDefs
+builtins = M.fromList
     [ fq "send" builtinSend
     , fq "flush" builtinFlush
     , fq "guard" builtinGuard
     , fq "wait" builtinWait
     ]
   where
-    fq name impl = ( GlobalVarName (ModuleName [ "$" ]) (VarName name), impl )
+    fq name impl = (( ModuleName [ "$" ], VarName name ), impl )
 
 getArg :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> a
 getArg args = fromMaybe (error "parameter mismatch") . getArgMb args

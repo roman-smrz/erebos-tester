@@ -13,7 +13,7 @@ module Test (
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
     FunctionType, DynamicType,
 
-    VarValue(..), SomeVarValue(..),
+    VarValue(..), SomeVarValue(..), GlobalDefs,
     svvVariables, svvArguments,
     someConstValue, fromConstValue,
     fromSomeVarValue, textSomeVarValue, someVarValueType,
@@ -21,7 +21,7 @@ module Test (
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
-    Expr(..), varExpr, mapExpr, eval, evalSome,
+    Expr(..), varExpr, mapExpr, eval, evalSome, evalSomeWith,
     Traced(..), EvalTrace, VarNameSelectors, gatherVars,
     AppAnnotation(..),
 
@@ -36,7 +36,6 @@ import Control.Monad
 import Control.Monad.Reader
 
 import Data.Char
-import Data.Bifunctor
 import Data.Foldable
 import Data.List
 import Data.Map (Map)
@@ -105,19 +104,21 @@ textSourceLine SourceLineBuiltin = "<builtin>"
 
 
 class MonadFail m => MonadEval m where
+    askGlobalDefs :: m GlobalDefs
     askDictionary :: m VariableDictionary
     withDictionary :: (VariableDictionary -> VariableDictionary) -> m a -> m a
 
-type VariableDictionary = [ ( FqVarName, SomeVarValue ) ]
+type VariableDictionary = [ ( VarName, SomeVarValue ) ]
 
 lookupVar :: MonadEval m => FqVarName -> m SomeVarValue
-lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackFqVarName name ++ "'") return . lookup name =<< askDictionary
+lookupVar name = maybe (fail $ "variable not in scope: '" ++ unpackFqVarName name ++ "'") return =<< tryLookupVar name
 
 tryLookupVar :: MonadEval m => FqVarName -> m (Maybe SomeVarValue)
-tryLookupVar name = lookup name <$> askDictionary
+tryLookupVar (LocalVarName name) = lookup name <$> askDictionary
+tryLookupVar (GlobalVarName mname var) = M.lookup ( mname, var ) <$> askGlobalDefs
 
 withVar :: (MonadEval m, ExprType e) => VarName -> e -> m a -> m a
-withVar name value = withDictionary (( LocalVarName name, someConstValue value ) : )
+withVar name value = withDictionary (( name, someConstValue value ) : )
 
 
 newtype VarName = VarName Text
@@ -292,6 +293,8 @@ data VarValue a = VarValue
     , vvFunction :: SourceLine -> FunctionArguments SomeVarValue -> a
     }
 
+type GlobalDefs = Map ( ModuleName, VarName ) SomeVarValue
+
 someConstValue :: ExprType a => a -> SomeVarValue
 someConstValue = SomeVarValue . VarValue [] mempty . const . const
 
@@ -389,18 +392,19 @@ mapExpr f = go
         Trace expr -> f $ Trace (go expr)
 
 
-newtype SimpleEval a = SimpleEval (Reader VariableDictionary a)
+newtype SimpleEval a = SimpleEval (Reader ( GlobalDefs, VariableDictionary ) a)
     deriving (Functor, Applicative, Monad)
 
-runSimpleEval :: SimpleEval a -> VariableDictionary -> a
-runSimpleEval (SimpleEval x) = runReader x
+runSimpleEval :: SimpleEval a -> GlobalDefs -> VariableDictionary -> a
+runSimpleEval (SimpleEval x) = curry $ runReader x
 
 instance MonadFail SimpleEval where
     fail = error . ("eval failed: " <>)
 
 instance MonadEval SimpleEval where
-    askDictionary = SimpleEval ask
-    withDictionary f (SimpleEval inner) = SimpleEval (local f inner)
+    askGlobalDefs = SimpleEval (asks fst)
+    askDictionary = SimpleEval (asks snd)
+    withDictionary f (SimpleEval inner) = SimpleEval (local (fmap f) inner)
 
 
 eval :: forall m a. MonadEval m => Expr a -> m a
@@ -412,10 +416,11 @@ eval = \case
     DynVariable _ _ name -> fail $ "ambiguous type of ‘" <> unpackFqVarName name <> "’"
     FunVariable _ sline name -> funFromSomeVarValue sline name =<< lookupVar name
     ArgsReq (FunctionArguments req) efun -> do
+        gdefs <- askGlobalDefs
         dict <- askDictionary
         return $ FunctionType $ \(FunctionArguments args) ->
             let used = M.intersectionWith (\value ( vname, _ ) -> ( vname, value )) args req
-                FunctionType fun = runSimpleEval (eval efun) (map (first LocalVarName) (toList used) ++ dict)
+                FunctionType fun = runSimpleEval (eval efun) gdefs (toList used ++ dict)
              in fun $ FunctionArguments $ args `M.difference` req
     ArgsApp eargs efun -> do
         FunctionType fun <- eval efun
@@ -428,8 +433,9 @@ eval = \case
         FunctionType fun <- eval efun
         return $ fun mempty
     LambdaAbstraction (TypedVarName name) expr -> do
+        gdefs <- askGlobalDefs
         dict <- askDictionary
-        return $ \x -> runSimpleEval (eval expr) (( LocalVarName name, someConstValue x ) : dict)
+        return $ \x -> runSimpleEval (eval expr) gdefs (( name, someConstValue x ) : dict)
     Pure value -> return value
     App _ f x -> eval f <*> eval x
     Concat xs -> T.concat <$> mapM eval xs
@@ -441,19 +447,29 @@ eval = \case
     Undefined err -> fail err
     Trace expr -> Traced <$> gatherVars expr <*> eval expr
 
+evalToVarValue :: MonadEval m => Expr a -> m (VarValue a)
+evalToVarValue expr = do
+    VarValue
+        <$> gatherVars expr
+        <*> pure mempty
+        <*> (const . const <$> eval expr)
+
+evalFunToVarValue :: MonadEval m => Expr (FunctionType a) -> m (VarValue a)
+evalFunToVarValue expr = do
+    FunctionType fun <- eval expr
+    VarValue
+        <$> gatherVars expr
+        <*> pure (exprArgs expr)
+        <*> pure (const fun)
+
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
 evalSome (SomeExpr expr)
-    | IsFunType <- asFunType expr = do
-        FunctionType fun <- eval expr
-        fmap SomeVarValue $ VarValue
-            <$> gatherVars expr
-            <*> pure (exprArgs expr)
-            <*> pure (const fun)
-    | otherwise = do
-        fmap SomeVarValue $ VarValue
-            <$> gatherVars expr
-            <*> pure mempty
-            <*> (const . const <$> eval expr)
+    | IsFunType <- asFunType expr = SomeVarValue <$> evalFunToVarValue expr
+    | otherwise = SomeVarValue <$> evalToVarValue expr
+
+evalSomeWith :: GlobalDefs -> SomeExpr -> SomeVarValue
+evalSomeWith gdefs sexpr = runSimpleEval (evalSome sexpr) gdefs []
+
 
 data Traced a = Traced EvalTrace a
 
@@ -465,20 +481,20 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
   where
     helper :: forall b. Expr b -> m EvalTrace
     helper = \case
-        Let _ (TypedVarName var) _ expr -> withDictionary (filter ((LocalVarName var /=) . fst)) $ helper expr
+        Let _ (TypedVarName var) _ expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Variable _ var
             | isInternalVar var -> return []
             | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         DynVariable _ _ var -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         FunVariable _ _ var -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
-        ArgsReq args expr -> withDictionary (filter ((`notElem` map (LocalVarName . fst) (toList args)) . fst)) $ helper expr
+        ArgsReq args expr -> withDictionary (filter ((`notElem` map fst (toList args)) . fst)) $ helper expr
         ArgsApp (FunctionArguments args) fun -> do
             v <- helper fun
             vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
             return $ concat (v : vs)
         FunctionAbstraction expr -> helper expr
         FunctionEval efun -> helper efun
-        LambdaAbstraction (TypedVarName var) expr -> withDictionary (filter ((LocalVarName var /=) . fst)) $ helper expr
+        LambdaAbstraction (TypedVarName var) expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Pure _ -> return []
         e@(App (AnnRecord sel) _ x)
             | Just (var, sels) <- gatherSelectors x

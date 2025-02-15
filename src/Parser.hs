@@ -68,7 +68,7 @@ parseDefinition = label "symbol definition" $ do
                 atypes' <- getInferredTypes atypes
                 L.IndentNone . ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs expr
             ]
-    modify $ \s -> s { testVars = ( name, ( LocalVarName name, someExprType expr )) : testVars s }
+    modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
     return def
   where
     getInferredTypes atypes = forM atypes $ \( off, vname, tvar@(TypeVar tvarname) ) -> do
@@ -169,7 +169,7 @@ parseTestFile parsedModules moduleName path = do
         Nothing -> do
             let initState = TestParserState
                     { testVars = concat
-                        [ map (\( name, value ) -> ( unqualifyName name, ( name, someVarValueType value ))) builtins
+                        [ map (\(( mname, name ), value ) -> ( name, ( GlobalVarName mname name, someVarValueType value ))) $ M.toList builtins
                         ]
                     , testContext = SomeExpr (Undefined "void" :: Expr Void)
                     , testNextTypeVar = 0

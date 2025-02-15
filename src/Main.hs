@@ -151,12 +151,12 @@ main = do
 
     ( modules, allModules ) <- parseTestFiles $ map fst files
     tests <- forM (zip modules $ map snd files) $ \( Module {..}, mbTestName ) -> do
-        return $ map ( , map (first LocalVarName) moduleDefinitions ) $ case mbTestName of
+        return $ case mbTestName of
             Nothing -> moduleTests
             Just name -> filter ((==name) . testName) moduleTests
-    let globalDefs = concatMap (map snd . moduleExportedDefinitions) allModules
+    let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
 
-    ok <- allM (\( test, defs ) -> runTest out (optTest opts) test (defs ++ globalDefs)) $
+    ok <- allM (runTest out (optTest opts) globalDefs) $
         concat $ replicate (optRepeat opts) $ concat tests
     when (not ok) exitFailure
 

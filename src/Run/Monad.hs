@@ -16,9 +16,9 @@ import Control.Monad.Except
 import Control.Monad.Reader
 
 import Data.Map (Map)
-import Data.Set (Set)
 import Data.Scientific
-import qualified Data.Text as T
+import Data.Set (Set)
+import Data.Text qualified as T
 
 import {-# SOURCE #-} GDB
 import Network.Ip
@@ -38,7 +38,8 @@ data TestEnv = TestEnv
     }
 
 data TestState = TestState
-    { tsVars :: [ ( FqVarName, SomeVarValue ) ]
+    { tsGlobals :: GlobalDefs
+    , tsLocals :: [ ( VarName, SomeVarValue ) ]
     , tsDisconnectedUp :: Set NetworkNamespace
     , tsDisconnectedBridge :: Set NetworkNamespace
     , tsNodePacketLoss :: Map NetworkNamespace Scientific
@@ -91,8 +92,9 @@ instance MonadError Failed TestRun where
     catchError (TestRun act) handler = TestRun $ catchError act $ fromTestRun . handler
 
 instance MonadEval TestRun where
-    askDictionary = asks (tsVars . snd)
-    withDictionary f = local (fmap $ \s -> s { tsVars = f (tsVars s) })
+    askGlobalDefs = asks (tsGlobals . snd)
+    askDictionary = asks (tsLocals . snd)
+    withDictionary f = local (fmap $ \s -> s { tsLocals = f (tsLocals s) })
 
 instance MonadOutput TestRun where
     getOutput = asks $ teOutput . fst
