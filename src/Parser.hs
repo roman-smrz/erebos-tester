@@ -119,6 +119,7 @@ parseImport = label "import declaration" $ toplevel (\() -> []) $ do
 
 parseTestModule :: FilePath -> TestParser Module
 parseTestModule absPath = do
+    scn
     moduleName <- choice
         [ label "module declaration" $ do
             wsymbol "module"
