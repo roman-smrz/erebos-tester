@@ -89,7 +89,7 @@ someExpansion = do
         [do off <- stateOffset <$> getParserState
             sline <- getSourceLine
             name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
-            lookupVarExpr off sline name
+            lookupScalarVarExpr off sline name
         , between (char '{') (char '}') someExpr
         ]
 

@@ -97,6 +97,15 @@ lookupVarExpr off sline name = do
         ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
 
+lookupScalarVarExpr :: Int -> SourceLine -> VarName -> TestParser SomeExpr
+lookupScalarVarExpr off sline name = do
+    ( fqn, etype ) <- lookupVarType off name
+    case etype of
+        ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
+        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
+        ExprTypeFunction args (pa :: Proxy a) -> do
+            SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
+
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do
     cur <- gets testTypeUnif
