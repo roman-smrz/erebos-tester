@@ -204,7 +204,7 @@ List elements can be of any type, but all elements of a particular list must hav
 
 Used in the `for` command.
 
-### Build-in commands
+### Built-in commands
 
 ```
 subnet <name> [of <network>]
@@ -368,6 +368,56 @@ When defining a function, the unnamed parameter, if any, must be enclosed in
 parentheses:
 ```
 def twice (x) = 2 * x
+```
+
+### Modules, exports and imports
+
+Each test script file constitutes a module. As such, it can export definitions
+for other modules to use, and import definitions from other modules. The name
+of each module must match the filename with the file extension removed, and is
+given using the `module` declaration. This declaration, if present, must be
+given at the beginning of the file, before other declarations.
+
+For example a file `test/foo.et` can start with:
+```
+module foo
+```
+This name is also implicitly assigned when the `module` declaration is omitted.
+
+In case of a more complex hierarchy, individual parts are separated with `.`
+and must match names of parent directories. E.g. a file `test/bar/baz.et`
+can start with:
+
+```
+module bar.baz
+```
+
+Such declared hierarchy is then used to determine the root of the project in
+order to find imported modules.
+
+To export a definition from module, use `export` keyword before `def`:
+```
+export def say_hello to p:
+    send "hello" to p
+    expect /hi/ from p
+```
+or list the exported name in a standalone export declaration:
+```
+export say_hello
+
+...
+
+def say_hello to p:
+    send "hello" to p
+    expect /hi/ from p
+```
+
+To import module, use `import <name>` statement, which makes all the exported
+definitions from the module `<name>` available in the local scope.
+```
+module bar.baz
+
+import foo
 ```
 
 
