@@ -3,6 +3,7 @@ module Main (main) where
 import Control.Monad
 
 import Data.Bifunctor
+import Data.List
 import Data.Maybe
 import Data.Text qualified as T
 
@@ -151,10 +152,17 @@ main = do
     out <- startOutput (optVerbose opts) useColor
 
     ( modules, allModules ) <- parseTestFiles $ map fst files
-    tests <- forM (zip modules $ map snd files) $ \( Module {..}, mbTestName ) -> do
-        return $ case mbTestName of
-            Nothing -> moduleTests
-            Just name -> filter ((==name) . testName) moduleTests
+    tests <- forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
+        case mbTestName of
+            Nothing -> return moduleTests
+            Just name
+                | Just test <- find ((==name) . testName) moduleTests
+                -> return [ test ]
+                | otherwise
+                -> do
+                    hPutStrLn stderr $ "Test `" <> T.unpack name <> "' not found in `" <> filePath <> "'"
+                    exitFailure
+
     let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
 
     ok <- allM (runTest out (optTest opts) globalDefs) $
