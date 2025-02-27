@@ -33,7 +33,7 @@ import Network
 import Network.Ip
 import Output
 import Run.Monad
-import Test
+import Script.Expr.Class
 
 data Process = Process
     { procName :: ProcName

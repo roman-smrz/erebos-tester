@@ -26,6 +26,7 @@ import System.FilePath
 import System.Process
 
 import Network.Ip
+import Script.Expr.Class
 import Test
 
 {-

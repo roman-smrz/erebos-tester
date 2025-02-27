@@ -45,24 +45,26 @@ executable erebos-tester
 
   main-is:             Main.hs
 
-  other-modules:       Config
-                       GDB
-                       Network
-                       Network.Ip
-                       Output
-                       Parser
-                       Parser.Core
-                       Parser.Expr
-                       Parser.Statement
-                       Paths_erebos_tester
-                       Process
-                       Run
-                       Run.Monad
-                       Test
-                       Test.Builtins
-                       Util
-                       Version
-                       Version.Git
+  other-modules:
+        Config
+        GDB
+        Network
+        Network.Ip
+        Output
+        Parser
+        Parser.Core
+        Parser.Expr
+        Parser.Statement
+        Paths_erebos_tester
+        Process
+        Run
+        Run.Monad
+        Script.Expr.Class
+        Test
+        Test.Builtins
+        Util
+        Version
+        Version.Git
 
   autogen-modules:     Paths_erebos_tester
 

@@ -22,6 +22,7 @@ import Network (Network, Node)
 import Parser.Core
 import Parser.Expr
 import Process (Process)
+import Script.Expr.Class
 import Test
 import Util
 
