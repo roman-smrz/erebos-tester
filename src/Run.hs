@@ -9,6 +9,7 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Fix
 import Control.Monad.Reader
 
 import Data.Map qualified as M
