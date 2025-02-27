@@ -178,8 +178,11 @@ and used by `spawn` or network configuration commands.
 
 Members:
 
+`ifname`
+: Name of the primary network interface of the node.
+
 `ip`
-: String representation of node's IP address.
+: String representation of the node primary IP address.
 
 `network`
 : The network which the node belogs to.

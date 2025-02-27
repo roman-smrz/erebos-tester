@@ -109,8 +109,9 @@ instance ExprType Node where
     textExprValue n = T.pack "n:" <> textNodeName (nodeName n)
 
     recordMembers = map (first T.pack)
-        [ ("ip", RecordSelector $ textIpAddress . nodeIp)
-        , ("network", RecordSelector $ nodeNetwork)
+        [ ( "ifname", RecordSelector $ const ("veth0" :: Text) )
+        , ( "ip", RecordSelector $ textIpAddress . nodeIp )
+        , ( "network", RecordSelector $ nodeNetwork )
         ]
 
 
