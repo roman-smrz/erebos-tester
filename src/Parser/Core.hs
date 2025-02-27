@@ -17,6 +17,8 @@ import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 
 import Network ()
+import Script.Expr
+import Script.Module
 import Test
 
 newtype TestParser a = TestParser (StateT TestParserState (ParsecT CustomTestError TestStream IO) a)

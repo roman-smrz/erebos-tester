@@ -24,7 +24,7 @@ import {-# SOURCE #-} GDB
 import Network.Ip
 import Output
 import {-# SOURCE #-} Process
-import Test
+import Script.Expr
 
 newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT Failed IO) a }
     deriving (Functor, Applicative, Monad, MonadReader (TestEnv, TestState), MonadIO)

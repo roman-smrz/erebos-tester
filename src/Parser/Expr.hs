@@ -39,8 +39,8 @@ import Text.Regex.TDFA qualified as RE
 import Text.Regex.TDFA.Text qualified as RE
 
 import Parser.Core
+import Script.Expr
 import Script.Expr.Class
-import Test
 
 reservedWords :: [ Text ]
 reservedWords =

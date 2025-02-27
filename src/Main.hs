@@ -23,6 +23,7 @@ import Output
 import Parser
 import Process
 import Run
+import Script.Module
 import Test
 import Util
 import Version

@@ -7,6 +7,7 @@ import Data.Maybe
 import Data.Text (Text)
 
 import Process (Process)
+import Script.Expr
 import Test
 
 builtins :: GlobalDefs

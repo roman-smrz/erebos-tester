@@ -30,6 +30,8 @@ import Network
 import Parser.Core
 import Parser.Expr
 import Parser.Statement
+import Script.Expr
+import Script.Module
 import Test
 import Test.Builtins
 

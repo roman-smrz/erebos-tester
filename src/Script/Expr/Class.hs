@@ -24,6 +24,14 @@ class Typeable a => ExprType a where
     exprEnumerator :: proxy a -> Maybe (ExprEnumerator a)
     exprEnumerator _ = Nothing
 
+
+data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
+
+data ExprListUnpacker a = forall e. ExprType e => ExprListUnpacker (a -> [e]) (Proxy a -> Proxy e)
+
+data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
+
+
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
     textExprValue x = T.pack (show x)
@@ -52,10 +60,3 @@ instance ExprType a => ExprType [a] where
     textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
 
     exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
-
-
-data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
-
-data ExprListUnpacker a = forall e. ExprType e => ExprListUnpacker (a -> [e]) (Proxy a -> Proxy e)
-
-data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])

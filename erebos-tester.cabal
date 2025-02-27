@@ -59,7 +59,10 @@ executable erebos-tester
         Process
         Run
         Run.Monad
+        Script.Expr
         Script.Expr.Class
+        Script.Module
+        Script.Var
         Test
         Test.Builtins
         Util

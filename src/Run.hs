@@ -31,6 +31,7 @@ import Network.Ip
 import Output
 import Process
 import Run.Monad
+import Script.Expr
 import Test
 import Test.Builtins
 
