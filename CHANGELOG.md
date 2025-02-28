@@ -1,5 +1,19 @@
 # Revision history for erebos-tester
 
+## 0.3.0 -- 2025-02-28
+
+* User-defined functions
+* Modules, exports and imports
+* Added `ifname` member to the `node` type
+* Added `>`, `>=`, `<=` and `<` operators for numbers
+* Change "flush" command to take regex argument via "matching" keyword
+* Change working directory of spawned process to node directory
+* Use custom C main instead of wrapper binary for unshare(2) call.
+* Fix regex check in flush command
+* Time information in output
+* Support for GHC up to 9.12
+* Fail when test requested on command-line is not found
+
 ## 0.2.4 -- 2024-08-13
 
 * Fix build with mtl-2.3
