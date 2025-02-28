@@ -158,6 +158,9 @@ parseTestFiles paths = do
     go parsedModules res path = do
         let moduleName = error "current module name should be set at the beginning of parseTestModule"
         parseTestFile parsedModules moduleName path >>= \case
+            Left (ImportModuleError bundle) -> do
+                putStr (errorBundlePretty bundle)
+                exitFailure
             Left err -> do
                 putStr (showErrorComponent err)
                 exitFailure
