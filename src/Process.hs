@@ -22,7 +22,9 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
+import System.Directory
 import System.Exit
+import System.FilePath
 import System.IO
 import System.IO.Error
 import System.Posix.Signals
@@ -89,9 +91,20 @@ lineReadingLoop process h act =
 
 spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
 spawnOn target pname killWith cmd = do
+    -- When executing command given with relative path, turn it to absolute one,
+    -- because working directory will be changed for the "ip netns exec" wrapper.
+    cmd' <- liftIO $ do
+        case span (/= ' ') cmd of
+            ( path, rest )
+                | any isPathSeparator path && isRelative path
+                -> do
+                    path' <- makeAbsolute path
+                    return (path' ++ rest)
+            _ -> return cmd
+
     let netns = either getNetns getNetns target
     let prefix = T.unpack $ "ip netns exec \"" <> textNetnsName netns <> "\" "
-    (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd)
+    (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd')
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
         , cwd = Just (either netDir nodeDir target)
         , env = Just [ ( "EREBOS_DIR", "." ) ]
