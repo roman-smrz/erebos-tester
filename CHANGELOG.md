@@ -1,5 +1,9 @@
 # Revision history for erebos-tester
 
+## 0.3.1 -- 2025-03-03
+
+* Fix executing test tool given with relative path
+
 ## 0.3.0 -- 2025-02-28
 
 * User-defined functions
