@@ -133,9 +133,11 @@ main = do
         putStrLn versionLine
         exitSuccess
 
-    getPermissions (head $ words $ optDefaultTool $ optTest opts) >>= \perms -> do
-        when (not $ executable perms) $ do
-            fail $ optDefaultTool (optTest opts) <> " is not executable"
+    case words $ optDefaultTool $ optTest opts of
+        (path : _) -> getPermissions path >>= \perms -> do
+            when (not $ executable perms) $ do
+                fail $ "‘" <> path <> "’ is not executable"
+        _ -> fail $ "invalid tool argument: ‘" <> optDefaultTool (optTest opts) <> "’"
 
     files <- if not (null ofiles)
         then return $ flip map ofiles $ \ofile ->
