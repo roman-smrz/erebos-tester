@@ -111,8 +111,9 @@ evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
 evalGlobalDefs exprs = fix $ \gdefs ->
     builtins `M.union` M.fromList (map (fmap (evalSomeWith gdefs)) exprs)
 
-evalBlock :: TestBlock -> TestRun ()
-evalBlock (TestBlock steps) = forM_ steps $ \case
+evalBlock :: TestBlock () -> TestRun ()
+evalBlock EmptyTestBlock = return ()
+evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
     Subnet name parent inner -> do
         withSubnet parent (Just name) $ evalBlock . inner
 

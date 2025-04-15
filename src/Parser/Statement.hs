@@ -27,7 +27,7 @@ import Script.Expr.Class
 import Test
 import Util
 
-letStatement :: TestParser (Expr TestBlock)
+letStatement :: TestParser (Expr (TestBlock ()))
 letStatement = do
     line <- getSourceLine
     indent <- L.indentLevel
@@ -44,7 +44,7 @@ letStatement = do
         body <- testBlock indent
         return $ Let line tname e body
 
-forStatement :: TestParser (Expr TestBlock)
+forStatement :: TestParser (Expr (TestBlock ()))
 forStatement = do
     ref <- L.indentLevel
     wsymbol "for"
@@ -69,7 +69,7 @@ forStatement = do
             <$> (unpack <$> e)
             <*> LambdaAbstraction tname body
 
-exprStatement :: TestParser (Expr TestBlock)
+exprStatement :: TestParser (Expr (TestBlock ()))
 exprStatement = do
     ref <- L.indentLevel
     off <- stateOffset <$> getParserState
@@ -79,11 +79,11 @@ exprStatement = do
         , unifyExpr off Proxy expr
         ]
   where
-    continuePartial :: ExprType a => Int -> Pos -> Expr a -> TestParser (Expr TestBlock)
+    continuePartial :: ExprType a => Int -> Pos -> Expr a -> TestParser (Expr (TestBlock ()))
     continuePartial off ref expr = do
         symbol ":"
         void eol
-        (fun :: Expr (FunctionType TestBlock)) <- unifyExpr off Proxy expr
+        (fun :: Expr (FunctionType (TestBlock ()))) <- unifyExpr off Proxy expr
         scn
         indent <- L.indentGuard scn GT ref
         blockOf indent $ do
@@ -229,10 +229,10 @@ paramOrContext name = fromParamOrContext <$> param name
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
 
-newtype InnerBlock a = InnerBlock { fromInnerBlock :: [ a ] -> TestBlock }
+newtype InnerBlock a = InnerBlock { fromInnerBlock :: [ a ] -> TestBlock () }
 
 instance ExprType a => ParamType (InnerBlock a) where
-    type ParamRep (InnerBlock a) = ( [ TypedVarName a ], Expr TestBlock )
+    type ParamRep (InnerBlock a) = ( [ TypedVarName a ], Expr (TestBlock ()) )
     parseParam _ = mzero
     showParamType _ = "<code block>"
     paramExpr ( vars, expr ) = fmap InnerBlock $ helper vars $ const <$> expr
@@ -244,13 +244,13 @@ instance ExprType a => ParamType (InnerBlock a) where
         combine f (x : xs) = f x xs
         combine _ [] = error "inner block parameter count mismatch"
 
-innerBlock :: CommandDef TestBlock
+innerBlock :: CommandDef (TestBlock ())
 innerBlock = ($ ([] :: [ Void ])) <$> innerBlockFun
 
-innerBlockFun :: ExprType a => CommandDef (a -> TestBlock)
+innerBlockFun :: ExprType a => CommandDef (a -> TestBlock ())
 innerBlockFun = (\f x -> f [ x ]) <$> innerBlockFunList
 
-innerBlockFunList :: ExprType a => CommandDef ([ a ] -> TestBlock)
+innerBlockFunList :: ExprType a => CommandDef ([ a ] -> TestBlock ())
 innerBlockFunList = fromInnerBlock <$> param ""
 
 newtype ExprParam a = ExprParam { fromExprParam :: a }
@@ -265,7 +265,7 @@ instance ExprType a => ParamType (ExprParam a) where
     showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
     paramExpr = fmap ExprParam
 
-command :: String -> CommandDef TestStep -> TestParser (Expr TestBlock)
+command :: String -> CommandDef (TestStep ()) -> TestParser (Expr (TestBlock ()))
 command name (CommandDef types ctor) = do
     indent <- L.indentLevel
     line <- getSourceLine
@@ -273,7 +273,7 @@ command name (CommandDef types ctor) = do
     localState $ do
         restOfLine indent [] line $ map (fmap $ \(SomeParam p@(_ :: Proxy p) Proxy) -> SomeParam p $ Nothing @(ParamRep p)) types
   where
-    restOfLine :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> SourceLine -> [(String, SomeParam Maybe)] -> TestParser (Expr TestBlock)
+    restOfLine :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> SourceLine -> [(String, SomeParam Maybe)] -> TestParser (Expr (TestBlock ()))
     restOfLine cmdi partials line params = choice
         [do void $ lookAhead eol
             let definedVariables = mconcat $ map (someParamVars . snd) params
@@ -290,7 +290,7 @@ command name (CommandDef types ctor) = do
                     , fail $ "missing " ++ (if null sym then "" else "'" ++ sym ++ "' ") ++ showParamType p
                     ]
                 (_, SomeParam (p :: Proxy p) (Just x)) -> return $ SomeParam p $ Identity x
-            return $ (TestBlock . (: [])) <$> ctor iparams
+            return $ (TestBlockStep EmptyTestBlock) <$> ctor iparams
 
         ,do symbol ":"
             scn
@@ -300,7 +300,7 @@ command name (CommandDef types ctor) = do
         ,do tryParams cmdi partials line [] params
         ]
 
-    restOfParts :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> TestParser (Expr TestBlock)
+    restOfParts :: Pos -> [(Pos, [(String, SomeParam Maybe)])] -> TestParser (Expr (TestBlock ()))
     restOfParts cmdi [] = testBlock cmdi
     restOfParts cmdi partials@((partIndent, params) : rest) = do
         scn
@@ -326,7 +326,7 @@ command name (CommandDef types ctor) = do
         ]
     tryParams _ _ _ _ [] = mzero
 
-testLocal :: TestParser (Expr TestBlock)
+testLocal :: TestParser (Expr (TestBlock ()))
 testLocal = do
     ref <- L.indentLevel
     wsymbol "local"
@@ -336,7 +336,7 @@ testLocal = do
     indent <- L.indentGuard scn GT ref
     localState $ testBlock indent
 
-testWith :: TestParser (Expr TestBlock)
+testWith :: TestParser (Expr (TestBlock ()))
 testWith = do
     ref <- L.indentLevel
     wsymbol "with"
@@ -362,25 +362,25 @@ testWith = do
         modify $ \s -> s { testContext = ctx }
         testBlock indent
 
-testSubnet :: TestParser (Expr TestBlock)
+testSubnet :: TestParser (Expr (TestBlock ()))
 testSubnet = command "subnet" $ Subnet
     <$> param ""
     <*> (fromExprParam <$> paramOrContext "of")
     <*> innerBlockFun
 
-testNode :: TestParser (Expr TestBlock)
+testNode :: TestParser (Expr (TestBlock ()))
 testNode = command "node" $ DeclNode
     <$> param ""
     <*> (fromExprParam <$> paramOrContext "on")
     <*> innerBlockFun
 
-testSpawn :: TestParser (Expr TestBlock)
+testSpawn :: TestParser (Expr (TestBlock ()))
 testSpawn = command "spawn" $ Spawn
     <$> param "as"
     <*> (bimap fromExprParam fromExprParam <$> paramOrContext "on")
     <*> innerBlockFun
 
-testExpect :: TestParser (Expr TestBlock)
+testExpect :: TestParser (Expr (TestBlock ()))
 testExpect = command "expect" $ Expect
     <$> cmdLine
     <*> (fromExprParam <$> paramOrContext "from")
@@ -388,29 +388,29 @@ testExpect = command "expect" $ Expect
     <*> param "capture"
     <*> innerBlockFunList
 
-testDisconnectNode :: TestParser (Expr TestBlock)
+testDisconnectNode :: TestParser (Expr (TestBlock ()))
 testDisconnectNode = command "disconnect_node" $ DisconnectNode
     <$> (fromExprParam <$> paramOrContext "")
     <*> innerBlock
 
-testDisconnectNodes :: TestParser (Expr TestBlock)
+testDisconnectNodes :: TestParser (Expr (TestBlock ()))
 testDisconnectNodes = command "disconnect_nodes" $ DisconnectNodes
     <$> (fromExprParam <$> paramOrContext "")
     <*> innerBlock
 
-testDisconnectUpstream :: TestParser (Expr TestBlock)
+testDisconnectUpstream :: TestParser (Expr (TestBlock ()))
 testDisconnectUpstream = command "disconnect_upstream" $ DisconnectUpstream
     <$> (fromExprParam <$> paramOrContext "")
     <*> innerBlock
 
-testPacketLoss :: TestParser (Expr TestBlock)
+testPacketLoss :: TestParser (Expr (TestBlock ()))
 testPacketLoss = command "packet_loss" $ PacketLoss
     <$> (fromExprParam <$> paramOrContext "")
     <*> (fromExprParam <$> paramOrContext "on")
     <*> innerBlock
 
 
-testBlock :: Pos -> TestParser (Expr TestBlock)
+testBlock :: Pos -> TestParser (Expr (TestBlock ()))
 testBlock indent = blockOf indent testStep
 
 blockOf :: Monoid a => Pos -> TestParser a -> TestParser a
@@ -425,7 +425,7 @@ blockOf indent step = go
               | pos == indent -> mappend <$> step <*> go
               | otherwise     -> L.incorrectIndent EQ indent pos
 
-testStep :: TestParser (Expr TestBlock)
+testStep :: TestParser (Expr (TestBlock ()))
 testStep = choice
     [ letStatement
     , forStatement

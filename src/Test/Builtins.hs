@@ -33,7 +33,7 @@ getArgVars (FunctionArguments args) kw = do
 
 builtinSend :: SomeVarValue
 builtinSend = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlock [ Send (getArg args (Just "to")) (getArg args Nothing) ]
+    \_ args -> TestBlockStep EmptyTestBlock $ Send (getArg args (Just "to")) (getArg args Nothing)
   where
     atypes =
         [ ( Just "to", SomeArgumentType (ContextDefault @Process) )
@@ -42,7 +42,7 @@ builtinSend = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes)
 
 builtinFlush :: SomeVarValue
 builtinFlush = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlock [ Flush (getArg args (Just "from")) (getArgMb args (Just "matching")) ]
+    \_ args -> TestBlockStep EmptyTestBlock $ Flush (getArg args (Just "from")) (getArgMb args (Just "matching"))
   where
     atypes =
         [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
@@ -51,7 +51,7 @@ builtinFlush = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes
 
 builtinGuard :: SomeVarValue
 builtinGuard = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
-    \sline args -> TestBlock [ Guard sline (getArgVars args Nothing) (getArg args Nothing) ]
+    \sline args -> TestBlockStep EmptyTestBlock $ Guard sline (getArgVars args Nothing) (getArg args Nothing)
 
 builtinWait :: SomeVarValue
-builtinWait = someConstValue $ TestBlock [ Wait ]
+builtinWait = someConstValue $ TestBlockStep EmptyTestBlock Wait
