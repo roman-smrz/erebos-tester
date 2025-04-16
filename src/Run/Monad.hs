@@ -109,10 +109,10 @@ finally act handler = do
     void handler
     return x
 
-forkTest :: TestRun () -> TestRun ()
+forkTest :: TestRun () -> TestRun ThreadId
 forkTest act = do
     tenv <- ask
-    void $ liftIO $ forkIO $ do
+    liftIO $ forkIO $ do
         runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
             Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
             Right () -> return ()

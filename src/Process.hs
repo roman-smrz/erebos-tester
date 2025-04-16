@@ -39,7 +39,7 @@ import Script.Expr.Class
 
 data Process = Process
     { procName :: ProcName
-    , procHandle :: ProcessHandle
+    , procHandle :: Either ProcessHandle ( ThreadId, MVar ExitCode )
     , procStdin :: Handle
     , procOutput :: TVar [Text]
     , procKillWith :: Maybe Signal
@@ -113,17 +113,17 @@ spawnOn target pname killWith cmd = do
 
     let process = Process
             { procName = pname
-            , procHandle = handle
+            , procHandle = Left handle
             , procStdin = hin
             , procOutput = pout
             , procKillWith = killWith
             , procNode = either (const undefined) id target
             }
 
-    forkTest $ lineReadingLoop process hout $ \line -> do
+    void $ forkTest $ lineReadingLoop process hout $ \line -> do
         outProc OutputChildStdout process line
         liftIO $ atomically $ modifyTVar pout (++[line])
-    forkTest $ lineReadingLoop process herr $ \line -> do
+    void $ forkTest $ lineReadingLoop process herr $ \line -> do
         case pname of
              ProcNameTcpdump -> return ()
              _ -> outProc OutputChildStderr process line
@@ -139,14 +139,14 @@ closeProcess p = do
     liftIO $ hClose $ procStdin p
     case procKillWith p of
         Nothing -> return ()
-        Just sig -> liftIO $ getPid (procHandle p) >>= \case
+        Just sig -> liftIO $ either getPid (\_ -> return Nothing) (procHandle p) >>= \case
             Nothing -> return ()
             Just pid -> signalProcess sig pid
 
     liftIO $ void $ forkIO $ do
         threadDelay 1000000
-        terminateProcess $ procHandle p
-    liftIO (waitForProcess (procHandle p)) >>= \case
+        either terminateProcess (killThread . fst) $ procHandle p
+    liftIO (either waitForProcess (takeMVar . snd) (procHandle p)) >>= \case
         ExitSuccess -> return ()
         ExitFailure code -> do
             outProc OutputChildFail p $ T.pack $ "exit code: " ++ show code

@@ -33,6 +33,7 @@ import Output
 import Process
 import Run.Monad
 import Script.Expr
+import Script.Shell
 import Test
 import Test.Builtins
 
@@ -72,7 +73,7 @@ runTest out opts gdefs test = do
     let sigHandler SignalInfo { siginfoSpecific = chld } = do
             processes <- readMVar procVar
             forM_ processes $ \p -> do
-                mbpid <- getPid (procHandle p)
+                mbpid <- either getPid (\_ -> return Nothing) (procHandle p)
                 when (mbpid == Just (siginfoPid chld)) $ flip runReaderT out $ do
                     let err detail = outProc OutputChildFail p detail
                     case siginfoStatus chld of
@@ -130,6 +131,10 @@ evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
             let pname = ProcName tname
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
             withProcess (Right node) pname Nothing tool $ evalBlock . inner
+
+    SpawnShell (TypedVarName (VarName tname)) node script inner -> do
+        let pname = ProcName tname
+        withShellProcess node pname script $ evalBlock . inner
 
     Send p line -> do
         outProc OutputChildStdin p line

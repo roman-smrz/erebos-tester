@@ -11,6 +11,7 @@ import Data.Typeable
 import Network
 import Process
 import Script.Expr
+import Script.Shell
 
 data Test = Test
     { testName :: Text
@@ -33,6 +34,7 @@ data TestStep a where
     Subnet :: TypedVarName Network -> Network -> (Network -> TestBlock a) -> TestStep a
     DeclNode :: TypedVarName Node -> Network -> (Node -> TestBlock a) -> TestStep a
     Spawn :: TypedVarName Process -> Either Network Node -> (Process -> TestBlock a) -> TestStep a
+    SpawnShell :: TypedVarName Process -> Node -> ShellScript -> (Process -> TestBlock a) -> TestStep a
     Send :: Process -> Text -> TestStep ()
     Expect :: SourceLine -> Process -> Traced Regex -> [ TypedVarName Text ] -> ([ Text ] -> TestBlock a) -> TestStep a
     Flush :: Process -> Maybe Regex -> TestStep ()

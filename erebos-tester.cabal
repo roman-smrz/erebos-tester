@@ -55,6 +55,7 @@ executable erebos-tester
         Parser
         Parser.Core
         Parser.Expr
+        Parser.Shell
         Parser.Statement
         Paths_erebos_tester
         Process
@@ -63,6 +64,7 @@ executable erebos-tester
         Script.Expr
         Script.Expr.Class
         Script.Module
+        Script.Shell
         Script.Var
         Test
         Test.Builtins

@@ -11,6 +11,8 @@ module Parser.Expr (
     literal,
     variable,
 
+    stringExpansion,
+
     checkFunctionArguments,
     functionArguments,
 ) where
@@ -94,8 +96,8 @@ someExpansion = do
         , between (char '{') (char '}') someExpr
         ]
 
-stringExpansion :: ExprType a => Text -> (forall b. ExprType b => Expr b -> [Maybe (Expr a)]) -> TestParser (Expr a)
-stringExpansion tname conv = do
+expressionExpansion :: ExprType a => Text -> (forall b. ExprType b => Expr b -> [ Maybe (Expr a) ]) -> TestParser (Expr a)
+expressionExpansion tname conv = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpansion
     let err = do
@@ -104,6 +106,13 @@ stringExpansion tname conv = do
             return $ Undefined "expansion not defined for type"
 
     maybe err return $ listToMaybe $ catMaybes $ conv e
+
+stringExpansion :: TestParser (Expr Text)
+stringExpansion = expressionExpansion (T.pack "string") $ \e ->
+    [ cast e
+    , fmap (T.pack . show @Integer) <$> cast e
+    , fmap (T.pack . show @Scientific) <$> cast e
+    ]
 
 numberLiteral :: TestParser SomeExpr
 numberLiteral = label "number" $ lexeme $ do
@@ -131,11 +140,7 @@ quotedString = label "string" $ lexeme $ do
                     , char 't' >> return '\t'
                     ]
                 (Pure (T.singleton c) :) <$> inner
-            ,do e <- stringExpansion (T.pack "string") $ \e ->
-                    [ cast e
-                    , fmap (T.pack . show @Integer) <$> cast e
-                    , fmap (T.pack . show @Scientific) <$> cast e
-                    ]
+            ,do e <- stringExpansion
                 (e:) <$> inner
             ]
     Concat <$> inner
@@ -153,7 +158,7 @@ regex = label "regular expression" $ lexeme $ do
                     , anySingle >>= \c -> return (Pure $ RegexPart $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
-            ,do e <- stringExpansion (T.pack "regex") $ \e ->
+            ,do e <- expressionExpansion (T.pack "regex") $ \e ->
                     [ cast e
                     , fmap RegexString <$> cast e
                     , fmap (RegexString . T.pack . show @Integer) <$> cast e

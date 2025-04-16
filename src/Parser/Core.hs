@@ -255,6 +255,18 @@ listOf item = do
     x <- item
     (x:) <$> choice [ symbol "," >> listOf item, return [] ]
 
+blockOf :: Monoid a => Pos -> TestParser a -> TestParser a
+blockOf indent step = go
+  where
+    go = do
+        scn
+        pos <- L.indentLevel
+        optional eof >>= \case
+            Just _ -> return mempty
+            _ | pos <  indent -> return mempty
+              | pos == indent -> mappend <$> step <*> go
+              | otherwise     -> L.incorrectIndent EQ indent pos
+
 
 getSourceLine :: TestParser SourceLine
 getSourceLine = do

@@ -21,6 +21,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 import Network (Network, Node)
 import Parser.Core
 import Parser.Expr
+import Parser.Shell
 import Process (Process)
 import Script.Expr
 import Script.Expr.Class
@@ -68,6 +69,22 @@ forStatement = do
         return $ (\xs f -> mconcat $ map f xs)
             <$> (unpack <$> e)
             <*> LambdaAbstraction tname body
+
+shellStatement :: TestParser (Expr (TestBlock ()))
+shellStatement = do
+    ref <- L.indentLevel
+    wsymbol "shell"
+    wsymbol "as"
+    pname <- newVarName
+    wsymbol "on"
+    node <- typedExpr
+    symbol ":"
+    void eol
+    void $ L.indentGuard scn GT ref
+    script <- shellScript
+    cont <- testBlock ref
+    return $ TestBlockStep EmptyTestBlock <$>
+        (SpawnShell pname <$> node <*> script <*> LambdaAbstraction pname cont)
 
 exprStatement :: TestParser (Expr (TestBlock ()))
 exprStatement = do
@@ -413,22 +430,11 @@ testPacketLoss = command "packet_loss" $ PacketLoss
 testBlock :: Pos -> TestParser (Expr (TestBlock ()))
 testBlock indent = blockOf indent testStep
 
-blockOf :: Monoid a => Pos -> TestParser a -> TestParser a
-blockOf indent step = go
-  where
-    go = do
-        scn
-        pos <- L.indentLevel
-        optional eof >>= \case
-            Just _ -> return mempty
-            _ | pos <  indent -> return mempty
-              | pos == indent -> mappend <$> step <*> go
-              | otherwise     -> L.incorrectIndent EQ indent pos
-
 testStep :: TestParser (Expr (TestBlock ()))
 testStep = choice
     [ letStatement
     , forStatement
+    , shellStatement
     , testLocal
     , testWith
     , testSubnet

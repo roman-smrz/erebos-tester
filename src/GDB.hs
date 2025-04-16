@@ -75,7 +75,7 @@ gdbStart onCrash = do
 
     let process = Process
             { procName = ProcNameGDB
-            , procHandle = handle
+            , procHandle = Left handle
             , procStdin = hin
             , procOutput = pout
             , procKillWith = Nothing
@@ -144,7 +144,7 @@ gdbLine gdb rline = either (outProc OutputError (gdbProcess gdb) . T.pack . erro
 
 addInferior :: MonadOutput m => GDB -> Process -> m ()
 addInferior gdb process = do
-    liftIO (getPid $ procHandle process) >>= \case
+    liftIO (either getPid (\_ -> return Nothing) $ procHandle process) >>= \case
         Nothing -> outProc OutputError process $ "failed to get PID"
         Just pid -> do
             tgid <- liftIO (atomically $ tryReadTChan $ gdbThreadGroups gdb) >>= \case
