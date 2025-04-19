@@ -47,6 +47,7 @@ executable erebos-tester
         Main.hs
 
     other-modules:
+        Asset
         Config
         GDB
         Network

@@ -26,6 +26,7 @@ import System.Exit
 import System.FilePath
 import System.IO.Error
 
+import Asset
 import Network
 import Parser.Core
 import Parser.Expr
@@ -98,12 +99,25 @@ parseDefinition = label "symbol definition" $ do
                 replaceArgs (SomeExpr e) = SomeExpr (go unif e)
             e -> e
 
+parseAsset :: TestParser ( VarName, SomeExpr )
+parseAsset = label "asset definition" $ do
+    wsymbol "asset"
+    name <- varName
+    osymbol ":"
+    void eol
+    ref <- L.indentGuard scn GT pos1
+    wsymbol "path"
+    osymbol ":"
+    assetPath <- AssetPath . TL.unpack <$> takeWhile1P Nothing (/= '\n')
+    void $ L.indentGuard scn LT ref
+    return ( name, SomeExpr $ Pure Asset {..} )
+
 parseExport :: TestParser [ Toplevel ]
 parseExport = label "export declaration" $ toplevel id $ do
     wsymbol "export"
     choice
       [ do
-        def@( name, _ ) <- parseDefinition
+        def@( name, _ ) <- parseDefinition <|> parseAsset
         return [ ToplevelDefinition def, ToplevelExport name ]
       , do
         names <- listOf varName
@@ -139,6 +153,7 @@ parseTestModule absPath = do
     toplevels <- fmap concat $ many $ choice
         [ (: []) <$> parseTestDefinition
         , (: []) <$> toplevel ToplevelDefinition parseDefinition
+        , (: []) <$> toplevel ToplevelDefinition parseAsset
         , parseExport
         , parseImport
         ]
