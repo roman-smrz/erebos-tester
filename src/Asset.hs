@@ -5,6 +5,7 @@ module Asset (
 
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Typeable
 
 import Script.Expr.Class
 
@@ -28,3 +29,5 @@ instance ExprType Asset where
 instance ExprType AssetPath where
     textExprType _ = "filepath"
     textExprValue = ("filepath:" <>) . textAssetPath
+
+    exprExpansionConvTo = cast textAssetPath

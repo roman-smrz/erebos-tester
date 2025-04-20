@@ -5,6 +5,7 @@ module Script.Expr.Class (
     ExprEnumerator(..),
 ) where
 
+import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -17,6 +18,12 @@ class Typeable a => ExprType a where
 
     recordMembers :: [(Text, RecordSelector a)]
     recordMembers = []
+
+    exprExpansionConvTo :: ExprType b => Maybe (a -> b)
+    exprExpansionConvTo = Nothing
+
+    exprExpansionConvFrom :: ExprType b => Maybe (b -> a)
+    exprExpansionConvFrom = Nothing
 
     exprListUnpacker :: proxy a -> Maybe (ExprListUnpacker a)
     exprListUnpacker _ = Nothing
@@ -36,11 +43,19 @@ instance ExprType Integer where
     textExprType _ = T.pack "integer"
     textExprValue x = T.pack (show x)
 
+    exprExpansionConvTo = listToMaybe $ catMaybes
+        [ cast (T.pack . show :: Integer -> Text)
+        ]
+
     exprEnumerator _ = Just $ ExprEnumerator enumFromTo enumFromThenTo
 
 instance ExprType Scientific where
     textExprType _ = T.pack "number"
     textExprValue x = T.pack (show x)
+
+    exprExpansionConvTo = listToMaybe $ catMaybes
+        [ cast (T.pack . show :: Scientific -> Text)
+        ]
 
 instance ExprType Bool where
     textExprType _ = T.pack "bool"

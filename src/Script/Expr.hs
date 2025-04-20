@@ -34,6 +34,8 @@ import Data.Foldable
 import Data.List
 import Data.Map (Map)
 import Data.Map qualified as M
+import Data.Maybe
+import Data.Scientific
 import Data.String
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -424,6 +426,12 @@ data Regex = RegexCompiled Text RE.Regex
 instance ExprType Regex where
     textExprType _ = T.pack "regex"
     textExprValue _ = T.pack "<regex>"
+
+    exprExpansionConvFrom = listToMaybe $ catMaybes
+        [ cast (RegexString)
+        , cast (RegexString . T.pack . show @Integer)
+        , cast (RegexString . T.pack . show @Scientific)
+        ]
 
 regexCompile :: Text -> Either String Regex
 regexCompile src = either Left (Right . RegexCompiled src) $ RE.compile RE.defaultCompOpt RE.defaultExecOpt $

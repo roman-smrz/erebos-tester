@@ -96,8 +96,8 @@ someExpansion = do
         , between (char '{') (char '}') someExpr
         ]
 
-expressionExpansion :: ExprType a => Text -> (forall b. ExprType b => Expr b -> [ Maybe (Expr a) ]) -> TestParser (Expr a)
-expressionExpansion tname conv = do
+expressionExpansion :: forall a. ExprType a => Text -> TestParser (Expr a)
+expressionExpansion tname = do
     off <- stateOffset <$> getParserState
     SomeExpr e <- someExpansion
     let err = do
@@ -105,14 +105,10 @@ expressionExpansion tname conv = do
                 [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
             return $ Undefined "expansion not defined for type"
 
-    maybe err return $ listToMaybe $ catMaybes $ conv e
+    maybe err (return . (<$> e)) $ listToMaybe $ catMaybes [ cast (id :: a -> a), exprExpansionConvTo, exprExpansionConvFrom ]
 
 stringExpansion :: TestParser (Expr Text)
-stringExpansion = expressionExpansion (T.pack "string") $ \e ->
-    [ cast e
-    , fmap (T.pack . show @Integer) <$> cast e
-    , fmap (T.pack . show @Scientific) <$> cast e
-    ]
+stringExpansion = expressionExpansion "string"
 
 numberLiteral :: TestParser SomeExpr
 numberLiteral = label "number" $ lexeme $ do
@@ -158,12 +154,7 @@ regex = label "regular expression" $ lexeme $ do
                     , anySingle >>= \c -> return (Pure $ RegexPart $ T.pack ['\\', c])
                     ]
                 (s:) <$> inner
-            ,do e <- expressionExpansion (T.pack "regex") $ \e ->
-                    [ cast e
-                    , fmap RegexString <$> cast e
-                    , fmap (RegexString . T.pack . show @Integer) <$> cast e
-                    , fmap (RegexString . T.pack . show @Scientific) <$> cast e
-                    ]
+            ,do e <- expressionExpansion (T.pack "regex")
                 (e:) <$> inner
             ]
     parts <- inner
