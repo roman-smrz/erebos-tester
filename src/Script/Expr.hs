@@ -23,7 +23,8 @@ module Script.Expr (
 
     module Script.Var,
 
-    Regex(RegexPart, RegexString), regexMatch,
+    Regex(RegexPart, RegexString),
+    regexCompile, regexMatch,
 ) where
 
 import Control.Monad

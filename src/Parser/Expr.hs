@@ -37,8 +37,6 @@ import Text.Megaparsec hiding (State)
 import Text.Megaparsec.Char
 import Text.Megaparsec.Char.Lexer qualified as L
 import Text.Megaparsec.Error.Builder qualified as Err
-import Text.Regex.TDFA qualified as RE
-import Text.Regex.TDFA.Text qualified as RE
 
 import Parser.Core
 import Script.Expr
@@ -161,7 +159,7 @@ regex = label "regular expression" $ lexeme $ do
     let testEval = \case
             Pure (RegexPart p) -> p
             _ -> ""
-    case RE.compile RE.defaultCompOpt RE.defaultExecOpt $ T.concat $ map testEval parts of
+    case regexCompile $ T.concat $ map testEval parts of
         Left err -> registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
             [ "failed to parse regular expression: ", T.pack err ]
         Right _ -> return ()
