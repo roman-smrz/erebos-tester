@@ -1,5 +1,5 @@
 module Output (
-    Output, OutputType(..),
+    Output, OutputStyle(..), OutputType(..),
     MonadOutput(..),
     startOutput,
     resetOutputTime,
@@ -9,7 +9,6 @@ module Output (
 ) where
 
 import Control.Concurrent.MVar
-import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 
@@ -18,9 +17,10 @@ import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Text.Lazy.IO qualified as TL
 
+import System.Clock
 import System.Console.Haskeline
 import System.Console.Haskeline.History
-import System.Clock
+import System.IO
 
 import Text.Printf
 
@@ -31,7 +31,7 @@ data Output = Output
     }
 
 data OutputConfig = OutputConfig
-    { outVerbose :: Bool
+    { outStyle :: OutputStyle
     , outUseColor :: Bool
     }
 
@@ -40,15 +40,23 @@ data OutputState = OutputState
     , outHistory :: History
     }
 
-data OutputType = OutputChildStdout
-                | OutputChildStderr
-                | OutputChildStdin
-                | OutputChildInfo
-                | OutputChildFail
-                | OutputMatch
-                | OutputMatchFail
-                | OutputError
-                | OutputAlways
+data OutputStyle
+    = OutputStyleQuiet
+    | OutputStyleVerbose
+    | OutputStyleTest
+    deriving (Eq)
+
+data OutputType
+    = OutputChildStdout
+    | OutputChildStderr
+    | OutputChildStdin
+    | OutputChildInfo
+    | OutputChildFail
+    | OutputMatch
+    | OutputMatchFail
+    | OutputError
+    | OutputAlways
+    | OutputTestRaw
 
 class MonadIO m => MonadOutput m where
     getOutput :: m Output
@@ -56,11 +64,12 @@ class MonadIO m => MonadOutput m where
 instance MonadIO m => MonadOutput (ReaderT Output m) where
     getOutput = ask
 
-startOutput :: Bool -> Bool -> IO Output
-startOutput outVerbose outUseColor = do
+startOutput :: OutputStyle -> Bool -> IO Output
+startOutput outStyle outUseColor = do
     outState <- newMVar OutputState { outPrint = TL.putStrLn, outHistory = emptyHistory }
     outConfig <- pure OutputConfig {..}
     outStartedAt <- newMVar =<< getTime Monotonic
+    hSetBuffering stdout LineBuffering
     return Output {..}
 
 resetOutputTime :: Output -> IO ()
@@ -77,6 +86,7 @@ outColor OutputMatch = T.pack "32"
 outColor OutputMatchFail = T.pack "31"
 outColor OutputError = T.pack "31"
 outColor OutputAlways = "0"
+outColor OutputTestRaw = "0"
 
 outSign :: OutputType -> Text
 outSign OutputChildStdout = T.empty
@@ -88,10 +98,24 @@ outSign OutputMatch = T.pack "+"
 outSign OutputMatchFail = T.pack "/"
 outSign OutputError = T.pack "!!"
 outSign OutputAlways = T.empty
+outSign OutputTestRaw = T.empty
 
 outArr :: OutputType -> Text
 outArr OutputChildStdin = "<"
 outArr _ = ">"
+
+outTestLabel :: OutputType -> Text
+outTestLabel = \case
+    OutputChildStdout -> "child-stdout"
+    OutputChildStderr -> "child-stderr"
+    OutputChildStdin -> "child-stdin"
+    OutputChildInfo -> "child-info"
+    OutputChildFail -> "child-fail"
+    OutputMatch -> "match"
+    OutputMatchFail -> "match-fail"
+    OutputError -> "error"
+    OutputAlways -> "other"
+    OutputTestRaw -> ""
 
 printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
@@ -107,7 +131,14 @@ ioWithOutput act = liftIO . act =<< getOutput
 
 outLine :: MonadOutput m => OutputType -> Maybe Text -> Text -> m ()
 outLine otype prompt line = ioWithOutput $ \out ->
-    when (outVerbose (outConfig out) || printWhenQuiet otype) $ do
+    case outStyle (outConfig out) of
+        OutputStyleQuiet
+            | printWhenQuiet otype -> normalOutput out
+            | otherwise -> return ()
+        OutputStyleVerbose -> normalOutput out
+        OutputStyleTest -> testOutput out
+  where
+    normalOutput out = do
         stime <- readMVar (outStartedAt out)
         nsecs <- toNanoSecs . (`diffTimeSpec` stime) <$> getTime Monotonic
         withMVar (outState out) $ \st -> do
@@ -122,6 +153,16 @@ outLine otype prompt line = ioWithOutput $ \out ->
                     then [ T.pack "\ESC[0m" ]
                     else []
                 ]
+
+    testOutput out = do
+        withMVar (outState out) $ \st -> do
+            outPrint st $ case otype of
+                OutputTestRaw -> TL.fromStrict line
+                _ -> TL.fromChunks
+                    [ outTestLabel otype, " "
+                    , maybe "-" id prompt, " "
+                    , line
+                    ]
 
 outPromptGetLine :: MonadOutput m => Text -> m (Maybe Text)
 outPromptGetLine = outPromptGetLineCompletion noCompletion

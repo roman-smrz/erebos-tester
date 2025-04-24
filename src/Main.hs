@@ -26,6 +26,7 @@ import Process
 import Run
 import Script.Module
 import Test
+import TestMode
 import Util
 import Version
 
@@ -36,6 +37,7 @@ data CmdlineOptions = CmdlineOptions
     , optColor :: Maybe Bool
     , optShowHelp :: Bool
     , optShowVersion :: Bool
+    , optTestMode :: Bool
     }
 
 defaultCmdlineOptions :: CmdlineOptions
@@ -46,9 +48,10 @@ defaultCmdlineOptions = CmdlineOptions
     , optColor = Nothing
     , optShowHelp = False
     , optShowVersion = False
+    , optTestMode = False
     }
 
-options :: [OptDescr (CmdlineOptions -> CmdlineOptions)]
+options :: [ OptDescr (CmdlineOptions -> CmdlineOptions) ]
 options =
     [ Option ['T'] ["tool"]
         (ReqArg (\str -> to $ \opts -> case break (==':') str of
@@ -95,6 +98,13 @@ options =
   where
     to f opts = opts { optTest = f (optTest opts) }
 
+hiddenOptions :: [ OptDescr (CmdlineOptions -> CmdlineOptions) ]
+hiddenOptions =
+    [ Option [] [ "test-mode" ]
+        (NoArg (\opts -> opts { optTestMode = True }))
+        "test mode"
+    ]
+
 main :: IO ()
 main = do
     configPath <- findConfig
@@ -112,7 +122,7 @@ main = do
             }
 
     args <- getArgs
-    (opts, ofiles) <- case getOpt Permute options args of
+    (opts, ofiles) <- case getOpt Permute (options ++ hiddenOptions) args of
         (o, files, []) -> return (foldl (flip id) initOpts o, files)
         (_, _, errs) -> do
             hPutStrLn stderr $ concat errs <> "Try `erebos-tester --help' for more information."
@@ -133,6 +143,10 @@ main = do
         putStrLn versionLine
         exitSuccess
 
+    when (optTestMode opts) $ do
+        testMode
+        exitSuccess
+
     case words $ optDefaultTool $ optTest opts of
         (path : _) -> getPermissions path >>= \perms -> do
             when (not $ executable perms) $ do
@@ -151,7 +165,10 @@ main = do
     useColor <- case optColor opts of
         Just use -> return use
         Nothing -> queryTerminal (Fd 1)
-    out <- startOutput (optVerbose opts) useColor
+    let outputStyle
+            | optVerbose opts = OutputStyleVerbose
+            | otherwise       = OutputStyleQuiet
+    out <- startOutput outputStyle useColor
 
     ( modules, allModules ) <- parseTestFiles $ map fst files
     tests <- forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do

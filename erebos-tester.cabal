@@ -69,6 +69,7 @@ executable erebos-tester
         Script.Var
         Test
         Test.Builtins
+        TestMode
         Util
         Version
         Version.Git
