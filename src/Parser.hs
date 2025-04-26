@@ -106,9 +106,18 @@ parseAsset = label "asset definition" $ do
     osymbol ":"
     void eol
     ref <- L.indentGuard scn GT pos1
+
     wsymbol "path"
     osymbol ":"
-    assetPath <- AssetPath . TL.unpack <$> takeWhile1P Nothing (/= '\n')
+    off <- stateOffset <$> getParserState
+    path <- TL.unpack <$> takeWhile1P Nothing (/= '\n')
+    dir <- takeDirectory <$> gets testSourcePath
+    absPath <- liftIO (makeAbsolute $ dir </> path)
+    let assetPath = AssetPath absPath
+    liftIO (doesPathExist absPath) >>= \case
+        True -> return ()
+        False -> registerParseError $ FancyError off $ S.singleton $ ErrorCustom $ FileNotFound absPath
+
     void $ L.indentGuard scn LT ref
     let expr = SomeExpr $ Pure Asset {..}
     modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
@@ -191,7 +200,8 @@ parseTestFile parsedModules moduleName path = do
         Just found -> return $ Right found
         Nothing -> do
             let initState = TestParserState
-                    { testVars = concat
+                    { testSourcePath = path
+                    , testVars = concat
                         [ map (\(( mname, name ), value ) -> ( name, ( GlobalVarName mname name, someVarValueType value ))) $ M.toList builtins
                         ]
                     , testContext = SomeExpr (Undefined "void" :: Expr Void)
@@ -206,7 +216,7 @@ parseTestFile parsedModules moduleName path = do
                 if isDoesNotExistError e then return Nothing else ioError e
             case mbContent of
                 Just content -> do
-                    runTestParser path content initState (parseTestModule absPath) >>= \case
+                    runTestParser content initState (parseTestModule absPath) >>= \case
                         Left bundle -> do
                             return $ Left $ ImportModuleError bundle
                         Right testModule -> do

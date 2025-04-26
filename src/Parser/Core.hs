@@ -27,6 +27,7 @@ newtype TestParser a = TestParser (StateT TestParserState (ParsecT CustomTestErr
         , MonadState TestParserState
         , MonadPlus
         , MonadFail
+        , MonadIO
         , MonadParsec CustomTestError TestStream
         )
 
@@ -36,6 +37,7 @@ type TestParseError = ParseError TestStream CustomTestError
 
 data CustomTestError
     = ModuleNotFound ModuleName
+    | FileNotFound FilePath
     | ImportModuleError (ParseErrorBundle TestStream CustomTestError)
     deriving (Eq)
 
@@ -44,17 +46,22 @@ instance Ord CustomTestError where
     compare (ModuleNotFound _) _                  = LT
     compare _                  (ModuleNotFound _) = GT
 
+    compare (FileNotFound a) (FileNotFound b) = compare a b
+    compare (FileNotFound _) _                = LT
+    compare _                (FileNotFound _) = GT
+
     -- Ord instance is required to store errors in Set, but there shouldn't be
     -- two ImportModuleErrors at the same possition, so "dummy" comparison
     -- should be ok.
     compare (ImportModuleError _) (ImportModuleError _) = EQ
 
 instance ShowErrorComponent CustomTestError where
-    showErrorComponent (ModuleNotFound name) = "module `" <> T.unpack (textModuleName name) <> "' not found"
+    showErrorComponent (ModuleNotFound name) = "module ‘" <> T.unpack (textModuleName name) <> "’ not found"
+    showErrorComponent (FileNotFound path) = "file ‘" <> path <> "’ not found"
     showErrorComponent (ImportModuleError bundle) = "error parsing imported module:\n" <> errorBundlePretty bundle
 
-runTestParser :: String -> TestStream -> TestParserState -> TestParser a -> IO (Either (ParseErrorBundle TestStream CustomTestError) a)
-runTestParser path content initState (TestParser parser) = flip (flip runParserT path) content . flip evalStateT initState $ parser
+runTestParser :: TestStream -> TestParserState -> TestParser a -> IO (Either (ParseErrorBundle TestStream CustomTestError) a)
+runTestParser content initState (TestParser parser) = flip (flip runParserT (testSourcePath initState)) content . flip evalStateT initState $ parser
 
 data Toplevel
     = ToplevelTest Test
@@ -63,7 +70,8 @@ data Toplevel
     | ToplevelImport ( ModuleName, VarName )
 
 data TestParserState = TestParserState
-    { testVars :: [ ( VarName, ( FqVarName, SomeExprType )) ]
+    { testSourcePath :: FilePath
+    , testVars :: [ ( VarName, ( FqVarName, SomeExprType )) ]
     , testContext :: SomeExpr
     , testNextTypeVar :: Int
     , testTypeUnif :: Map TypeVar SomeExprType
