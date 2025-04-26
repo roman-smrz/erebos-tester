@@ -110,7 +110,9 @@ parseAsset = label "asset definition" $ do
     osymbol ":"
     assetPath <- AssetPath . TL.unpack <$> takeWhile1P Nothing (/= '\n')
     void $ L.indentGuard scn LT ref
-    return ( name, SomeExpr $ Pure Asset {..} )
+    let expr = SomeExpr $ Pure Asset {..}
+    modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
+    return ( name, expr )
 
 parseExport :: TestParser [ Toplevel ]
 parseExport = label "export declaration" $ toplevel id $ do
