@@ -8,6 +8,7 @@ import Data.Maybe
 import Data.Text qualified as T
 
 import Text.Read (readMaybe)
+import Text.Megaparsec (errorBundlePretty, showErrorComponent)
 
 import System.Console.GetOpt
 import System.Directory
@@ -170,7 +171,17 @@ main = do
             | otherwise       = OutputStyleQuiet
     out <- startOutput outputStyle useColor
 
-    ( modules, allModules ) <- parseTestFiles $ map fst files
+    ( modules, allModules ) <- parseTestFiles (map fst files) >>= \case
+        Right res -> do
+            return res
+        Left err -> do
+            case err of
+                ImportModuleError bundle ->
+                    putStr (errorBundlePretty bundle)
+                _ -> do
+                    putStrLn (showErrorComponent err)
+            exitFailure
+
     tests <- forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
         case mbTestName of
             Nothing -> return moduleTests

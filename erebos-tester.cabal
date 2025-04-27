@@ -81,6 +81,7 @@ executable erebos-tester
         src/main.c
 
     other-extensions:
+        CPP
         TemplateHaskell
     default-extensions:
         DefaultSignatures

@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module TestMode (
     testMode,
 ) where
@@ -13,6 +15,9 @@ import Data.Text qualified as T
 import Data.Text.IO qualified as T
 
 import System.IO.Error
+
+import Text.Megaparsec.Error
+import Text.Megaparsec.Pos
 
 import Output
 import Parser
@@ -86,13 +91,31 @@ commands =
 cmdLoad :: Command
 cmdLoad = do
     [ path ] <- asks tmiParams
-    ( modules, allModules ) <- liftIO $ parseTestFiles [ T.unpack path ]
-    let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
-    modify $ \s -> s
-        { tmsModules = modules
-        , tmsGlobals = globalDefs
-        }
-    cmdOut "load-done"
+    liftIO (parseTestFiles [ T.unpack path ]) >>= \case
+        Right ( modules, allModules ) -> do
+            let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
+            modify $ \s -> s
+                { tmsModules = modules
+                , tmsGlobals = globalDefs
+                }
+            cmdOut "load-done"
+
+        Left (ModuleNotFound moduleName) -> do
+            cmdOut $ "load-failed module-not-found" <> textModuleName moduleName
+        Left (FileNotFound notFoundPath) -> do
+            cmdOut $ "load-failed file-not-found " <> T.pack notFoundPath
+        Left (ImportModuleError bundle) -> do
+#if MIN_VERSION_megaparsec(9,7,0)
+            mapM_ (cmdOut . T.pack) $ lines $ errorBundlePrettyWith showParseError bundle
+#endif
+            cmdOut $ "load-failed parse-error"
+  where
+    showParseError _ SourcePos {..} _ = concat
+        [ "parse-error"
+        , " ", sourceName
+        , ":", show $ unPos sourceLine
+        , ":", show $ unPos sourceColumn
+        ]
 
 cmdRun :: Command
 cmdRun = do

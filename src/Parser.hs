@@ -2,9 +2,11 @@
 
 module Parser (
     parseTestFiles,
+    CustomTestError(..),
 ) where
 
 import Control.Monad
+import Control.Monad.Except
 import Control.Monad.State
 
 import Data.IORef
@@ -22,7 +24,6 @@ import Text.Megaparsec.Char
 import Text.Megaparsec.Char.Lexer qualified as L
 
 import System.Directory
-import System.Exit
 import System.FilePath
 import System.IO.Error
 
@@ -174,27 +175,23 @@ parseTestModule absPath = do
     eof
     return Module {..}
 
-parseTestFiles :: [ FilePath ] -> IO ( [ Module ], [ Module ] )
+parseTestFiles :: [ FilePath ] -> IO (Either CustomTestError ( [ Module ], [ Module ] ))
 parseTestFiles paths = do
     parsedModules <- newIORef []
-    requestedModules <- reverse <$> foldM (go parsedModules) [] paths
-    allModules <- map snd <$> readIORef parsedModules
-    return ( requestedModules, allModules )
+    runExceptT $ do
+        requestedModules <- reverse <$> foldM (go parsedModules) [] paths
+        allModules <- map snd <$> liftIO (readIORef parsedModules)
+        return ( requestedModules, allModules )
   where
     go parsedModules res path = do
-        let moduleName = error "current module name should be set at the beginning of parseTestModule"
-        parseTestFile parsedModules moduleName path >>= \case
-            Left (ImportModuleError bundle) -> do
-                putStr (errorBundlePretty bundle)
-                exitFailure
+        liftIO (parseTestFile parsedModules Nothing path) >>= \case
             Left err -> do
-                putStr (showErrorComponent err)
-                exitFailure
+                throwError err
             Right cur -> do
                 return $ cur : res
 
-parseTestFile :: IORef [ ( FilePath, Module ) ] -> ModuleName -> FilePath -> IO (Either CustomTestError Module)
-parseTestFile parsedModules moduleName path = do
+parseTestFile :: IORef [ ( FilePath, Module ) ] -> Maybe ModuleName -> FilePath -> IO (Either CustomTestError Module)
+parseTestFile parsedModules mbModuleName path = do
     absPath <- makeAbsolute path
     (lookup absPath <$> readIORef parsedModules) >>= \case
         Just found -> return $ Right found
@@ -207,10 +204,10 @@ parseTestFile parsedModules moduleName path = do
                     , testContext = SomeExpr (Undefined "void" :: Expr Void)
                     , testNextTypeVar = 0
                     , testTypeUnif = M.empty
-                    , testCurrentModuleName = moduleName
+                    , testCurrentModuleName = fromMaybe (error "current module name should be set at the beginning of parseTestModule") mbModuleName
                     , testParseModule = \(ModuleName current) mname@(ModuleName imported) -> do
                         let projectRoot = iterate takeDirectory absPath !! length current
-                        parseTestFile parsedModules mname $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
+                        parseTestFile parsedModules (Just mname) $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
                     }
             mbContent <- (Just <$> TL.readFile path) `catchIOError` \e ->
                 if isDoesNotExistError e then return Nothing else ioError e
@@ -222,4 +219,4 @@ parseTestFile parsedModules moduleName path = do
                         Right testModule -> do
                             modifyIORef parsedModules (( absPath, testModule ) : )
                             return $ Right testModule
-                Nothing -> return $ Left $ ModuleNotFound moduleName
+                Nothing -> return $ Left $ maybe (FileNotFound path) ModuleNotFound mbModuleName
