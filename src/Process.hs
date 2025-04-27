@@ -23,6 +23,7 @@ import qualified Data.Text as T
 import qualified Data.Text.IO as T
 
 import System.Directory
+import System.Environment
 import System.Exit
 import System.FilePath
 import System.IO
@@ -104,10 +105,11 @@ spawnOn target pname killWith cmd = do
 
     let netns = either getNetns getNetns target
     let prefix = T.unpack $ "ip netns exec \"" <> textNetnsName netns <> "\" "
+    currentEnv <- liftIO $ getEnvironment
     (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd')
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
         , cwd = Just (either netDir nodeDir target)
-        , env = Just [ ( "EREBOS_DIR", "." ) ]
+        , env = Just $ ( "EREBOS_DIR", "." ) : currentEnv
         }
     pout <- liftIO $ newTVarIO []
 
