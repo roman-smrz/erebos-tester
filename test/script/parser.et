@@ -1,0 +1,7 @@
+module parser
+
+test ModuleNotFound:
+    spawn as p 
+    with p:
+        send "load non-existing-file.et"
+        expect /load-failed file-not-found .*/

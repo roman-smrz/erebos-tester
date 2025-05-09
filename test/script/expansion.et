@@ -1,0 +1,15 @@
+module expansion
+
+asset expansion:
+    path: ../asset/expansion.et
+
+test VariableExpansion:
+    spawn as p
+    with p:
+        send "load ${expansion.path}"
+        expect /load-done/
+        send "run VariableExpansion"
+        for str in [ "1", "1.3", "abc", "abc" ]:
+            expect /child-stdout p $str/
+            expect /match p $str/
+        expect /run-done/
