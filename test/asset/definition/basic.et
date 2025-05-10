@@ -1,0 +1,22 @@
+def expr_def = 4
+
+def fun_expr_def (x) = x + 5
+
+def test_def (n):
+    shell as p on n:
+	echo $expr_def
+
+    expect from p:
+	/4/
+
+def fun_test_def (n) first x:
+    shell as p on n:
+	echo ${expr_def + x}
+
+    expect from p:
+	/${4 + x}/
+
+test Test:
+    node n
+    test_def (n)
+    fun_test_def (n) first 7

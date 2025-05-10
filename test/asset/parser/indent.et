@@ -1,0 +1,41 @@
+def x1s:
+ wait
+
+def x2s:
+  wait
+
+def x4s:
+    wait
+
+def x8s:
+        wait
+
+def x16s:
+                wait
+
+def x1t:
+	wait
+
+def x2t:
+		wait
+
+export def e1s:
+ wait
+
+export def e2s:
+  wait
+
+export def e4s:
+    wait
+
+export def e8s:
+        wait
+
+export def e16s:
+                wait
+
+export def e1t:
+	wait
+
+export def e2t:
+		wait

@@ -1,0 +1,18 @@
+module definition
+
+asset scripts:
+    path: ../asset/definition
+
+test Definition:
+    spawn as p 
+    with p:
+        send "load ${scripts.path}/basic.et"
+        expect /load-done/
+
+        send "run Test"
+        expect /child-stdout p 4/
+        expect /match p 4/
+        expect /child-stdout p 11/
+        expect /match p 11/
+        expect /(.*)/ capture done
+        guard (done == "run-done")

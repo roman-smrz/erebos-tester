@@ -49,9 +49,9 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
         wsymbol "test"
         lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
 
-parseDefinition :: TestParser ( VarName, SomeExpr )
-parseDefinition = label "symbol definition" $ do
-    def@( name, expr ) <- localState $ L.indentBlock scn $ do
+parseDefinition :: Pos -> TestParser ( VarName, SomeExpr )
+parseDefinition href = label "symbol definition" $ do
+    def@( name, expr ) <- localState $ do
         wsymbol "def"
         name <- varName
         argsDecl <- functionArguments (\off _ -> return . ( off, )) varName mzero (\_ -> return . VarName)
@@ -59,19 +59,20 @@ parseDefinition = label "symbol definition" $ do
             tvar <- newTypeVar
             modify $ \s -> s { testVars = ( vname, ( LocalVarName vname, ExprTypeVar tvar )) : testVars s }
             return ( off, vname, tvar )
-        choice
+        SomeExpr expr <- choice
             [ do
                 osymbol ":"
-                let finish steps = do
-                        atypes' <- getInferredTypes atypes
-                        ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs (mconcat steps)
-                return $ L.IndentSome Nothing finish testStep
+                scn
+                ref <- L.indentGuard scn GT href
+                SomeExpr <$> blockOf ref testStep
             , do
                 osymbol "="
-                SomeExpr (expr :: Expr e) <- someExpr
-                atypes' <- getInferredTypes atypes
-                L.IndentNone . ( name, ) . SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs expr
+                someExpr <* eol
             ]
+        scn
+        atypes' <- getInferredTypes atypes
+        sexpr <- SomeExpr . ArgsReq atypes' . FunctionAbstraction <$> replaceDynArgs expr
+        return ( name, sexpr )
     modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
     return def
   where
@@ -100,13 +101,13 @@ parseDefinition = label "symbol definition" $ do
                 replaceArgs (SomeExpr e) = SomeExpr (go unif e)
             e -> e
 
-parseAsset :: TestParser ( VarName, SomeExpr )
-parseAsset = label "asset definition" $ do
+parseAsset :: Pos -> TestParser ( VarName, SomeExpr )
+parseAsset href = label "asset definition" $ do
     wsymbol "asset"
     name <- varName
     osymbol ":"
     void eol
-    ref <- L.indentGuard scn GT pos1
+    ref <- L.indentGuard scn GT href
 
     wsymbol "path"
     osymbol ":"
@@ -126,10 +127,11 @@ parseAsset = label "asset definition" $ do
 
 parseExport :: TestParser [ Toplevel ]
 parseExport = label "export declaration" $ toplevel id $ do
+    ref <- L.indentLevel
     wsymbol "export"
     choice
       [ do
-        def@( name, _ ) <- parseDefinition <|> parseAsset
+        def@( name, _ ) <- parseDefinition ref <|> parseAsset ref
         return [ ToplevelDefinition def, ToplevelExport name ]
       , do
         names <- listOf varName
@@ -164,8 +166,8 @@ parseTestModule absPath = do
     modify $ \s -> s { testCurrentModuleName = moduleName }
     toplevels <- fmap concat $ many $ choice
         [ (: []) <$> parseTestDefinition
-        , (: []) <$> toplevel ToplevelDefinition parseDefinition
-        , (: []) <$> toplevel ToplevelDefinition parseAsset
+        , (: []) <$> toplevel ToplevelDefinition (parseDefinition pos1)
+        , (: []) <$> toplevel ToplevelDefinition (parseAsset pos1)
         , parseExport
         , parseImport
         ]

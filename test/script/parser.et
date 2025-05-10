@@ -1,7 +1,13 @@
 module parser
 
-test ModuleNotFound:
+asset scripts:
+    path: ../asset/parser
+
+test Parser:
     spawn as p 
     with p:
         send "load non-existing-file.et"
         expect /load-failed file-not-found .*/
+
+        send "load ${scripts.path}/indent.et"
+        expect /load-done/
