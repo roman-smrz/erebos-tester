@@ -196,6 +196,15 @@ Members:
 `node`
 : Node on which the process is running.
 
+#### asset
+
+Represents an asset (file or directory), which can be used during test execution.
+
+Members:
+
+`path`
+: Path to the asset valid during the test execution.
+
 #### list
 
 Lists are written using bracket notation:
@@ -422,6 +431,31 @@ module bar.baz
 
 import foo
 ```
+
+### Assets
+
+To provide the used test tool with access to auxiliary files needed for the
+test execution, asset objects can be defined. The definition is done on the
+toplevel using the `asset` keyword, giving the asset object name and a path to
+the asset on the filesystem, relative to the directory containing the test
+script:
+
+```
+asset my_asset:
+    path: ../path/to/file
+```
+
+Such defined asset object can then be used in expressions within tests or function definitions:
+
+```
+test:
+    spawn p
+    send to p "use-asset ${my_asset.path}"
+```
+
+The `my_asset.path` expression expands to a strict containing path to the asset
+that can be used by the spawn process `p`. The process should not try to modify
+the file.
 
 
 Optional dependencies
