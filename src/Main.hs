@@ -123,15 +123,21 @@ main = do
             }
 
     args <- getArgs
-    (opts, ofiles) <- case getOpt Permute (options ++ hiddenOptions) args of
+    (opts, oselection) <- case getOpt Permute (options ++ hiddenOptions) args of
         (o, files, []) -> return (foldl (flip id) initOpts o, files)
         (_, _, errs) -> do
             hPutStrLn stderr $ concat errs <> "Try `erebos-tester --help' for more information."
             exitFailure
 
+    let ( ofiles, otests )
+            | any (any isPathSeparator) oselection = ( oselection, [] )
+            | otherwise = ( [], map T.pack oselection )
+
     when (optShowHelp opts) $ do
         let header = unlines
-                [ "Usage: erebos-tester [<option>...] [<script>[:<test>]...]"
+                [ "Usage: erebos-tester [<option>...] [<test-name>...]"
+                , "   or: erebos-tester [<option>...] <script>[:<test>]..."
+                , "  <test-name> name of a test from project configuration"
                 , "  <script>    path to test script file"
                 , "  <test>      name of the test to run"
                 , ""
@@ -182,21 +188,30 @@ main = do
                     putStrLn (showErrorComponent err)
             exitFailure
 
-    tests <- forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
-        case mbTestName of
-            Nothing -> return moduleTests
-            Just name
-                | Just test <- find ((==name) . testName) moduleTests
-                -> return [ test ]
+    tests <- if null otests
+        then fmap concat $ forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
+            case mbTestName of
+                Nothing -> return moduleTests
+                Just name
+                    | Just test <- find ((name ==) . testName) moduleTests
+                    -> return [ test ]
+                    | otherwise
+                    -> do
+                        hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found in ‘" <> filePath <> "’"
+                        exitFailure
+        else forM otests $ \name -> if
+                | Just test <- find ((name ==) . testName) $ concatMap moduleTests modules
+                -> return test
                 | otherwise
                 -> do
-                    hPutStrLn stderr $ "Test `" <> T.unpack name <> "' not found in `" <> filePath <> "'"
+                    hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found"
                     exitFailure
+
 
     let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
 
     ok <- allM (runTest out (optTest opts) globalDefs) $
-        concat $ replicate (optRepeat opts) $ concat tests
+        concat $ replicate (optRepeat opts) tests
     when (not ok) exitFailure
 
 foreign export ccall testerMain :: IO ()

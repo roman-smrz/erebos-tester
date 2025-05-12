@@ -56,14 +56,26 @@ cmake --build build
 erebos-tester --verbose
 ```
 
-To run tests from a given test file, pass it as command-line argument:
+To run all tests from project configuration (see below), run the tester without any argument:
 ```
-erebos-tester path/to/script.test
+erebos-tester
+```
+
+To run only some named tests, list the names on command line:
+```
+erebos-tester FirstTest SecondTest
+```
+
+To run tests from a given test file, pass it as command-line argument (the path
+must contain a slash, so use e.g. `./script.et` for script in the current
+directory):
+```
+erebos-tester path/to/script.et
 ```
 
 To select single test from a file, use `:` separator:
 ```
-erebos-tester path/to/script.test:TestName
+erebos-tester path/to/script.et:TestName
 ```
 
 Configuration
