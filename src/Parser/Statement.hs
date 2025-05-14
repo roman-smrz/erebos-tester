@@ -98,12 +98,6 @@ shellStatement = do
         , do
             off <- stateOffset <$> getParserState
             symbol ":"
-            pname <- case mbpname of
-                Just pname -> return pname
-                Nothing -> do
-                    registerParseError $ FancyError off $ S.singleton $ ErrorFail $
-                        "missing parameter with keyword ‘as’"
-                    return $ TypedVarName (VarName "")
             node <- case mbnode of
                 Just node -> return node
                 Nothing -> do
@@ -115,8 +109,10 @@ shellStatement = do
             void $ L.indentGuard scn GT ref
             script <- shellScript
             cont <- testBlock ref
+            let expr | Just pname <- mbpname = LambdaAbstraction pname cont
+                     | otherwise = const <$> cont
             return $ TestBlockStep EmptyTestBlock <$>
-                (SpawnShell pname <$> node <*> script <*> LambdaAbstraction pname cont)
+                (SpawnShell mbpname <$> node <*> script <*> expr)
         ]
 
 exprStatement :: TestParser (Expr (TestBlock ()))

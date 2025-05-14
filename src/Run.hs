@@ -132,7 +132,9 @@ evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
             withProcess (Right node) pname Nothing tool $ evalBlock . inner
 
-    SpawnShell (TypedVarName (VarName tname)) node script inner -> do
+    SpawnShell mbname node script inner -> do
+        let tname | Just (TypedVarName (VarName name)) <- mbname = name
+                  | otherwise = "shell"
         let pname = ProcName tname
         withShellProcess node pname script $ evalBlock . inner
 
