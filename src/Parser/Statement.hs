@@ -74,17 +74,50 @@ shellStatement :: TestParser (Expr (TestBlock ()))
 shellStatement = do
     ref <- L.indentLevel
     wsymbol "shell"
-    wsymbol "as"
-    pname <- newVarName
-    wsymbol "on"
-    node <- typedExpr
-    symbol ":"
-    void eol
-    void $ L.indentGuard scn GT ref
-    script <- shellScript
-    cont <- testBlock ref
-    return $ TestBlockStep EmptyTestBlock <$>
-        (SpawnShell pname <$> node <*> script <*> LambdaAbstraction pname cont)
+    parseParams ref Nothing Nothing
+
+  where
+    parseParamKeyword kw prev = do
+        off <- stateOffset <$> getParserState
+        wsymbol kw
+        when (isJust prev) $ do
+            registerParseError $ FancyError off $ S.singleton $ ErrorFail $
+                "unexpected parameter with keyword ‘" <> kw <> "’"
+
+    parseParams ref mbpname mbnode = choice
+        [ do
+            parseParamKeyword "as" mbpname
+            pname <- newVarName
+            parseParams ref (Just pname) mbnode
+
+        , do
+            parseParamKeyword "on" mbnode
+            node <- typedExpr
+            parseParams ref mbpname (Just node)
+
+        , do
+            off <- stateOffset <$> getParserState
+            symbol ":"
+            pname <- case mbpname of
+                Just pname -> return pname
+                Nothing -> do
+                    registerParseError $ FancyError off $ S.singleton $ ErrorFail $
+                        "missing parameter with keyword ‘as’"
+                    return $ TypedVarName (VarName "")
+            node <- case mbnode of
+                Just node -> return node
+                Nothing -> do
+                    registerParseError $ FancyError off $ S.singleton $ ErrorFail $
+                        "missing parameter with keyword ‘on’"
+                    return $ Undefined ""
+
+            void eol
+            void $ L.indentGuard scn GT ref
+            script <- shellScript
+            cont <- testBlock ref
+            return $ TestBlockStep EmptyTestBlock <$>
+                (SpawnShell pname <$> node <*> script <*> LambdaAbstraction pname cont)
+        ]
 
 exprStatement :: TestParser (Expr (TestBlock ()))
 exprStatement = do

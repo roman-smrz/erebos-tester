@@ -394,7 +394,7 @@ checkFunctionArguments (FunctionArguments argTypes) poff kw sexpr@(SomeExpr expr
         Nothing -> do
             registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
                 case kw of
-                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword `" <> tkw <> "'"
+                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword ‘" <> tkw <> "’"
                     Nothing                    -> "unexpected parameter"
             return sexpr
 
