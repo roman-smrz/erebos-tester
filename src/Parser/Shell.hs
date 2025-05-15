@@ -22,6 +22,7 @@ import Script.Shell
 parseArgument :: TestParser (Expr Text)
 parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)) (Pure [])) $ some $ choice
     [ doubleQuotedString
+    , singleQuotedString
     , escapedChar
     , stringExpansion
     , unquotedString
@@ -43,6 +44,10 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
                 , (:) <$> stringExpansion <*> inner
                 ]
         App AnnNone (Pure T.concat) . foldr (liftA2 (:)) (Pure []) <$> inner
+
+    singleQuotedString :: TestParser (Expr Text)
+    singleQuotedString = do
+        Pure . TL.toStrict <$> (char '\'' *> takeWhileP Nothing (/= '\'') <* char '\'')
 
     escapedChar :: TestParser (Expr Text)
     escapedChar = do
