@@ -243,11 +243,12 @@ node <name> [on <network>]
 Create a node on network `<network>` (or context network if omitted) and assign the new node to the variable `<name>`.
 
 ```
-spawn as <name> [on (<node> | <network>)]
+spawn as <name> [on (<node> | <network>)] [args <arguments>]
 ```
 
 Spawn a new test process on `<node>` or `<network>` (or one from context) and assign the new process to variable `<name>`.
 When spawning on network, create a new node for this process.
+Extra `<arguments>` to the tool can be given as a list of strings using the `args` keyword.
 
 The process is terminated when the variable `<name>` goes out of scope (at the end of the block in which it was created) by closing its stdin.
 When the process fails to terminate successfully within a timeout, the test fails.

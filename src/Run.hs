@@ -121,7 +121,7 @@ evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
     DeclNode name net inner -> do
         withNode net (Left name) $ evalBlock . inner
 
-    Spawn tvname@(TypedVarName (VarName tname)) target inner -> do
+    Spawn tvname@(TypedVarName (VarName tname)) target args inner -> do
         case target of
             Left net -> withNode net (Right tvname) go
             Right node -> go node
@@ -130,7 +130,9 @@ evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
             opts <- asks $ teOptions . fst
             let pname = ProcName tname
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-            withProcess (Right node) pname Nothing tool $ evalBlock . inner
+                cmd = unwords $ tool : map (T.unpack . escape) args
+                escape = ("'" <>) . (<> "'") . T.replace "'" "'\\''"
+            withProcess (Right node) pname Nothing cmd $ evalBlock . inner
 
     SpawnShell mbname node script inner -> do
         let tname | Just (TypedVarName (VarName name)) <- mbname = name
