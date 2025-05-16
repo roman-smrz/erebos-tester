@@ -1,5 +1,12 @@
 # Revision history for erebos-tester
 
+## 0.3.2 -- 2025-05-16
+
+* Asset files and directories for use during tests
+* Select tests from project configuration using only test name on command line without script path
+* Added `args` parameter to `spawn` command to pass extra command-line arguments to the spawned tool
+* Experimental shell interpreter
+
 ## 0.3.1 -- 2025-03-03
 
 * Fix executing test tool given with relative path
