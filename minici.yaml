@@ -1,3 +1,13 @@
 job build:
   shell:
     - cabal build -fci --constraint='megaparsec >= 9.7.0'
+    - mkdir build
+    - cp $(cabal list-bin erebos-tester) build/erebos-tester
+  artifact bin:
+    path: build/erebos-tester
+
+job test:
+  uses:
+    - build.bin
+  shell:
+    - EREBOS_TEST_TOOL='build/erebos-tester --test-mode' erebos-tester --verbose
