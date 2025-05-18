@@ -466,9 +466,17 @@ test:
     send to p "use-asset ${my_asset.path}"
 ```
 
-The `my_asset.path` expression expands to a strict containing path to the asset
-that can be used by the spawn process `p`. The process should not try to modify
-the file.
+The `my_asset.path` expression expands to a string containing path to the asset
+that can be used by the spawned process `p`. The process should not try to
+modify the file.
+
+Assets can be exported for use in other modules using the `export` keyword,
+just like other definitions:
+
+```
+export asset my_asset:
+    path: ../path/to/file
+```
 
 
 Optional dependencies
