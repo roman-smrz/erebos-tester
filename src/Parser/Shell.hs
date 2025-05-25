@@ -3,6 +3,7 @@ module Parser.Shell (
     shellScript,
 ) where
 
+import Control.Applicative (liftA2)
 import Control.Monad
 
 import Data.Char
