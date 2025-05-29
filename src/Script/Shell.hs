@@ -33,8 +33,8 @@ data ShellStatement = ShellStatement
 newtype ShellScript = ShellScript [ ShellStatement ]
 
 
-executeScript :: Node -> ProcName -> Handle -> Handle -> Handle -> ShellScript -> TestRun ()
-executeScript node pname pstdin pstdout pstderr (ShellScript statements) = do
+executeScript :: Node -> ProcName -> MVar ExitCode -> Handle -> Handle -> Handle -> ShellScript -> TestRun ()
+executeScript node _ statusVar pstdin pstdout pstderr (ShellScript statements) = do
     forM_ statements $ \ShellStatement {..} -> case shellCommand of
         "echo" -> liftIO $ do
             T.hPutStrLn pstdout $ T.intercalate " " shellArguments
@@ -50,9 +50,10 @@ executeScript node pname pstdin pstdout pstderr (ShellScript statements) = do
                     }
             liftIO (waitForProcess phandle) >>= \case
                 ExitSuccess -> return ()
-                ExitFailure code -> do
-                    outLine OutputChildFail (Just $ textProcName pname) $ T.pack $ "exit code: " ++ show code
+                status -> do
+                    liftIO $ putMVar statusVar status
                     throwError Failed
+    liftIO $ putMVar statusVar ExitSuccess
 
 spawnShell :: Node -> ProcName -> ShellScript -> TestRun Process
 spawnShell procNode procName script = do
@@ -62,8 +63,7 @@ spawnShell procNode procName script = do
     ( hout, pstdout ) <- liftIO $ createPipe
     ( herr, pstderr ) <- liftIO $ createPipe
     procHandle <- fmap (Right . (, statusVar)) $ forkTest $ do
-        executeScript procNode procName pstdin pstdout pstderr script
-        liftIO $ putMVar statusVar ExitSuccess
+        executeScript procNode procName statusVar pstdin pstdout pstderr script
 
     let procKillWith = Nothing
     let process = Process {..}
