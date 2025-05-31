@@ -23,18 +23,20 @@ import Network
 import Output
 import Process
 import Run.Monad
+import Script.Var
 
 
 data ShellStatement = ShellStatement
     { shellCommand :: Text
     , shellArguments :: [ Text ]
+    , shellSourceLine :: SourceLine
     }
 
 newtype ShellScript = ShellScript [ ShellStatement ]
 
 
 executeScript :: Node -> ProcName -> MVar ExitCode -> Handle -> Handle -> Handle -> ShellScript -> TestRun ()
-executeScript node _ statusVar pstdin pstdout pstderr (ShellScript statements) = do
+executeScript node pname statusVar pstdin pstdout pstderr (ShellScript statements) = do
     forM_ statements $ \ShellStatement {..} -> case shellCommand of
         "echo" -> liftIO $ do
             T.hPutStrLn pstdout $ T.intercalate " " shellArguments
@@ -51,6 +53,7 @@ executeScript node _ statusVar pstdin pstdout pstderr (ShellScript statements) =
             liftIO (waitForProcess phandle) >>= \case
                 ExitSuccess -> return ()
                 status -> do
+                    outLine OutputChildFail (Just $ textProcName pname) $ "failed at: " <> textSourceLine shellSourceLine
                     liftIO $ putMVar statusVar status
                     throwError Failed
     liftIO $ putMVar statusVar ExitSuccess

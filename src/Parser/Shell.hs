@@ -67,11 +67,13 @@ parseArguments = foldr (liftA2 (:)) (Pure []) <$> many parseArgument
 
 shellStatement :: TestParser (Expr [ ShellStatement ])
 shellStatement = label "shell statement" $ do
+    line <- getSourceLine
     command <- parseArgument
     args <- parseArguments
     return $ fmap (: []) $ ShellStatement
         <$> command
         <*> args
+        <*> pure line
 
 shellScript :: TestParser (Expr ShellScript)
 shellScript = do
