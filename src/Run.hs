@@ -105,7 +105,10 @@ runTest out opts gdefs test = do
         (Right (), Nothing) -> do
             when (not $ optKeep opts) $ removeDirectoryRecursive testDir
             return True
-        _ -> return False
+        _ -> do
+            flip runReaderT out $ do
+                void $ outLine OutputError Nothing $ "Test ‘" <> testName test <> "’ failed."
+            return False
 
 
 evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
