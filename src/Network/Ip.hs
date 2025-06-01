@@ -17,6 +17,7 @@ module Network.Ip (
     NetworkNamespace,
     HasNetns(..),
     addNetworkNamespace,
+    setNetworkNamespace,
     textNetnsName,
     callOn,
 
@@ -33,6 +34,7 @@ module Network.Ip (
 ) where
 
 import Control.Concurrent.STM
+import Control.Exception
 import Control.Monad
 import Control.Monad.Writer
 
@@ -42,6 +44,11 @@ import Data.Text qualified as T
 import Data.Typeable
 import Data.Word
 
+import Foreign.C.Error
+import Foreign.C.Types
+
+import System.Posix.IO
+import System.Posix.Types
 import System.Process
 
 newtype IpPrefix = IpPrefix [Word8]
@@ -121,6 +128,19 @@ addNetworkNamespace netnsName = do
     netnsRoutesConfigured <- liftSTM $ newTVar []
     netnsRoutesActive <- liftSTM $ newTVar []
     return $ NetworkNamespace {..}
+
+setNetworkNamespace :: MonadIO m => NetworkNamespace -> m ()
+setNetworkNamespace netns = liftIO $ do
+    let path = "/var/run/netns/" <> T.unpack (textNetnsName netns)
+        open = openFd path ReadOnly defaultFileFlags { cloexec = True }
+    res <- bracket open closeFd $ \(Fd fd) -> do
+        c_setns fd c_CLONE_NEWNET
+    when (res /= 0) $ do
+        throwErrno "setns failed"
+
+foreign import ccall unsafe "sched.h setns" c_setns :: CInt -> CInt -> IO CInt
+c_CLONE_NEWNET :: CInt
+c_CLONE_NEWNET = 0x40000000
 
 textNetnsName :: NetworkNamespace -> Text
 textNetnsName = netnsName

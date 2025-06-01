@@ -7,6 +7,7 @@ module Run.Monad (
 
     finally,
     forkTest,
+    forkTestUsing,
 ) where
 
 import Control.Concurrent
@@ -110,9 +111,12 @@ finally act handler = do
     return x
 
 forkTest :: TestRun () -> TestRun ThreadId
-forkTest act = do
+forkTest = forkTestUsing forkIO
+
+forkTestUsing :: (IO () -> IO ThreadId) -> TestRun () -> TestRun ThreadId
+forkTestUsing fork act = do
     tenv <- ask
-    liftIO $ forkIO $ do
+    liftIO $ fork $ do
         runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
             Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
             Right () -> return ()

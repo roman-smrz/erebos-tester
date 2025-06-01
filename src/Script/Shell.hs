@@ -20,6 +20,7 @@ import System.IO
 import System.Process hiding (ShellCommand)
 
 import Network
+import Network.Ip
 import Output
 import Process
 import Run.Monad
@@ -37,6 +38,7 @@ newtype ShellScript = ShellScript [ ShellStatement ]
 
 executeScript :: Node -> ProcName -> MVar ExitCode -> Handle -> Handle -> Handle -> ShellScript -> TestRun ()
 executeScript node pname statusVar pstdin pstdout pstderr (ShellScript statements) = do
+    setNetworkNamespace $ getNetns node
     forM_ statements $ \ShellStatement {..} -> case shellCommand of
         "echo" -> liftIO $ do
             T.hPutStrLn pstdout $ T.intercalate " " shellArguments
@@ -65,7 +67,7 @@ spawnShell procNode procName script = do
     ( pstdin, procStdin ) <- liftIO $ createPipe
     ( hout, pstdout ) <- liftIO $ createPipe
     ( herr, pstderr ) <- liftIO $ createPipe
-    procHandle <- fmap (Right . (, statusVar)) $ forkTest $ do
+    procHandle <- fmap (Right . (, statusVar)) $ forkTestUsing forkOS $ do
         executeScript procNode procName statusVar pstdin pstdout pstderr script
 
     let procKillWith = Nothing
