@@ -1,0 +1,4 @@
+test ExpectEcho:
+    spawn as p
+    send "abcdef" to p
+    expect /abcdef/ from p

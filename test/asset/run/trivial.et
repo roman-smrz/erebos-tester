@@ -1,0 +1,7 @@
+test AlwaysSucceeds:
+    node n
+    guard (1 == 1)
+
+test AlwaysFails:
+    node n
+    guard (1 == 0)

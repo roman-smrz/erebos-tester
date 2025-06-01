@@ -2,27 +2,23 @@ module Main (main) where
 
 import Control.Monad
 
-import Data.Bifunctor
 import Data.List
 import Data.Maybe
 import Data.Text qualified as T
 
 import Text.Read (readMaybe)
-import Text.Megaparsec (errorBundlePretty, showErrorComponent)
 
 import System.Console.GetOpt
 import System.Directory
 import System.Environment
 import System.Exit
 import System.FilePath
-import System.FilePath.Glob
 import System.IO
 import System.Posix.Terminal
 import System.Posix.Types
 
 import Config
 import Output
-import Parser
 import Process
 import Run
 import Script.Module
@@ -108,9 +104,8 @@ hiddenOptions =
 
 main :: IO ()
 main = do
-    configPath <- findConfig
-    config <- mapM parseConfig configPath
-    let baseDir = maybe "." dropFileName configPath
+    config <- mapM parseConfig =<< findConfig
+    let baseDir = maybe "." configDir config
 
     envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool ->
         return $ fromMaybe (error "No test tool defined") $ mbtool `mplus` (return . (baseDir </>) =<< configTool =<< config)
@@ -151,7 +146,7 @@ main = do
         exitSuccess
 
     when (optTestMode opts) $ do
-        testMode
+        testMode config
         exitSuccess
 
     case words $ optDefaultTool $ optTest opts of
@@ -165,7 +160,7 @@ main = do
             case span (/= ':') ofile of
                 (path, ':':test) -> (path, Just $ T.pack test)
                 (path, _)        -> (path, Nothing)
-        else map (, Nothing) . concat <$> mapM (flip globDir1 baseDir) (maybe [] configTests config)
+        else map (, Nothing) <$> maybe (return []) (getConfigTestFiles) config
 
     when (null files) $ fail $ "No test files"
 
@@ -177,17 +172,7 @@ main = do
             | otherwise       = OutputStyleQuiet
     out <- startOutput outputStyle useColor
 
-    ( modules, allModules ) <- parseTestFiles (map fst files) >>= \case
-        Right res -> do
-            return res
-        Left err -> do
-            case err of
-                ImportModuleError bundle ->
-                    putStr (errorBundlePretty bundle)
-                _ -> do
-                    putStrLn (showErrorComponent err)
-            exitFailure
-
+    ( modules, globalDefs ) <- loadModules (map fst files)
     tests <- if null otests
         then fmap concat $ forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
             case mbTestName of
@@ -206,9 +191,6 @@ main = do
                 -> do
                     hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found"
                     exitFailure
-
-
-    let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
 
     ok <- allM (runTest out (optTest opts) globalDefs) $
         concat $ replicate (optRepeat opts) tests

@@ -1,0 +1,2 @@
+tests: ./scripts/**/*.et
+tool: ./tools/tool

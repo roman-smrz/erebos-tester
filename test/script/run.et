@@ -1,0 +1,47 @@
+module run
+
+asset scripts:
+    path: ../asset/run
+
+test TrivialRun:
+    spawn as p 
+    with p:
+        send "load ${scripts.path}/trivial.et"
+        expect /load-done/
+
+        send "run AlwaysSucceeds"
+        local:
+            expect /(run-.*)/ capture done
+            guard (done == "run-done")
+
+        send "run AlwaysFails"
+        local:
+            expect /match-fail .*/
+            expect /(run-.*)/ capture done
+            guard (done == "run-failed")
+
+
+test RunConfig:
+    node n
+    shell on n:
+        cp ${scripts.path}/erebos-tester.yaml .
+        mkdir tools
+        cp ${scripts.path}/tools/echo.sh ./tools/tool
+        mkdir scripts
+        # TODO: it seems that namespaces are not properly cleaned up after the failed test
+        #cp ${scripts.path}/trivial.et ./scripts/
+        cp ${scripts.path}/echo.et ./scripts/
+
+    spawn as p on n
+
+    with p:
+        send "load-config"
+        expect /load-config-done/
+        send "run-all"
+        #expect /run-test-result AlwaysSucceeds done/
+        #expect /run-test-result AlwaysFails failed/
+        expect /child-stdin p abcdef/
+        expect /child-stdout p abcdef/
+        expect /match p abcdef/
+        expect /run-test-result ExpectEcho done/
+        expect /run-all-done/

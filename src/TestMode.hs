@@ -4,12 +4,14 @@ module TestMode (
     testMode,
 ) where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 
 import Data.Bifunctor
 import Data.List
+import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -19,6 +21,7 @@ import System.IO.Error
 import Text.Megaparsec.Error
 import Text.Megaparsec.Pos
 
+import Config
 import Output
 import Parser
 import Run
@@ -29,29 +32,32 @@ import Test
 
 data TestModeInput = TestModeInput
     { tmiOutput :: Output
+    , tmiConfig :: Maybe Config
     , tmiParams :: [ Text ]
     }
 
 data TestModeState = TestModeState
     { tmsModules :: [ Module ]
     , tmsGlobals :: GlobalDefs
+    , tmsNextTestNumber :: Int
     }
 
 initTestModeState :: TestModeState
 initTestModeState = TestModeState
     { tmsModules = mempty
     , tmsGlobals = mempty
+    , tmsNextTestNumber = 1
     }
 
-testMode :: IO ()
-testMode = do
-    out <- startOutput OutputStyleTest False
+testMode :: Maybe Config -> IO ()
+testMode tmiConfig = do
+    tmiOutput <- startOutput OutputStyleTest False
     let testLoop = getLineMb >>= \case
             Just line -> do
                 case T.words line of
-                    cname : params
+                    cname : tmiParams
                         | Just (CommandM cmd) <- lookup cname commands -> do
-                            runReaderT cmd $ TestModeInput out params
+                            runReaderT cmd $ TestModeInput {..}
                         | otherwise -> fail $ "Unknown command '" ++ T.unpack cname ++ "'"
                     [] -> return ()
                 testLoop
@@ -59,7 +65,7 @@ testMode = do
             Nothing -> return ()
 
     runExceptT (evalStateT testLoop initTestModeState) >>= \case
-        Left err -> flip runReaderT out $ outLine OutputError Nothing $ T.pack err
+        Left err -> flip runReaderT tmiOutput $ outLine OutputError Nothing $ T.pack err
         Right () -> return ()
 
 getLineMb :: MonadIO m => m (Maybe Text)
@@ -69,6 +75,25 @@ cmdOut :: Text -> Command
 cmdOut line = do
     out <- asks tmiOutput
     flip runReaderT out $ outLine OutputTestRaw Nothing line
+
+getNextTestNumber :: CommandM Int
+getNextTestNumber = do
+    num <- gets tmsNextTestNumber
+    modify $ \s -> s { tmsNextTestNumber = num + 1 }
+    return num
+
+runSingleTest :: Test -> CommandM Bool
+runSingleTest test = do
+    out <- asks tmiOutput
+    num <- getNextTestNumber
+    globals <- gets tmsGlobals
+    mbconfig <- asks tmiConfig
+    let opts = defaultTestOptions
+            { optDefaultTool = fromMaybe "" $ configTool =<< mbconfig
+            , optTestDir = ".test" <> show num
+            , optKeep = True
+            }
+    liftIO (runTest out opts globals test)
 
 
 newtype CommandM a = CommandM (ReaderT TestModeInput (StateT TestModeState (ExceptT String IO)) a)
@@ -85,7 +110,9 @@ type Command = CommandM ()
 commands :: [ ( Text, Command ) ]
 commands =
     [ ( "load", cmdLoad )
+    , ( "load-config", cmdLoadConfig )
     , ( "run", cmdRun )
+    , ( "run-all", cmdRunAll )
     ]
 
 cmdLoad :: Command
@@ -117,6 +144,16 @@ cmdLoad = do
         , ":", show $ unPos sourceColumn
         ]
 
+cmdLoadConfig :: Command
+cmdLoadConfig = do
+    Just config <- asks tmiConfig
+    ( modules, globalDefs ) <- liftIO $ loadModules =<< getConfigTestFiles config
+    modify $ \s -> s
+        { tmsModules = modules
+        , tmsGlobals = globalDefs
+        }
+    cmdOut "load-config-done"
+
 cmdRun :: Command
 cmdRun = do
     [ name ] <- asks tmiParams
@@ -124,7 +161,14 @@ cmdRun = do
     case find ((name ==) . testName) $ concatMap moduleTests tmsModules of
         Nothing -> cmdOut "run-not-found"
         Just test -> do
-            out <- asks tmiOutput
-            liftIO (runTest out defaultTestOptions tmsGlobals test) >>= \case
+            runSingleTest test >>= \case
                 True -> cmdOut "run-done"
                 False -> cmdOut "run-failed"
+
+cmdRunAll :: Command
+cmdRunAll = do
+    TestModeState {..} <- get
+    forM_ (concatMap moduleTests tmsModules) $ \test -> do
+        res <- runSingleTest test
+        cmdOut $ "run-test-result " <> testName test <> " " <> (if res then "done" else "failed")
+    cmdOut "run-all-done"

@@ -1,6 +1,7 @@
 module Run (
     module Run.Monad,
     runTest,
+    loadModules,
     evalGlobalDefs,
 ) where
 
@@ -12,12 +13,14 @@ import Control.Monad.Except
 import Control.Monad.Fix
 import Control.Monad.Reader
 
+import Data.Bifunctor
 import Data.Map qualified as M
 import Data.Maybe
-import Data.Set qualified as S
 import Data.Scientific
+import Data.Set qualified as S
 import Data.Text (Text)
-import qualified Data.Text as T
+import Data.Text qualified as T
+import Text.Megaparsec (errorBundlePretty, showErrorComponent)
 
 import System.Directory
 import System.Exit
@@ -30,12 +33,15 @@ import GDB
 import Network
 import Network.Ip
 import Output
+import Parser
 import Process
 import Run.Monad
 import Script.Expr
+import Script.Module
 import Script.Shell
 import Test
 import Test.Builtins
+
 
 runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool
 runTest out opts gdefs test = do
@@ -109,6 +115,22 @@ runTest out opts gdefs test = do
             flip runReaderT out $ do
                 void $ outLine OutputError Nothing $ "Test ‘" <> testName test <> "’ failed."
             return False
+
+
+loadModules :: [ FilePath ] -> IO ( [ Module ], GlobalDefs )
+loadModules files = do
+    ( modules, allModules ) <- parseTestFiles files >>= \case
+        Right res -> do
+            return res
+        Left err -> do
+            case err of
+                ImportModuleError bundle ->
+                    putStr (errorBundlePretty bundle)
+                _ -> do
+                    putStrLn (showErrorComponent err)
+            exitFailure
+    let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
+    return ( modules, globalDefs )
 
 
 evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs

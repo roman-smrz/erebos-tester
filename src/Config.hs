@@ -2,6 +2,7 @@ module Config (
     Config(..),
     findConfig,
     parseConfig,
+    getConfigTestFiles,
 ) where
 
 import Control.Monad.Combinators
@@ -16,31 +17,21 @@ import System.FilePath
 import System.FilePath.Glob
 
 data Config = Config
-    { configTool :: Maybe FilePath
+    { configDir :: FilePath
+    , configTool :: Maybe FilePath
     , configTests :: [Pattern]
     }
     deriving (Show)
 
-instance Semigroup Config where
-    a <> b = Config
-        { configTool = maybe (configTool b) Just (configTool a)
-        , configTests = configTests a ++ configTests b
-        }
-
-instance Monoid Config where
-    mempty = Config
-        { configTool = Nothing
-        , configTests = []
-        }
-
-instance FromYAML Config where
-    parseYAML = withMap "Config" $ \m -> Config
-        <$> (fmap T.unpack <$> m .:? "tool")
-        <*> (map (compile . T.unpack) <$> foldr1 (<|>)
+instance FromYAML (FilePath -> Config) where
+    parseYAML = withMap "Config" $ \m -> do
+        configTool <- (fmap T.unpack <$> m .:? "tool")
+        configTests <- (map (compile . T.unpack) <$> foldr1 (<|>)
                 [ fmap (:[]) (m .: "tests") -- single pattern
                 , m .:? "tests" .!= []      -- list of patterns
                 ]
             )
+        return $ \configDir -> Config {..}
 
 findConfig :: IO (Maybe FilePath)
 findConfig = go "."
@@ -63,4 +54,7 @@ parseConfig path = do
         Left (pos, err) -> do
             putStr $ prettyPosWithSource pos contents err
             exitFailure
-        Right conf -> return conf
+        Right conf -> return $ conf $ takeDirectory path
+
+getConfigTestFiles :: Config -> IO [ FilePath ]
+getConfigTestFiles config = concat <$> mapM (flip globDir1 $ configDir config) (configTests config)
