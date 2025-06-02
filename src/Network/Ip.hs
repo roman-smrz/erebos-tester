@@ -19,6 +19,7 @@ module Network.Ip (
     addNetworkNamespace,
     setNetworkNamespace,
     textNetnsName,
+    runInNetworkNamespace,
     callOn,
 
     Link(..),
@@ -33,6 +34,7 @@ module Network.Ip (
     addRoute,
 ) where
 
+import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Exception
 import Control.Monad
@@ -142,12 +144,20 @@ foreign import ccall unsafe "sched.h setns" c_setns :: CInt -> CInt -> IO CInt
 c_CLONE_NEWNET :: CInt
 c_CLONE_NEWNET = 0x40000000
 
+runInNetworkNamespace :: NetworkNamespace -> IO a -> IO a
+runInNetworkNamespace netns act = do
+    mvar <- newEmptyMVar
+    void $ forkOS $ do
+        setNetworkNamespace netns
+        putMVar mvar =<< act
+    takeMVar mvar
+
+
 textNetnsName :: NetworkNamespace -> Text
 textNetnsName = netnsName
 
 callOn :: HasNetns a => a -> Text -> IO ()
-callOn n cmd = callCommand $ T.unpack $ "ip netns exec \"" <> ns <> "\" " <> cmd
-    where ns = textNetnsName $ getNetns n
+callOn n cmd = runInNetworkNamespace (getNetns n) $ callCommand $ T.unpack cmd
 
 
 data Link a = Link

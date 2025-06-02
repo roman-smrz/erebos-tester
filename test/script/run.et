@@ -45,3 +45,21 @@ test RunConfig:
         expect /match p abcdef/
         expect /run-test-result ExpectEcho done/
         expect /run-all-done/
+
+
+test GetSysInfo:
+    node n
+    shell on n:
+        cp ${scripts.path}/erebos-tester.yaml .
+        mkdir tools
+        cp ${scripts.path}/tools/sysinfo.sh ./tools/tool
+        mkdir scripts
+        cp ${scripts.path}/sysinfo.et ./scripts/
+
+    spawn as p on n
+
+    with p:
+        send "load-config"
+        expect /load-config-done/
+        send "run SysInfo"
+        expect /run-done/

@@ -1,0 +1,12 @@
+test SysInfo:
+    node n
+    spawn on n as p1
+    with p1:
+        send "network-info"
+        expect /ip ${n.ifname} ${n.ip}/
+
+    spawn as p2
+    guard (p2.node.ip /= p1.node.ip)
+    with p2:
+        send "network-info"
+        expect /ip ${n.ifname} ${p2.node.ip}/

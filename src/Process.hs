@@ -93,7 +93,7 @@ lineReadingLoop process h act =
 spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
 spawnOn target pname killWith cmd = do
     -- When executing command given with relative path, turn it to absolute one,
-    -- because working directory will be changed for the "ip netns exec" wrapper.
+    -- because working directory will be changed for the shell wrapper.
     cmd' <- liftIO $ do
         case span (/= ' ') cmd of
             ( path, rest )
@@ -104,13 +104,13 @@ spawnOn target pname killWith cmd = do
             _ -> return cmd
 
     let netns = either getNetns getNetns target
-    let prefix = T.unpack $ "ip netns exec \"" <> textNetnsName netns <> "\" "
     currentEnv <- liftIO $ getEnvironment
-    (Just hin, Just hout, Just herr, handle) <- liftIO $ createProcess (shell $ prefix ++ cmd')
-        { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
-        , cwd = Just (either netDir nodeDir target)
-        , env = Just $ ( "EREBOS_DIR", "." ) : currentEnv
-        }
+    (Just hin, Just hout, Just herr, handle) <- liftIO $ do
+        runInNetworkNamespace netns $ createProcess (shell cmd')
+            { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
+            , cwd = Just (either netDir nodeDir target)
+            , env = Just $ ( "EREBOS_DIR", "." ) : currentEnv
+            }
     pout <- liftIO $ newTVarIO []
 
     let process = Process
