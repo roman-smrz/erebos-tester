@@ -88,6 +88,7 @@ This is a YAML file with following fields:
 
 * `tool`: path to the test tool, which may be overridden by the `--tool` command-line option.
 * `tests`: glob pattern that expands to all the test script files that should be used.
+* `timeout`: initial timeout for test steps like `expect`, given as `int` or `float`; defaults to `1` if not specified.
 
 Script language
 ---------------

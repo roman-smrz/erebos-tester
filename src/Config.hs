@@ -8,6 +8,7 @@ module Config (
 import Control.Monad.Combinators
 
 import Data.ByteString.Lazy qualified as BS
+import Data.Scientific
 import Data.Text qualified as T
 import Data.YAML
 
@@ -19,7 +20,8 @@ import System.FilePath.Glob
 data Config = Config
     { configDir :: FilePath
     , configTool :: Maybe FilePath
-    , configTests :: [Pattern]
+    , configTests :: [ Pattern ]
+    , configTimeout :: Maybe Scientific
     }
     deriving (Show)
 
@@ -31,7 +33,16 @@ instance FromYAML (FilePath -> Config) where
                 , m .:? "tests" .!= []      -- list of patterns
                 ]
             )
+        configTimeout <- fmap fromNumber <$> m .:! "timeout"
         return $ \configDir -> Config {..}
+
+newtype Number = Number { fromNumber :: Scientific }
+
+instance FromYAML Number where
+    parseYAML = \case
+        Scalar _ (SFloat x) -> return $ Number $ realToFrac x
+        Scalar _ (SInt x) -> return $ Number $ fromIntegral x
+        node -> typeMismatch "int or float" node
 
 findConfig :: IO (Maybe FilePath)
 findConfig = go "."

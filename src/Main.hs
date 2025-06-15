@@ -114,6 +114,7 @@ main = do
             { optTest = defaultTestOptions
                 { optDefaultTool = envtool
                 , optTestDir = normalise $ baseDir </> optTestDir defaultTestOptions
+                , optTimeout = fromMaybe (optTimeout defaultTestOptions) $ configTimeout =<< config
                 }
             }
 
