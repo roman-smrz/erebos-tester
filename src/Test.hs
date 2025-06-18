@@ -15,7 +15,7 @@ import Script.Shell
 
 data Test = Test
     { testName :: Text
-    , testSteps :: Expr (TestBlock ())
+    , testSteps :: Expr (TestStep ())
     }
 
 data TestBlock a where
@@ -31,18 +31,19 @@ instance Monoid (TestBlock ()) where
     mempty = EmptyTestBlock
 
 data TestStep a where
-    Subnet :: TypedVarName Network -> Network -> (Network -> TestBlock a) -> TestStep a
-    DeclNode :: TypedVarName Node -> Network -> (Node -> TestBlock a) -> TestStep a
-    Spawn :: TypedVarName Process -> Either Network Node -> [ Text ] -> (Process -> TestBlock a) -> TestStep a
-    SpawnShell :: Maybe (TypedVarName Process) -> Node -> ShellScript -> (Process -> TestBlock a) -> TestStep a
+    Scope :: TestBlock a -> TestStep a
+    Subnet :: TypedVarName Network -> Network -> (Network -> TestStep a) -> TestStep a
+    DeclNode :: TypedVarName Node -> Network -> (Node -> TestStep a) -> TestStep a
+    Spawn :: TypedVarName Process -> Either Network Node -> [ Text ] -> (Process -> TestStep a) -> TestStep a
+    SpawnShell :: Maybe (TypedVarName Process) -> Node -> ShellScript -> (Process -> TestStep a) -> TestStep a
     Send :: Process -> Text -> TestStep ()
-    Expect :: SourceLine -> Process -> Traced Regex -> [ TypedVarName Text ] -> ([ Text ] -> TestBlock a) -> TestStep a
+    Expect :: SourceLine -> Process -> Traced Regex -> [ TypedVarName Text ] -> ([ Text ] -> TestStep a) -> TestStep a
     Flush :: Process -> Maybe Regex -> TestStep ()
     Guard :: SourceLine -> EvalTrace -> Bool -> TestStep ()
-    DisconnectNode :: Node -> TestBlock a -> TestStep a
-    DisconnectNodes :: Network -> TestBlock a -> TestStep a
-    DisconnectUpstream :: Network -> TestBlock a -> TestStep a
-    PacketLoss :: Scientific -> Node -> TestBlock a -> TestStep a
+    DisconnectNode :: Node -> TestStep a -> TestStep a
+    DisconnectNodes :: Network -> TestStep a -> TestStep a
+    DisconnectUpstream :: Network -> TestStep a -> TestStep a
+    PacketLoss :: Scientific -> Node -> TestStep a -> TestStep a
     Wait :: TestStep ()
 
 instance Typeable a => ExprType (TestBlock a) where

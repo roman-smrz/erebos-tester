@@ -1,5 +1,6 @@
 module Parser.Statement (
     testStep,
+    testBlock,
 ) where
 
 import Control.Monad
@@ -43,7 +44,7 @@ letStatement = do
         addVarName off tname
         void $ eol
         body <- testBlock indent
-        return $ Let line tname e body
+        return $ Let line tname e (TestBlockStep EmptyTestBlock . Scope <$> body)
 
 forStatement :: TestParser (Expr (TestBlock ()))
 forStatement = do
@@ -68,7 +69,7 @@ forStatement = do
         body <- testBlock indent
         return $ (\xs f -> mconcat $ map f xs)
             <$> (unpack <$> e)
-            <*> LambdaAbstraction tname body
+            <*> LambdaAbstraction tname (TestBlockStep EmptyTestBlock . Scope <$> body)
 
 shellStatement :: TestParser (Expr (TestBlock ()))
 shellStatement = do
@@ -108,7 +109,7 @@ shellStatement = do
             void eol
             void $ L.indentGuard scn GT ref
             script <- shellScript
-            cont <- testBlock ref
+            cont <- fmap Scope <$> testBlock ref
             let expr | Just pname <- mbpname = LambdaAbstraction pname cont
                      | otherwise = const <$> cont
             return $ TestBlockStep EmptyTestBlock <$>
@@ -290,14 +291,14 @@ instance ExprType a => ParamType (InnerBlock a) where
         combine f (x : xs) = f x xs
         combine _ [] = error "inner block parameter count mismatch"
 
-innerBlock :: CommandDef (TestBlock ())
+innerBlock :: CommandDef (TestStep ())
 innerBlock = ($ ([] :: [ Void ])) <$> innerBlockFun
 
-innerBlockFun :: ExprType a => CommandDef (a -> TestBlock ())
+innerBlockFun :: ExprType a => CommandDef (a -> TestStep ())
 innerBlockFun = (\f x -> f [ x ]) <$> innerBlockFunList
 
-innerBlockFunList :: ExprType a => CommandDef ([ a ] -> TestBlock ())
-innerBlockFunList = fromInnerBlock <$> param ""
+innerBlockFunList :: ExprType a => CommandDef ([ a ] -> TestStep ())
+innerBlockFunList = (\ib -> Scope . fromInnerBlock ib) <$> param ""
 
 newtype ExprParam a = ExprParam { fromExprParam :: a }
     deriving (Functor, Foldable, Traversable)
@@ -380,7 +381,8 @@ testLocal = do
     void $ eol
 
     indent <- L.indentGuard scn GT ref
-    localState $ testBlock indent
+    localState $ do
+        fmap (TestBlockStep EmptyTestBlock . Scope) <$> testBlock indent
 
 testWith :: TestParser (Expr (TestBlock ()))
 testWith = do
@@ -406,7 +408,7 @@ testWith = do
     indent <- L.indentGuard scn GT ref
     localState $ do
         modify $ \s -> s { testContext = ctx }
-        testBlock indent
+        fmap (TestBlockStep EmptyTestBlock . Scope) <$> testBlock indent
 
 testSubnet :: TestParser (Expr (TestBlock ()))
 testSubnet = command "subnet" $ Subnet

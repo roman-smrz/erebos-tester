@@ -96,7 +96,7 @@ runTest out opts gdefs test = do
     resetOutputTime out
     res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
         withInternet $ \_ -> do
-            evalBlock =<< eval (testSteps test)
+            runStep =<< eval (testSteps test)
             when (optWait opts) $ do
                 void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
 
@@ -137,14 +137,20 @@ evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
 evalGlobalDefs exprs = fix $ \gdefs ->
     builtins `M.union` M.fromList (map (fmap (evalSomeWith gdefs)) exprs)
 
-evalBlock :: TestBlock () -> TestRun ()
-evalBlock EmptyTestBlock = return ()
-evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
+runBlock :: TestBlock () -> TestRun ()
+runBlock EmptyTestBlock = return ()
+runBlock (TestBlockStep prev step) = runBlock prev >> runStep step
+
+runStep :: TestStep () -> TestRun ()
+runStep = \case
+    Scope block -> do
+        runBlock block
+
     Subnet name parent inner -> do
-        withSubnet parent (Just name) $ evalBlock . inner
+        withSubnet parent (Just name) $ runStep . inner
 
     DeclNode name net inner -> do
-        withNode net (Left name) $ evalBlock . inner
+        withNode net (Left name) $ runStep . inner
 
     Spawn tvname@(TypedVarName (VarName tname)) target args inner -> do
         case target of
@@ -157,20 +163,20 @@ evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
                 cmd = unwords $ tool : map (T.unpack . escape) args
                 escape = ("'" <>) . (<> "'") . T.replace "'" "'\\''"
-            withProcess (Right node) pname Nothing cmd $ evalBlock . inner
+            withProcess (Right node) pname Nothing cmd $ runStep . inner
 
     SpawnShell mbname node script inner -> do
         let tname | Just (TypedVarName (VarName name)) <- mbname = name
                   | otherwise = "shell"
         let pname = ProcName tname
-        withShellProcess node pname script $ evalBlock . inner
+        withShellProcess node pname script $ runStep . inner
 
     Send p line -> do
         outProc OutputChildStdin p line
         send p line
 
     Expect line p expr captures inner -> do
-        expect line p expr captures $ evalBlock . inner
+        expect line p expr captures $ runStep . inner
 
     Flush p regex -> do
         flush p regex
@@ -179,18 +185,18 @@ evalBlock (TestBlockStep prev step) = evalBlock prev >> case step of
         testStepGuard line vars expr
 
     DisconnectNode node inner -> do
-        withDisconnectedUp (nodeUpstream node) $ evalBlock inner
+        withDisconnectedUp (nodeUpstream node) $ runStep inner
 
     DisconnectNodes net inner -> do
-        withDisconnectedBridge (netBridge net) $ evalBlock inner
+        withDisconnectedBridge (netBridge net) $ runStep inner
 
     DisconnectUpstream net inner -> do
         case netUpstream net of
-            Just link -> withDisconnectedUp link $ evalBlock inner
-            Nothing -> evalBlock inner
+            Just link -> withDisconnectedUp link $ runStep inner
+            Nothing -> runStep inner
 
     PacketLoss loss node inner -> do
-        withNodePacketLoss node loss $ evalBlock inner
+        withNodePacketLoss node loss $ runStep inner
 
     Wait -> do
         void $ outPromptGetLine "Waiting..."

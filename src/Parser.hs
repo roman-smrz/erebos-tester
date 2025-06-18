@@ -43,7 +43,7 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
         modify $ \s -> s
             { testContext = SomeExpr $ varExpr SourceLineBuiltin rootNetworkVar
             }
-        block (\name steps -> return $ Test name $ mconcat steps) header testStep
+        block (\name steps -> return $ Test name $ Scope <$> mconcat steps) header testStep
   where
     header = do
         wsymbol "test"
@@ -64,7 +64,7 @@ parseDefinition href = label "symbol definition" $ do
                 osymbol ":"
                 scn
                 ref <- L.indentGuard scn GT href
-                SomeExpr <$> blockOf ref testStep
+                SomeExpr <$> testBlock ref
             , do
                 osymbol "="
                 someExpr <* eol
