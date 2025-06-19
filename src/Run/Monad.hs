@@ -15,6 +15,7 @@ import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
+import Control.Monad.Writer
 
 import Data.Map (Map)
 import Data.Scientific
@@ -26,15 +27,22 @@ import Network.Ip
 import Output
 import {-# SOURCE #-} Process
 import Script.Expr
+import Script.Object
 
-newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT Failed IO) a }
-    deriving (Functor, Applicative, Monad, MonadReader (TestEnv, TestState), MonadIO)
+newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT Failed (WriterT [ SomeObject TestRun ] IO)) a }
+  deriving
+    ( Functor, Applicative, Monad
+    , MonadReader ( TestEnv, TestState )
+    , MonadWriter [ SomeObject TestRun ]
+    , MonadIO
+    )
 
 data TestEnv = TestEnv
     { teOutput :: Output
     , teFailed :: TVar (Maybe Failed)
     , teOptions :: TestOptions
-    , teProcesses :: MVar [Process]
+    , teNextObjId :: MVar Int
+    , teProcesses :: MVar [ Process ]
     , teGDB :: Maybe (MVar GDB)
     }
 
@@ -117,6 +125,7 @@ forkTestUsing :: (IO () -> IO ThreadId) -> TestRun () -> TestRun ThreadId
 forkTestUsing fork act = do
     tenv <- ask
     liftIO $ fork $ do
-        runExceptT (flip runReaderT tenv $ fromTestRun act) >>= \case
+        ( res, [] ) <- runWriterT (runExceptT $ flip runReaderT tenv $ fromTestRun act)
+        case res of
             Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
             Right () -> return ()

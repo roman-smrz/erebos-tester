@@ -10,7 +10,9 @@ import Data.Typeable
 
 import Network
 import Process
+import Run.Monad
 import Script.Expr
+import Script.Object
 import Script.Shell
 
 data Test = Test
@@ -32,6 +34,7 @@ instance Monoid (TestBlock ()) where
 
 data TestStep a where
     Scope :: TestBlock a -> TestStep a
+    CreateObject :: forall o. ObjectType TestRun o => Proxy o -> ConstructorArgs o -> TestStep ()
     Subnet :: TypedVarName Network -> Network -> (Network -> TestStep a) -> TestStep a
     DeclNode :: TypedVarName Node -> Network -> (Node -> TestStep a) -> TestStep a
     Spawn :: TypedVarName Process -> Either Network Node -> [ Text ] -> (Process -> TestStep a) -> TestStep a

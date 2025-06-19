@@ -12,15 +12,16 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Fix
 import Control.Monad.Reader
+import Control.Monad.Writer
 
 import Data.Bifunctor
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Proxy
 import Data.Scientific
 import Data.Set qualified as S
 import Data.Text (Text)
 import Data.Text qualified as T
-import Text.Megaparsec (errorBundlePretty, showErrorComponent)
 
 import System.Directory
 import System.Exit
@@ -28,6 +29,8 @@ import System.IO.Error
 import System.Posix.Process
 import System.Posix.Signals
 import System.Process
+
+import Text.Megaparsec (errorBundlePretty, showErrorComponent)
 
 import GDB
 import Network
@@ -38,6 +41,7 @@ import Process
 import Run.Monad
 import Script.Expr
 import Script.Module
+import Script.Object
 import Script.Shell
 import Test
 import Test.Builtins
@@ -53,6 +57,7 @@ runTest out opts gdefs test = do
     createDirectoryIfMissing True testDir
 
     failedVar <- newTVarIO Nothing
+    objIdVar <- newMVar 1
     procVar <- newMVar []
 
     mgdb <- if optGDB opts
@@ -65,6 +70,7 @@ runTest out opts gdefs test = do
             { teOutput = out
             , teFailed = failedVar
             , teOptions = opts
+            , teNextObjId = objIdVar
             , teProcesses = procVar
             , teGDB = fst <$> mgdb
             }
@@ -94,7 +100,7 @@ runTest out opts gdefs test = do
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
     resetOutputTime out
-    res <- runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
+    ( res, [] ) <- runWriterT $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
         withInternet $ \_ -> do
             runStep =<< eval (testSteps test)
             when (optWait opts) $ do
@@ -144,7 +150,15 @@ runBlock (TestBlockStep prev step) = runBlock prev >> runStep step
 runStep :: TestStep () -> TestRun ()
 runStep = \case
     Scope block -> do
-        runBlock block
+        ( x, objs ) <- censor (const []) $ listen $ catchError (Right <$> runBlock block) (return . Left)
+        mapM_ destroySomeObject (reverse objs)
+        either throwError return x
+
+    CreateObject (Proxy :: Proxy o) cargs -> do
+        objIdVar <- asks (teNextObjId . fst)
+        oid <- liftIO $ modifyMVar objIdVar (\x -> return ( x + 1, x ))
+        obj <- createObject @TestRun @o (ObjectId oid) cargs
+        tell [ toSomeObject obj ]
 
     Subnet name parent inner -> do
         withSubnet parent (Just name) $ runStep . inner

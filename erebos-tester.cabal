@@ -65,6 +65,7 @@ executable erebos-tester
         Script.Expr
         Script.Expr.Class
         Script.Module
+        Script.Object
         Script.Shell
         Script.Var
         Test
