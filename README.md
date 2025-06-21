@@ -179,6 +179,7 @@ let re2 = /$str$re1/ # match '.' followed by any character
 #### boolean
 
 Result of comparison operators `==` and `/=`.
+Values are `True` and `False`.
 
 #### network
 

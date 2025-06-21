@@ -118,6 +118,13 @@ numberLiteral = label "number" $ lexeme $ do
              else return $ SomeExpr $ Pure x
         ]
 
+boolLiteral :: TestParser SomeExpr
+boolLiteral = label "bool" $ lexeme $ do
+    SomeExpr . Pure <$> choice
+        [ wsymbol "True"  *> return True
+        , wsymbol "False" *> return False
+        ]
+
 quotedString :: TestParser (Expr Text)
 quotedString = label "string" $ lexeme $ do
     void $ char '"'
@@ -261,11 +268,13 @@ someExpr = join inner <?> "expression"
                               [ SomeBinOp ((==) @Integer)
                               , SomeBinOp ((==) @Scientific)
                               , SomeBinOp ((==) @Text)
+                              , SomeBinOp ((==) @Bool)
                               ]
               , binary' "/=" (\op xs ys -> length xs /= length ys || or  (zipWith op xs ys)) $
                               [ SomeBinOp ((/=) @Integer)
                               , SomeBinOp ((/=) @Scientific)
                               , SomeBinOp ((/=) @Text)
+                              , SomeBinOp ((/=) @Bool)
                               ]
               , binary ">" $
                   [ SomeBinOp ((>) @Integer)
@@ -347,6 +356,7 @@ typedExpr = do
 literal :: TestParser SomeExpr
 literal = label "literal" $ choice
     [ numberLiteral
+    , boolLiteral
     , SomeExpr <$> quotedString
     , SomeExpr <$> regex
     , list

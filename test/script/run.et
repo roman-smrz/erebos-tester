@@ -3,6 +3,13 @@ module run
 asset scripts:
     path: ../asset/run
 
+asset scripts_success:
+    path: ../asset/run-success
+
+asset scripts_fail:
+    path: ../asset/run-fail
+
+
 test TrivialRun:
     spawn as p 
     with p:
@@ -19,6 +26,39 @@ test TrivialRun:
             expect /match-fail .*/
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
+
+
+test SimpleRun:
+    let should_succeed = [ "bool" ]
+    let should_fail = [ "bool" ]
+    spawn as p
+
+    with p:
+        for file in should_succeed:
+            send "load ${scripts_success.path}/$file.et"
+            local:
+                expect /(load-.*)/ capture done
+                guard (done == "load-done")
+            flush
+
+            send "run Test"
+            local:
+                expect /(run-.*)/ capture done
+                guard (done == "run-done")
+            flush
+
+        for file in should_fail:
+            send "load ${scripts_fail.path}/$file.et"
+            local:
+                expect /(load-.*)/ capture done
+                guard (done == "load-done")
+            flush
+
+            send "run Test"
+            local:
+                expect /(run-.*)/ capture done
+                guard (done == "run-failed")
+            flush
 
 
 test RunConfig:

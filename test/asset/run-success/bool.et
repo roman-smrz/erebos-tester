@@ -1,0 +1,7 @@
+test Test:
+    node n
+    guard (True == True)
+    guard (False == False)
+    guard (False /= True)
+    guard ((1 == 1) == True)
+    guard ((1 == 0) == False)
