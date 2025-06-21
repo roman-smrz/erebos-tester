@@ -4,6 +4,7 @@ import Control.Monad
 
 import Data.List
 import Data.Maybe
+import Data.Text (Text)
 import Data.Text qualified as T
 
 import Text.Read (readMaybe)
@@ -30,6 +31,7 @@ import Version
 data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
     , optRepeat :: Int
+    , optExclude :: [ Text ]
     , optVerbose :: Bool
     , optColor :: Maybe Bool
     , optShowHelp :: Bool
@@ -41,6 +43,7 @@ defaultCmdlineOptions :: CmdlineOptions
 defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
     , optRepeat = 1
+    , optExclude = []
     , optVerbose = False
     , optColor = Nothing
     , optShowHelp = False
@@ -82,6 +85,9 @@ options =
     , Option ['r'] ["repeat"]
         (ReqArg (\str opts -> opts { optRepeat = read str }) "<count>")
         "number of times to repeat the test(s)"
+    , Option [ 'e' ] [ "exclude" ]
+        (ReqArg (\str opts -> opts { optExclude = T.pack str : optExclude opts }) "<test>")
+        "exclude given test from execution"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
@@ -174,7 +180,7 @@ main = do
     out <- startOutput outputStyle useColor
 
     ( modules, globalDefs ) <- loadModules (map fst files)
-    tests <- if null otests
+    tests <- filter ((`notElem` optExclude opts) . testName) <$> if null otests
         then fmap concat $ forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
             case mbTestName of
                 Nothing -> return moduleTests
