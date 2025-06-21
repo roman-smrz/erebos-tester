@@ -90,5 +90,5 @@ withShellProcess node pname script inner = do
 
     inner process `finally` do
         ps <- liftIO $ takeMVar procVar
-        closeProcess process `finally` do
+        closeTestProcess process `finally` do
             liftIO $ putMVar procVar $ filter (/=process) ps

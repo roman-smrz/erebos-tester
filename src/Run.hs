@@ -111,7 +111,7 @@ runTest out opts gdefs test = do
     void $ installHandler processStatusChanged oldHandler Nothing
 
     Right () <- runExceptT $ flip runReaderT out $ do
-        maybe (return ()) (closeProcess . snd) mgdb
+        maybe (return ()) (closeProcess 1 . snd) mgdb
     [] <- readMVar procVar
 
     failed <- atomically $ readTVar (teFailed tenv)

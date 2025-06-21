@@ -7,6 +7,7 @@ module Process (
     lineReadingLoop,
     spawnOn,
     closeProcess,
+    closeTestProcess,
     withProcess,
 ) where
 
@@ -18,9 +19,10 @@ import Control.Monad.Except
 import Control.Monad.Reader
 
 import Data.Function
+import Data.Scientific
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Text.IO as T
+import Data.Text qualified as T
+import Data.Text.IO qualified as T
 
 import System.Directory
 import System.Environment
@@ -136,8 +138,8 @@ spawnOn target pname killWith cmd = do
 
     return process
 
-closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Process -> m ()
-closeProcess p = do
+closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Scientific -> Process -> m ()
+closeProcess timeout p = do
     liftIO $ hClose $ procStdin p
     case procKillWith p of
         Nothing -> return ()
@@ -146,13 +148,18 @@ closeProcess p = do
             Just pid -> signalProcess sig pid
 
     liftIO $ void $ forkIO $ do
-        threadDelay 1000000
+        threadDelay $ floor $ 1000000 * timeout
         either terminateProcess (killThread . fst) $ procHandle p
     liftIO (either waitForProcess (takeMVar . snd) (procHandle p)) >>= \case
         ExitSuccess -> return ()
         ExitFailure code -> do
             outProc OutputChildFail p $ T.pack $ "exit code: " ++ show code
             throwError Failed
+
+closeTestProcess :: Process -> TestRun ()
+closeTestProcess process = do
+    timeout <- liftIO . readMVar =<< asks (teTimeout . fst)
+    closeProcess timeout process
 
 withProcess :: Either Network Node -> ProcName -> Maybe Signal -> String -> (Process -> TestRun a) -> TestRun a
 withProcess target pname killWith cmd inner = do
@@ -163,5 +170,5 @@ withProcess target pname killWith cmd inner = do
 
     inner process `finally` do
         ps <- liftIO $ takeMVar procVar
-        closeProcess process `finally` do
+        closeTestProcess process `finally` do
             liftIO $ putMVar procVar $ filter (/=process) ps
