@@ -4,6 +4,8 @@ module Test.Builtins (
 
 import Data.Map qualified as M
 import Data.Maybe
+import Data.Proxy
+import Data.Scientific
 import Data.Text (Text)
 
 import Process (Process)
@@ -15,6 +17,7 @@ builtins = M.fromList
     [ fq "send" builtinSend
     , fq "flush" builtinFlush
     , fq "guard" builtinGuard
+    , fq "multiply_timeout" builtinMultiplyTimeout
     , fq "wait" builtinWait
     ]
   where
@@ -52,6 +55,10 @@ builtinFlush = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes
 builtinGuard :: SomeVarValue
 builtinGuard = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
     \sline args -> TestBlockStep EmptyTestBlock $ Guard sline (getArgVars args Nothing) (getArg args Nothing)
+
+builtinMultiplyTimeout :: SomeVarValue
+builtinMultiplyTimeout = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton (Just "by") (SomeArgumentType (RequiredArgument @Scientific))) $
+    \_ args -> TestBlockStep EmptyTestBlock $ CreateObject (Proxy @MultiplyTimeout) (getArg args (Just "by"))
 
 builtinWait :: SomeVarValue
 builtinWait = someConstValue $ TestBlockStep EmptyTestBlock Wait

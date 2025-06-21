@@ -43,6 +43,7 @@ data TestEnv = TestEnv
     , teOptions :: TestOptions
     , teNextObjId :: MVar Int
     , teProcesses :: MVar [ Process ]
+    , teTimeout :: MVar Scientific
     , teGDB :: Maybe (MVar GDB)
     }
 

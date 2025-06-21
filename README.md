@@ -336,6 +336,13 @@ with <expr>:
 Execute `<test block>` with `<expr>` as context.
 
 ```
+multiply_timeout by <multiplier>
+```
+
+Modify the timeout used for commands like `expect` by multiplying it with `<multiplier>`.
+The effect lasts until the end of the block.
+
+```
 wait
 ```
 

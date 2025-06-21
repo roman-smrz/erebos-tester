@@ -2,13 +2,20 @@ module Test (
     Test(..),
     TestStep(..),
     TestBlock(..),
+
+    MultiplyTimeout(..),
 ) where
+
+import Control.Concurrent.MVar
+import Control.Monad.Except
+import Control.Monad.Reader
 
 import Data.Scientific
 import Data.Text (Text)
 import Data.Typeable
 
 import Network
+import Output
 import Process
 import Run.Monad
 import Script.Expr
@@ -52,3 +59,23 @@ data TestStep a where
 instance Typeable a => ExprType (TestBlock a) where
     textExprType _ = "test block"
     textExprValue _ = "<test block>"
+
+
+data MultiplyTimeout = MultiplyTimeout Scientific
+
+instance ObjectType TestRun MultiplyTimeout where
+    type ConstructorArgs MultiplyTimeout = Scientific
+
+    createObject oid timeout
+        | timeout > 0 = do
+            var <- asks (teTimeout . fst)
+            liftIO $ modifyMVar_ var $ return . (* timeout)
+            return $ Object oid $ MultiplyTimeout timeout
+
+        | otherwise = do
+            outLine OutputError Nothing "timeout must be positive"
+            throwError Failed
+
+    destroyObject Object { objImpl = MultiplyTimeout timeout } = do
+        var <- asks (teTimeout . fst)
+        liftIO $ modifyMVar_ var $ return . (/ timeout)
