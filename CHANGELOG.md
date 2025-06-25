@@ -1,5 +1,14 @@
 # Revision history for erebos-tester
 
+## 0.3.3 -- 2025-06-25
+
+* Added optional `timeout` setting to config file
+* Added `multiply_timeout` command
+* Added `True` and `False` literals, and comparison operators for boolean values
+* Added `--exclude` command-line option to exclude tests
+* Execute shell commands in appropriate network namespace
+* Show name of failed test in output
+
 ## 0.3.2 -- 2025-05-16
 
 * Asset files and directories for use during tests
