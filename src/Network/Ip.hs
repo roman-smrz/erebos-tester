@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Network.Ip (
     IpPrefix(..),
     textIpNetwork,
@@ -134,7 +136,11 @@ addNetworkNamespace netnsName = do
 setNetworkNamespace :: MonadIO m => NetworkNamespace -> m ()
 setNetworkNamespace netns = liftIO $ do
     let path = "/var/run/netns/" <> T.unpack (textNetnsName netns)
+#if MIN_VERSION_unix(2,8,0)
         open = openFd path ReadOnly defaultFileFlags { cloexec = True }
+#else
+        open = openFd path ReadOnly Nothing defaultFileFlags
+#endif
     res <- bracket open closeFd $ \(Fd fd) -> do
         c_setns fd c_CLONE_NEWNET
     when (res /= 0) $ do
