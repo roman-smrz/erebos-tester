@@ -39,6 +39,7 @@ import Output
 import Parser
 import Process
 import Run.Monad
+import Sandbox
 import Script.Expr
 import Script.Module
 import Script.Object
@@ -102,11 +103,21 @@ runTest out opts gdefs test = do
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
     resetOutputTime out
-    ( res, [] ) <- runWriterT $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
-        withInternet $ \_ -> do
-            runStep =<< eval (testSteps test)
-            when (optWait opts) $ do
-                void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
+    testRunResult <- newEmptyMVar
+
+    void $ forkOS $ do
+        isolateFilesystem testDir >>= \case
+            True -> do
+                tres <- runWriterT $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
+                    withInternet $ \_ -> do
+                        runStep =<< eval (testSteps test)
+                        when (optWait opts) $ do
+                            void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
+                putMVar testRunResult tres
+            _ -> do
+                putMVar testRunResult ( Left Failed, [] )
+
+    ( res, [] ) <- takeMVar testRunResult
 
     void $ installHandler processStatusChanged oldHandler Nothing
 
