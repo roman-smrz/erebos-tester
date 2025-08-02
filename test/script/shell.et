@@ -51,6 +51,7 @@ test ShellEcho:
         "\$ \" \\"
         "\"\"a"
         "' \" \\\\\\ \\"
+        "a b  c"
 
     with p:
         expect /run-test-result Echo done/

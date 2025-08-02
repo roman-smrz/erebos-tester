@@ -24,7 +24,7 @@ parseArgument :: TestParser (Expr Text)
 parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)) (Pure [])) $ some $ choice
     [ doubleQuotedString
     , singleQuotedString
-    , escapedChar
+    , standaloneEscapedChar
     , stringExpansion
     , unquotedString
     ]
@@ -41,7 +41,7 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
         let inner = choice
                 [ char '"' >> return []
                 , (:) <$> (Pure . TL.toStrict <$> takeWhile1P Nothing (`notElem` specialChars)) <*> inner
-                , (:) <$> escapedChar <*> inner
+                , (:) <$> stringEscapedChar <*> inner
                 , (:) <$> stringExpansion <*> inner
                 ]
         App AnnNone (Pure T.concat) . foldr (liftA2 (:)) (Pure []) <$> inner
@@ -50,8 +50,8 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
     singleQuotedString = do
         Pure . TL.toStrict <$> (char '\'' *> takeWhileP Nothing (/= '\'') <* char '\'')
 
-    escapedChar :: TestParser (Expr Text)
-    escapedChar = do
+    stringEscapedChar :: TestParser (Expr Text)
+    stringEscapedChar = do
         void $ char '\\'
         Pure <$> choice
             [ char '\\' >> return "\\"
@@ -60,6 +60,17 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
             , char 'n' >> return "\n"
             , char 'r' >> return "\r"
             , char 't' >> return "\t"
+            , return "\\"
+            ]
+
+    standaloneEscapedChar :: TestParser (Expr Text)
+    standaloneEscapedChar = do
+        void $ char '\\'
+        Pure <$> choice
+            [ char '\\' >> return "\\"
+            , char '"' >> return "\""
+            , char '$' >> return "$"
+            , char ' ' >> return " "
             ]
 
 parseArguments :: TestParser (Expr [ Text ])
