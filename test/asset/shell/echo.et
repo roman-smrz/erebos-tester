@@ -1,0 +1,22 @@
+test Echo:
+    node n
+    let echo_str = "echo"
+    let space_str = "a   b"
+
+    shell on n as sh:
+        echo a b  c
+        echo "a b  c"
+        echo 'a b  d'
+        echo a b   " c  d"
+
+        /bin/echo "abcd"  xyz
+        "echo" a"a" "b"c   d
+        $echo_str b $echo_str c
+
+        echo "$space_str"
+        echo $space_str
+        echo '$space_str'
+
+        echo \$ \" \\
+        echo "\""\""a"
+        echo "'" '"' '\\\' "\\"

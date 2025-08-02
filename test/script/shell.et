@@ -1,0 +1,57 @@
+asset scripts:
+    path: ../asset/shell
+
+
+test ShellSpawn:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/spawn.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+        flush
+
+        send "run-all"
+        expect /run-test-result ShellTrue done/
+        expect /child-fail sh failed at: .*: false/
+        expect /child-fail sh exit code: 1/
+        expect /run-test-result ShellFalse failed/
+        expect /run-all-done/
+
+
+def expect_next_stdout from p (expected):
+    expect from p /child-stdout sh (.*)/ capture line
+    guard (line == expected)
+
+test ShellEcho:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/echo.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+        flush
+
+        send "run-all"
+
+    expect_next_stdout from p:
+        "a b c"
+        "a b  c"
+        "a b  d"
+        "a b  c  d"
+
+        "abcd xyz"
+        "aa bc d"
+        "b echo c"
+
+        "a   b"
+        "a   b"
+        "\$space_str"
+
+        "\$ \" \\"
+        "\"\"a"
+        "' \" \\\\\\ \\"
+
+    with p:
+        expect /run-test-result Echo done/
+        expect /run-all-done/

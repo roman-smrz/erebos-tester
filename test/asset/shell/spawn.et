@@ -1,0 +1,13 @@
+test ShellTrue:
+    node n
+    shell on n:
+        true
+
+    shell on n as sh:
+        true
+
+
+test ShellFalse:
+    node n
+    shell on n as sh:
+        false
