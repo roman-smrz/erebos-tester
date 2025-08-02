@@ -29,7 +29,9 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
     , unquotedString
     ]
   where
-    specialChars = [ '\"', '\\', '$' ]
+    specialChars = [ '"', '\'', '\\', '$', '#', '|', '>', '<', ';', '[', ']', '{', '}', '(', ')', '*', '?', '~', '&', '!' ]
+
+    stringSpecialChars = [ '"', '\\', '$' ]
 
     unquotedString :: TestParser (Expr Text)
     unquotedString = do
@@ -40,7 +42,7 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
         void $ char '"'
         let inner = choice
                 [ char '"' >> return []
-                , (:) <$> (Pure . TL.toStrict <$> takeWhile1P Nothing (`notElem` specialChars)) <*> inner
+                , (:) <$> (Pure . TL.toStrict <$> takeWhile1P Nothing (`notElem` stringSpecialChars)) <*> inner
                 , (:) <$> stringEscapedChar <*> inner
                 , (:) <$> stringExpansion <*> inner
                 ]
@@ -53,11 +55,9 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
     stringEscapedChar :: TestParser (Expr Text)
     stringEscapedChar = do
         void $ char '\\'
-        Pure <$> choice
-            [ char '\\' >> return "\\"
-            , char '"' >> return "\""
-            , char '$' >> return "$"
-            , char 'n' >> return "\n"
+        fmap Pure $ choice $
+            map (\c -> char c >> return (T.singleton c)) stringSpecialChars ++
+            [ char 'n' >> return "\n"
             , char 'r' >> return "\r"
             , char 't' >> return "\t"
             , return "\\"
@@ -66,11 +66,9 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
     standaloneEscapedChar :: TestParser (Expr Text)
     standaloneEscapedChar = do
         void $ char '\\'
-        Pure <$> choice
-            [ char '\\' >> return "\\"
-            , char '"' >> return "\""
-            , char '$' >> return "$"
-            , char ' ' >> return " "
+        fmap Pure $ choice $
+            map (\c -> char c >> return (T.singleton c)) specialChars ++
+            [ char ' ' >> return " "
             ]
 
 parseArguments :: TestParser (Expr [ Text ])

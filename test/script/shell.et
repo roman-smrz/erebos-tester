@@ -53,6 +53,8 @@ test ShellEcho:
         "' \" \\\\\\ \\"
         "a b  c"
 
+        "\" ' \\ \$ # | > < ; [ ] { } ( ) * ? ~ & !"
+
     with p:
         expect /run-test-result Echo done/
         expect /run-all-done/
