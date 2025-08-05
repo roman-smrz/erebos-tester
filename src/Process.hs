@@ -85,9 +85,10 @@ outProc otype p line = outLine otype (Just $ textProcName $ procName p) line
 lineReadingLoop :: MonadOutput m => Process -> Handle -> (Text -> m ()) -> m ()
 lineReadingLoop process h act =
     liftIO (tryIOError (T.hGetLine h)) >>= \case
-        Left err
-            | isEOFError err -> return ()
-            | otherwise -> outProc OutputChildFail process $ T.pack $ "IO error: " ++ show err
+        Left err -> do
+            when (not (isEOFError err)) $ do
+                outProc OutputChildFail process $ T.pack $ "IO error: " ++ show err
+            liftIO $ hClose h
         Right line -> do
             act line
             lineReadingLoop process h act

@@ -69,6 +69,10 @@ spawnShell procNode procName script = do
     ( herr, pstderr ) <- liftIO $ createPipe
     procHandle <- fmap (Right . (, statusVar)) $ forkTestUsing forkOS $ do
         executeScript procNode procName statusVar pstdin pstdout pstderr script
+        liftIO $ do
+            hClose pstdin
+            hClose pstdout
+            hClose pstderr
 
     let procKillWith = Nothing
     let process = Process {..}
