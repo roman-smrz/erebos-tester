@@ -58,3 +58,23 @@ test ShellEcho:
     with p:
         expect /run-test-result Echo done/
         expect /run-all-done/
+
+
+test ShellPipe:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/pipe.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+        flush
+
+        send "run-all"
+
+    expect_next_stdout from p:
+        "bc"
+        "b"
+
+    with p:
+        expect /run-test-result Pipe done/
+        expect /run-all-done/

@@ -74,17 +74,35 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
 parseArguments :: TestParser (Expr [ Text ])
 parseArguments = foldr (liftA2 (:)) (Pure []) <$> many parseArgument
 
-shellStatement :: TestParser (Expr [ ShellStatement ])
-shellStatement = label "shell statement" $ do
+parseCommand :: TestParser (Expr ShellCommand)
+parseCommand = label "shell statement" $ do
     line <- getSourceLine
     command <- parseArgument
     args <- parseArguments
-    return $ fmap (: []) $ ShellStatement
+    return $ ShellCommand
         <$> command
         <*> args
         <*> pure line
 
+parsePipeline :: Expr (Maybe ShellPipeline) -> TestParser (Expr ShellPipeline)
+parsePipeline upper = do
+    cmd <- parseCommand
+    let pipeline = ShellPipeline <$> cmd <*> upper
+    choice
+        [ do
+            osymbol "|"
+            parsePipeline (Just <$> pipeline)
+
+        , do
+            return pipeline
+        ]
+
+parseStatement :: TestParser (Expr [ ShellStatement ])
+parseStatement = do
+    line <- getSourceLine
+    fmap ((: []) . flip ShellStatement line) <$> parsePipeline (pure Nothing)
+
 shellScript :: TestParser (Expr ShellScript)
 shellScript = do
     indent <- L.indentLevel
-    fmap ShellScript <$> blockOf indent shellStatement
+    fmap ShellScript <$> blockOf indent parseStatement

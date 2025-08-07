@@ -81,6 +81,7 @@ executable erebos-tester
 
     c-sources:
         src/main.c
+        src/shell.c
 
     other-extensions:
         CPP

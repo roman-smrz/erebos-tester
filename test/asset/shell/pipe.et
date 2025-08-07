@@ -1,0 +1,5 @@
+test Pipe:
+    node n
+    shell on n as sh:
+        echo abcd | grep -o '[bc]*'
+        echo abcd | grep -o '[bcd]*' | grep -o '[ab]*'
