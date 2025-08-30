@@ -123,6 +123,7 @@ executeScript sei@ShellExecInfo {..} pstdin pstdout pstderr (ShellScript stateme
 spawnShell :: Node -> ProcName -> ShellScript -> TestRun Process
 spawnShell procNode procName script = do
     procOutput <- liftIO $ newTVarIO []
+    procIgnore <- liftIO $ newTVarIO ( 0, [] )
     seiStatusVar <- liftIO $ newEmptyMVar
     ( pstdin, procStdin ) <- createPipeCloexec
     ( hout, pstdout ) <- createPipeCloexec
@@ -139,12 +140,7 @@ spawnShell procNode procName script = do
     let procKillWith = Nothing
     let process = Process {..}
 
-    void $ forkTest $ lineReadingLoop process hout $ \line -> do
-        outProc OutputChildStdout process line
-        liftIO $ atomically $ modifyTVar procOutput (++ [ line ])
-    void $ forkTest $ lineReadingLoop process herr $ \line -> do
-        outProc OutputChildStderr process line
-
+    startProcessIOLoops process hout herr
     return process
 
 withShellProcess :: Node -> ProcName -> ShellScript -> (Process -> TestRun a) -> TestRun a

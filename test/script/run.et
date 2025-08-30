@@ -29,7 +29,7 @@ test TrivialRun:
 
 
 test SimpleRun:
-    let should_succeed = [ "bool" ]
+    let should_succeed = [ "bool", "command-ignore" ]
     let should_fail = [ "bool" ]
     spawn as p
 

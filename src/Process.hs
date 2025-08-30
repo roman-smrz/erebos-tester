@@ -5,10 +5,14 @@ module Process (
     send,
     outProc,
     lineReadingLoop,
+    startProcessIOLoops,
     spawnOn,
     closeProcess,
     closeTestProcess,
     withProcess,
+
+    IgnoreProcessOutput(..),
+    flushProcessOutput,
 ) where
 
 import Control.Arrow
@@ -19,6 +23,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 
 import Data.Function
+import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -38,13 +43,16 @@ import Network
 import Network.Ip
 import Output
 import Run.Monad
+import Script.Expr
 import Script.Expr.Class
+import Script.Object
 
 data Process = Process
     { procName :: ProcName
     , procHandle :: Either ProcessHandle ( ThreadId, MVar ExitCode )
     , procStdin :: Handle
-    , procOutput :: TVar [Text]
+    , procOutput :: TVar [ Text ]
+    , procIgnore :: TVar ( Int, [ ( Int, Maybe Regex ) ] )
     , procKillWith :: Maybe Signal
     , procNode :: Node
     }
@@ -93,8 +101,30 @@ lineReadingLoop process h act =
             act line
             lineReadingLoop process h act
 
+startProcessIOLoops :: Process -> Handle -> Handle -> TestRun ()
+startProcessIOLoops process@Process {..} hout herr = do
+
+    void $ forkTest $ lineReadingLoop process hout $ \line -> do
+        outProc OutputChildStdout process line
+        liftIO $ atomically $ do
+            ignores <- map snd . snd <$> readTVar procIgnore
+            when (not $ any (matches line) ignores) $ do
+                modifyTVar procOutput (++ [ line ])
+
+    void $ forkTest $ lineReadingLoop process herr $ \line -> do
+        case procName of
+            ProcNameTcpdump -> return ()
+            _ -> outProc OutputChildStderr process line
+
+  where
+    matches _    Nothing
+        = True
+    matches line (Just re)
+        | Right (Just _) <- regexMatch re line = True
+        | otherwise = False
+
 spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
-spawnOn target pname killWith cmd = do
+spawnOn target procName procKillWith cmd = do
     -- When executing command given with relative path, turn it to absolute one,
     -- because working directory will be changed for the shell wrapper.
     cmd' <- liftIO $ do
@@ -108,33 +138,22 @@ spawnOn target pname killWith cmd = do
 
     let netns = either getNetns getNetns target
     currentEnv <- liftIO $ getEnvironment
-    (Just hin, Just hout, Just herr, handle) <- liftIO $ do
+    (Just procStdin, Just hout, Just herr, handle) <- liftIO $ do
         runInNetworkNamespace netns $ createProcess (shell cmd')
             { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
             , cwd = Just (either netDir nodeDir target)
             , env = Just $ ( "EREBOS_DIR", "." ) : currentEnv
             }
-    pout <- liftIO $ newTVarIO []
+    let procHandle = Left handle
+    procOutput <- liftIO $ newTVarIO []
+    procIgnore <- liftIO $ newTVarIO ( 0, [] )
+    let procNode = either (const undefined) id target
+    let process = Process {..}
 
-    let process = Process
-            { procName = pname
-            , procHandle = Left handle
-            , procStdin = hin
-            , procOutput = pout
-            , procKillWith = killWith
-            , procNode = either (const undefined) id target
-            }
-
-    void $ forkTest $ lineReadingLoop process hout $ \line -> do
-        outProc OutputChildStdout process line
-        liftIO $ atomically $ modifyTVar pout (++[line])
-    void $ forkTest $ lineReadingLoop process herr $ \line -> do
-        case pname of
-             ProcNameTcpdump -> return ()
-             _ -> outProc OutputChildStderr process line
+    startProcessIOLoops process hout herr
 
     asks (teGDB . fst) >>= maybe (return Nothing) (liftIO . tryReadMVar) >>= \case
-        Just gdb | ProcName _ <- pname -> addInferior gdb process
+        Just gdb | ProcName _ <- procName -> addInferior gdb process
         _ -> return ()
 
     return process
@@ -173,3 +192,26 @@ withProcess target pname killWith cmd inner = do
         ps <- liftIO $ takeMVar procVar
         closeTestProcess process `finally` do
             liftIO $ putMVar procVar $ filter (/=process) ps
+
+
+data IgnoreProcessOutput = IgnoreProcessOutput Process Int
+
+instance ObjectType TestRun IgnoreProcessOutput where
+    type ConstructorArgs IgnoreProcessOutput = ( Process, Maybe Regex )
+
+    createObject oid ( process@Process {..}, regex ) = do
+        liftIO $ atomically $ do
+            flushProcessOutput process regex
+            ( iid, list ) <- readTVar procIgnore
+            writeTVar procIgnore ( iid + 1, ( iid, regex ) : list )
+            return $ Object oid $ IgnoreProcessOutput process iid
+
+    destroyObject Object { objImpl = IgnoreProcessOutput Process {..} iid } = do
+        liftIO $ atomically $ do
+            writeTVar procIgnore . fmap (filter ((iid /=) . fst)) =<< readTVar procIgnore
+
+flushProcessOutput :: Process -> Maybe Regex -> STM ()
+flushProcessOutput p mbre = do
+    writeTVar (procOutput p) =<< case mbre of
+        Nothing -> return []
+        Just re -> filter (either error isNothing . regexMatch re) <$> readTVar (procOutput p)

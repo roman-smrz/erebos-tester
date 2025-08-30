@@ -206,7 +206,7 @@ runStep = \case
         expect line p expr captures $ runStep . inner
 
     Flush p regex -> do
-        flush p regex
+        atomicallyTest $ flushProcessOutput p regex
 
     Guard line vars expr -> do
         testStepGuard line vars expr
@@ -347,13 +347,6 @@ expect sline p (Traced trace re) tvars inner = do
              inner capture
 
          Nothing -> exprFailed (T.pack "expect") sline (Just $ procName p) trace
-
-flush :: Process -> Maybe Regex -> TestRun ()
-flush p mbre = do
-    atomicallyTest $ do
-        writeTVar (procOutput p) =<< case mbre of
-            Nothing -> return []
-            Just re -> filter (either error isNothing . regexMatch re) <$> readTVar (procOutput p)
 
 testStepGuard :: SourceLine -> EvalTrace -> Bool -> TestRun ()
 testStepGuard sline vars x = do

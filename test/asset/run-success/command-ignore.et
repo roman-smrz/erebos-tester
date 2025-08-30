@@ -1,0 +1,39 @@
+def expect_next from p (str):
+    expect /(.*)/ from p capture line
+    guard (line == str)
+
+test Test:
+    node n
+    shell on n as p:
+        cat
+
+    send "a" to p
+    send "b" to p
+    send "x" to p
+    expect /x/ from p
+
+    ignore from p matching /a/
+    send "a" to p
+    send "c" to p
+
+    expect_next "b" from p
+    expect_next "c" from p
+
+    send "a" to p
+    send "b" to p
+    with p:
+        send "c"
+        ignore matching /[bcd]/
+        send "d"
+        send "e"
+        expect_next "e" from p
+
+    send "a" to p
+    send "b" to p
+    local:
+        send "c" to p
+        send "d" to p
+
+        expect_next "b" from p
+        expect_next "c" from p
+        expect_next "d" from p

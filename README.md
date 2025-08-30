@@ -282,6 +282,15 @@ Flush memory of `<proc>` output, so no following `expect` command will match any
 If the `matching` clause is used, discard only output lines matching `<regex>`.
 
 ```
+ignore [from <proc>] [matching <regex>]
+```
+
+Ignore output lines from `<proc>` (or context process) that match the given
+`<regex>` (or all lines if the `matching` clause is not used). Affects both
+past and future output of the process; the effect lasts until the end of
+the block.
+
+```
 guard <expr>
 ```
 

@@ -8,7 +8,7 @@ import Data.Proxy
 import Data.Scientific
 import Data.Text (Text)
 
-import Process (Process)
+import Process
 import Script.Expr
 import Test
 
@@ -16,6 +16,7 @@ builtins :: GlobalDefs
 builtins = M.fromList
     [ fq "send" builtinSend
     , fq "flush" builtinFlush
+    , fq "ignore" builtinIgnore
     , fq "guard" builtinGuard
     , fq "multiply_timeout" builtinMultiplyTimeout
     , fq "wait" builtinWait
@@ -46,6 +47,15 @@ builtinSend = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes)
 builtinFlush :: SomeVarValue
 builtinFlush = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
     \_ args -> TestBlockStep EmptyTestBlock $ Flush (getArg args (Just "from")) (getArgMb args (Just "matching"))
+  where
+    atypes =
+        [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
+        , ( Just "matching", SomeArgumentType (OptionalArgument @Regex) )
+        ]
+
+builtinIgnore :: SomeVarValue
+builtinIgnore = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
+    \_ args -> TestBlockStep EmptyTestBlock $ CreateObject (Proxy @IgnoreProcessOutput) ( getArg args (Just "from"), getArgMb args (Just "matching") )
   where
     atypes =
         [ ( Just "from", SomeArgumentType (ContextDefault @Process) )

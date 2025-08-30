@@ -72,12 +72,14 @@ gdbStart onCrash = do
         { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
         }
     pout <- liftIO $ newTVarIO []
+    ignore <- liftIO $ newTVarIO ( 0, [] )
 
     let process = Process
             { procName = ProcNameGDB
             , procHandle = Left handle
             , procStdin = hin
             , procOutput = pout
+            , procIgnore = ignore
             , procKillWith = Nothing
             , procNode = undefined
             }
