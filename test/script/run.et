@@ -103,3 +103,18 @@ test GetSysInfo:
         expect /load-config-done/
         send "run SysInfo"
         expect /run-done/
+
+
+test CallStack:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/callstack.et"
+        expect /load-done/
+
+        send "run A"
+        expect /match-fail guard failed/
+        expect /match-fail-line .*\/callstack.et:3:5: .*/
+        expect /match-fail-var x 1/
+        local:
+            expect /(run-.*)/ capture done
+            guard (done == "run-failed")

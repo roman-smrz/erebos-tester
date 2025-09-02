@@ -313,15 +313,10 @@ tryMatch re (x:xs) | Right (Just (_, _, _, capture)) <- regexMatch re x = Just (
                    | otherwise = fmap (x:) <$> tryMatch re xs
 tryMatch _ [] = Nothing
 
-exprFailed :: Text -> SourceLine -> Maybe ProcName -> EvalTrace -> TestRun ()
-exprFailed desc sline pname exprVars = do
+exprFailed :: Text -> CallStack -> Maybe ProcName -> TestRun ()
+exprFailed desc stack pname = do
     let prompt = maybe T.empty textProcName pname
-    outLine OutputMatchFail (Just prompt) $ T.concat [desc, T.pack " failed on ", textSourceLine sline]
-    forM_ exprVars $ \((name, sel), value) ->
-        outLine OutputMatchFail (Just prompt) $ T.concat
-            [ "  ", textFqVarName name, T.concat (map ("."<>) sel)
-            , " = ", textSomeVarValue sline value
-            ]
+    outLine (OutputMatchFail stack) (Just prompt) $ desc <> " failed"
     throwError Failed
 
 expect :: SourceLine -> Process -> Traced Regex -> [TypedVarName Text] -> ([ Text ] -> TestRun ()) -> TestRun ()
@@ -340,14 +335,14 @@ expect sline p (Traced trace re) tvars inner = do
              let vars = map (\(TypedVarName n) -> n) tvars
 
              when (length vars /= length capture) $ do
-                 outProc OutputMatchFail p $ T.pack "mismatched number of capture variables on " `T.append` textSourceLine sline
+                 outProc (OutputMatchFail (CallStack [ ( sline, [] ) ])) p $ T.pack "mismatched number of capture variables on " `T.append` textSourceLine sline
                  throwError Failed
 
              outProc OutputMatch p line
              inner capture
 
-         Nothing -> exprFailed (T.pack "expect") sline (Just $ procName p) trace
+         Nothing -> exprFailed (T.pack "expect") (CallStack [ ( sline, trace ) ]) (Just $ procName p)
 
 testStepGuard :: SourceLine -> EvalTrace -> Bool -> TestRun ()
 testStepGuard sline vars x = do
-    when (not x) $ exprFailed (T.pack "guard") sline Nothing vars
+    when (not x) $ exprFailed (T.pack "guard") (CallStack [ ( sline, vars ) ]) Nothing

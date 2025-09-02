@@ -9,6 +9,7 @@ module Output (
 ) where
 
 import Control.Concurrent.MVar
+import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 
@@ -23,6 +24,8 @@ import System.Console.Haskeline.History
 import System.IO
 
 import Text.Printf
+
+import Script.Expr
 
 data Output = Output
     { outState :: MVar OutputState
@@ -53,7 +56,7 @@ data OutputType
     | OutputChildInfo
     | OutputChildFail
     | OutputMatch
-    | OutputMatchFail
+    | OutputMatchFail CallStack
     | OutputError
     | OutputAlways
     | OutputTestRaw
@@ -83,7 +86,7 @@ outColor OutputChildStdin = T.pack "0"
 outColor OutputChildInfo = T.pack "0"
 outColor OutputChildFail = T.pack "31"
 outColor OutputMatch = T.pack "32"
-outColor OutputMatchFail = T.pack "31"
+outColor OutputMatchFail {} = T.pack "31"
 outColor OutputError = T.pack "31"
 outColor OutputAlways = "0"
 outColor OutputTestRaw = "0"
@@ -95,7 +98,7 @@ outSign OutputChildStdin = T.empty
 outSign OutputChildInfo = T.pack "."
 outSign OutputChildFail = T.pack "!!"
 outSign OutputMatch = T.pack "+"
-outSign OutputMatchFail = T.pack "/"
+outSign OutputMatchFail {} = T.pack "/"
 outSign OutputError = T.pack "!!"
 outSign OutputAlways = T.empty
 outSign OutputTestRaw = T.empty
@@ -112,7 +115,7 @@ outTestLabel = \case
     OutputChildInfo -> "child-info"
     OutputChildFail -> "child-fail"
     OutputMatch -> "match"
-    OutputMatchFail -> "match-fail"
+    OutputMatchFail {} -> "match-fail"
     OutputError -> "error"
     OutputAlways -> "other"
     OutputTestRaw -> ""
@@ -121,7 +124,7 @@ printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
     OutputChildStderr -> True
     OutputChildFail -> True
-    OutputMatchFail -> True
+    OutputMatchFail {} -> True
     OutputError -> True
     OutputAlways -> True
     _ -> False
@@ -142,27 +145,59 @@ outLine otype prompt line = ioWithOutput $ \out ->
         stime <- readMVar (outStartedAt out)
         nsecs <- toNanoSecs . (`diffTimeSpec` stime) <$> getTime Monotonic
         withMVar (outState out) $ \st -> do
-            outPrint st $ TL.fromChunks $ concat
-                [ [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
-                , if outUseColor (outConfig out)
-                    then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
-                    else []
-                , [ maybe "" (<> outSign otype <> outArr otype <> " ") prompt ]
-                , [ line ]
-                , if outUseColor (outConfig out)
-                    then [ T.pack "\ESC[0m" ]
-                    else []
-                ]
+            forM_ (normalOutputLines otype line) $ \line' -> do
+                outPrint st $ TL.fromChunks $ concat
+                    [ [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
+                    , if outUseColor (outConfig out)
+                        then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
+                        else []
+                    , [ maybe "" (<> outSign otype <> outArr otype <> " ") prompt ]
+                    , [ line' ]
+                    , if outUseColor (outConfig out)
+                        then [ T.pack "\ESC[0m" ]
+                        else []
+                    ]
 
     testOutput out = do
         withMVar (outState out) $ \st -> do
-            outPrint st $ case otype of
-                OutputTestRaw -> TL.fromStrict line
-                _ -> TL.fromChunks
-                    [ outTestLabel otype, " "
-                    , maybe "-" id prompt, " "
-                    , line
-                    ]
+            case otype of
+                OutputTestRaw -> outPrint st $ TL.fromStrict line
+                _ -> forM_ (testOutputLines otype (maybe "-" id prompt) line) $ outPrint st . TL.fromStrict
+
+
+normalOutputLines :: OutputType -> Text -> [ Text ]
+normalOutputLines (OutputMatchFail (CallStack stack)) msg = concat
+    [ msg <> " on " <> textSourceLine stackTopLine : showVars stackTopLine stackTopVars
+    , concat $ flip map stackRest $ \( sline, vars ) ->
+        "  called from " <> textSourceLine sline : showVars sline vars
+    ]
+  where
+    showVars sline =
+        map $ \(( name, sel ), value ) -> T.concat
+            [ "    ", textFqVarName name, T.concat (map ("."<>) sel)
+            , " = ", textSomeVarValue sline value
+            ]
+    (( stackTopLine, stackTopVars ), stackRest ) =
+        case stack of
+            (stop : srest) -> ( stop, srest )
+            [] -> (( SourceLine "unknown", [] ), [] )
+normalOutputLines _ msg = [ msg ]
+
+
+testOutputLines :: OutputType -> Text -> Text -> [ Text ]
+testOutputLines otype@(OutputMatchFail (CallStack stack)) _ msg = concat
+    [ [ T.concat [ outTestLabel otype, " ", msg ] ]
+    , concat $ flip map stack $ \( sline, vars ) ->
+        T.concat [ outTestLabel otype, "-line ", textSourceLine sline ] : showVars sline vars
+    ]
+  where
+    showVars sline =
+        map $ \(( name, sel ), value ) -> T.concat
+            [ outTestLabel otype, "-var ", textFqVarName name, T.concat (map ("."<>) sel)
+            , " ", textSomeVarValue sline value
+            ]
+testOutputLines otype prompt msg = [ T.concat [ outTestLabel otype, " ", prompt, " ", msg ] ]
+
 
 outPromptGetLine :: MonadOutput m => Text -> m (Maybe Text)
 outPromptGetLine = outPromptGetLineCompletion noCompletion

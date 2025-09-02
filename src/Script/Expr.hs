@@ -18,7 +18,7 @@ module Script.Expr (
     anull, exprArgs,
     SomeArgumentType(..), ArgumentType(..),
 
-    Traced(..), EvalTrace, VarNameSelectors, gatherVars,
+    Traced(..), EvalTrace, CallStack(..), VarNameSelectors, gatherVars,
     AppAnnotation(..),
 
     module Script.Var,
@@ -377,6 +377,7 @@ data Traced a = Traced EvalTrace a
 
 type VarNameSelectors = ( FqVarName, [ Text ] )
 type EvalTrace = [ ( VarNameSelectors, SomeVarValue ) ]
+newtype CallStack = CallStack [ ( SourceLine, EvalTrace ) ]
 
 gatherVars :: forall a m. MonadEval m => Expr a -> m EvalTrace
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper
