@@ -201,7 +201,8 @@ unifyExpr off pa expr = if
                 SomeExpr context <- gets testContext
                 context' <- unifyExpr off atype context
                 return $ Just ( kw, SomeExpr context' )
-        return (FunctionEval $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
+        sline <- getSourceLine
+        return (FunctionEval sline $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
 
     | Just (Refl :: DynamicType :~: b) <- eqT
     , Undefined msg <- expr

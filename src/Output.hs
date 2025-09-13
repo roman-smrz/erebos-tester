@@ -167,15 +167,15 @@ outLine otype prompt line = ioWithOutput $ \out ->
 
 normalOutputLines :: OutputType -> Text -> [ Text ]
 normalOutputLines (OutputMatchFail (CallStack stack)) msg = concat
-    [ msg <> " on " <> textSourceLine stackTopLine : showVars stackTopLine stackTopVars
+    [ msg <> " on " <> textSourceLine stackTopLine : showVars stackTopVars
     , concat $ flip map stackRest $ \( sline, vars ) ->
-        "  called from " <> textSourceLine sline : showVars sline vars
+        "  called from " <> textSourceLine sline : showVars vars
     ]
   where
-    showVars sline =
+    showVars =
         map $ \(( name, sel ), value ) -> T.concat
             [ "    ", textFqVarName name, T.concat (map ("."<>) sel)
-            , " = ", textSomeVarValue sline value
+            , " = ", textSomeVarValue value
             ]
     (( stackTopLine, stackTopVars ), stackRest ) =
         case stack of
@@ -188,13 +188,13 @@ testOutputLines :: OutputType -> Text -> Text -> [ Text ]
 testOutputLines otype@(OutputMatchFail (CallStack stack)) _ msg = concat
     [ [ T.concat [ outTestLabel otype, " ", msg ] ]
     , concat $ flip map stack $ \( sline, vars ) ->
-        T.concat [ outTestLabel otype, "-line ", textSourceLine sline ] : showVars sline vars
+        T.concat [ outTestLabel otype, "-line ", textSourceLine sline ] : showVars vars
     ]
   where
-    showVars sline =
+    showVars =
         map $ \(( name, sel ), value ) -> T.concat
             [ outTestLabel otype, "-var ", textFqVarName name, T.concat (map ("."<>) sel)
-            , " ", textSomeVarValue sline value
+            , " ", textSomeVarValue value
             ]
 testOutputLines otype prompt msg = [ T.concat [ outTestLabel otype, " ", prompt, " ", msg ] ]
 

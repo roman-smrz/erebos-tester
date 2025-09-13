@@ -58,7 +58,7 @@ data Expr a where
     ArgsReq :: ExprType a => FunctionArguments ( VarName, SomeArgumentType ) -> Expr (FunctionType a) -> Expr (FunctionType a)
     ArgsApp :: ExprType a => FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
     FunctionAbstraction :: ExprType a => Expr a -> Expr (FunctionType a)
-    FunctionEval :: ExprType a => Expr (FunctionType a) -> Expr a
+    FunctionEval :: ExprType a => SourceLine -> Expr (FunctionType a) -> Expr a
     LambdaAbstraction :: ExprType a => TypedVarName a -> Expr b -> Expr (a -> b)
     Pure :: a -> Expr a
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
@@ -98,7 +98,7 @@ mapExpr f = go
         ArgsReq args expr -> f $ ArgsReq args (go expr)
         ArgsApp args expr -> f $ ArgsApp (fmap (\(SomeExpr e) -> SomeExpr (go e)) args) (go expr)
         FunctionAbstraction expr -> f $ FunctionAbstraction (go expr)
-        FunctionEval expr -> f $ FunctionEval (go expr)
+        FunctionEval sline expr -> f $ FunctionEval sline (go expr)
         LambdaAbstraction tvar expr -> f $ LambdaAbstraction tvar (go expr)
         e@Pure {} -> f e
         App ann efun earg -> f $ App ann (go efun) (go earg)
@@ -131,12 +131,6 @@ withVar name value = withDictionary (( name, someConstValue value ) : )
 withTypedVar :: (MonadEval m, ExprType e) => TypedVarName e -> e -> m a -> m a
 withTypedVar (TypedVarName name) = withVar name
 
-isInternalVar :: FqVarName -> Bool
-isInternalVar (GlobalVarName {}) = False
-isInternalVar (LocalVarName (VarName name))
-    | Just ( '$', _ ) <- T.uncons name = True
-    | otherwise                        = False
-
 
 newtype SimpleEval a = SimpleEval (Reader ( GlobalDefs, VariableDictionary ) a)
     deriving (Functor, Applicative, Monad)
@@ -157,26 +151,27 @@ eval = \case
     Let _ (TypedVarName name) valExpr expr -> do
         val <- eval valExpr
         withVar name val $ eval expr
-    Variable sline name -> fromSomeVarValue sline name =<< lookupVar name
+    Variable _ name -> fromSomeVarValue (CallStack []) name =<< lookupVar name
     DynVariable _ _ name -> fail $ "ambiguous type of ‘" <> unpackFqVarName name <> "’"
-    FunVariable _ sline name -> funFromSomeVarValue sline name =<< lookupVar name
+    FunVariable _ _ name -> funFromSomeVarValue name =<< lookupVar name
     ArgsReq (FunctionArguments req) efun -> do
         gdefs <- askGlobalDefs
         dict <- askDictionary
-        return $ FunctionType $ \(FunctionArguments args) ->
+        return $ FunctionType $ \stack (FunctionArguments args) ->
             let used = M.intersectionWith (\value ( vname, _ ) -> ( vname, value )) args req
                 FunctionType fun = runSimpleEval (eval efun) gdefs (toList used ++ dict)
-             in fun $ FunctionArguments $ args `M.difference` req
+             in fun stack $ FunctionArguments $ args `M.difference` req
     ArgsApp eargs efun -> do
         FunctionType fun <- eval efun
         args <- mapM evalSome eargs
-        return $ FunctionType $ \args' -> fun (args <> args')
+        return $ FunctionType $ \stack args' -> fun stack (args <> args')
     FunctionAbstraction expr -> do
         val <- eval expr
-        return $ FunctionType $ const val
-    FunctionEval efun -> do
+        return $ FunctionType $ const $ const val
+    FunctionEval sline efun -> do
         FunctionType fun <- eval efun
-        return $ fun mempty
+        vars <- gatherVars efun
+        return $ fun (CallStack [ ( sline, vars ) ]) mempty
     LambdaAbstraction (TypedVarName name) expr -> do
         gdefs <- askGlobalDefs
         dict <- askDictionary
@@ -205,7 +200,7 @@ evalFunToVarValue expr = do
     VarValue
         <$> gatherVars expr
         <*> pure (exprArgs expr)
-        <*> pure (const fun)
+        <*> pure fun
 
 evalSome :: MonadEval m => SomeExpr -> m SomeVarValue
 evalSome (SomeExpr expr)
@@ -216,7 +211,7 @@ evalSomeWith :: GlobalDefs -> SomeExpr -> SomeVarValue
 evalSomeWith gdefs sexpr = runSimpleEval (evalSome sexpr) gdefs []
 
 
-data FunctionType a = FunctionType (FunctionArguments SomeVarValue -> a)
+data FunctionType a = FunctionType (CallStack -> FunctionArguments SomeVarValue -> a)
 
 instance ExprType a => ExprType (FunctionType a) where
     textExprType _ = "function type"
@@ -289,7 +284,7 @@ asFunType = \case
 data VarValue a = VarValue
     { vvVariables :: EvalTrace
     , vvArguments :: FunctionArguments SomeArgumentType
-    , vvFunction :: SourceLine -> FunctionArguments SomeVarValue -> a
+    , vvFunction :: CallStack -> FunctionArguments SomeVarValue -> a
     }
 
 data SomeVarValue = forall a. ExprType a => SomeVarValue (VarValue a)
@@ -303,27 +298,27 @@ svvArguments (SomeVarValue vv) = vvArguments vv
 someConstValue :: ExprType a => a -> SomeVarValue
 someConstValue = SomeVarValue . VarValue [] mempty . const . const
 
-fromConstValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> FqVarName -> VarValue a -> m a
-fromConstValue sline name (VarValue _ args value :: VarValue b) = do
+fromConstValue :: forall a m. (ExprType a, MonadFail m) => CallStack -> FqVarName -> VarValue a -> m a
+fromConstValue stack name (VarValue _ args value :: VarValue b) = do
     maybe (fail err) return $ do
         guard $ anull args
-        cast $ value sline mempty
+        cast $ value stack mempty
   where
     err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textFqVarName name, T.pack "' has type ",
             if anull args then textExprType @b Proxy else "function type" ]
 
-fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> FqVarName -> SomeVarValue -> m a
-fromSomeVarValue sline name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
+fromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => CallStack -> FqVarName -> SomeVarValue -> m a
+fromSomeVarValue stack name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
     maybe (fail err) return $ do
         guard $ anull args
-        cast $ value sline mempty
+        cast $ value stack mempty
   where
     err = T.unpack $ T.concat [ T.pack "expected ", textExprType @a Proxy, T.pack ", but variable '", textFqVarName name, T.pack "' has type ",
             if anull args then textExprType @b Proxy else "function type" ]
 
-textSomeVarValue :: SourceLine -> SomeVarValue -> Text
-textSomeVarValue sline (SomeVarValue (VarValue _ args value))
-    | anull args = textExprValue $ value sline mempty
+textSomeVarValue :: SomeVarValue -> Text
+textSomeVarValue (SomeVarValue (VarValue _ args value))
+    | anull args = textExprValue $ value (CallStack []) mempty
     | otherwise  =  "<function>"
 
 someVarValueType :: SomeVarValue -> SomeExprType
@@ -356,10 +351,10 @@ exprArgs = \case
     App {} -> error "exprArgs: app"
     Undefined {} -> error "exprArgs: undefined"
 
-funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => SourceLine -> FqVarName -> SomeVarValue -> m (FunctionType a)
-funFromSomeVarValue sline name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
+funFromSomeVarValue :: forall a m. (ExprType a, MonadFail m) => FqVarName -> SomeVarValue -> m (FunctionType a)
+funFromSomeVarValue name (SomeVarValue (VarValue _ args value :: VarValue b)) = do
     maybe (fail err) return $ do
-        FunctionType <$> cast (value sline)
+        FunctionType <$> cast value
   where
     err = T.unpack $ T.concat [ T.pack "expected function returning ", textExprType @a Proxy, T.pack ", but variable '", textFqVarName name, T.pack "' has ",
             (if anull args then "type " else "function type returting ") <> textExprType @b Proxy ]
@@ -386,17 +381,21 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
     helper = \case
         Let _ (TypedVarName var) _ expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Variable _ var
-            | isInternalVar var -> return []
+            | GlobalVarName {} <- var -> return []
             | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
-        DynVariable _ _ var -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
-        FunVariable _ _ var -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
+        DynVariable _ _ var
+            | GlobalVarName {} <- var -> return []
+            | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
+        FunVariable _ _ var
+            | GlobalVarName {} <- var -> return []
+            | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         ArgsReq args expr -> withDictionary (filter ((`notElem` map fst (toList args)) . fst)) $ helper expr
         ArgsApp (FunctionArguments args) fun -> do
             v <- helper fun
             vs <- mapM (\(SomeExpr e) -> helper e) $ M.elems args
             return $ concat (v : vs)
         FunctionAbstraction expr -> helper expr
-        FunctionEval efun -> helper efun
+        FunctionEval _ efun -> helper efun
         LambdaAbstraction (TypedVarName var) expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Pure _ -> return []
         e@(App (AnnRecord sel) _ x)

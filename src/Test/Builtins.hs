@@ -29,11 +29,7 @@ getArg args = fromMaybe (error "parameter mismatch") . getArgMb args
 
 getArgMb :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> Maybe a
 getArgMb (FunctionArguments args) kw = do
-    fromSomeVarValue SourceLineBuiltin (LocalVarName (VarName "")) =<< M.lookup kw args
-
-getArgVars :: FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> [ (( FqVarName, [ Text ] ), SomeVarValue ) ]
-getArgVars (FunctionArguments args) kw = do
-    maybe [] svvVariables $ M.lookup kw args
+    fromSomeVarValue (CallStack []) (LocalVarName (VarName "")) =<< M.lookup kw args
 
 builtinSend :: SomeVarValue
 builtinSend = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
@@ -64,7 +60,7 @@ builtinIgnore = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atype
 
 builtinGuard :: SomeVarValue
 builtinGuard = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
-    \sline args -> TestBlockStep EmptyTestBlock $ Guard sline (getArgVars args Nothing) (getArg args Nothing)
+    \stack args -> TestBlockStep EmptyTestBlock $ Guard stack (getArg args Nothing)
 
 builtinMultiplyTimeout :: SomeVarValue
 builtinMultiplyTimeout = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton (Just "by") (SomeArgumentType (RequiredArgument @Scientific))) $

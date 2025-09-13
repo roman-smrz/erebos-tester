@@ -49,7 +49,7 @@ data TestStep a where
     Send :: Process -> Text -> TestStep ()
     Expect :: SourceLine -> Process -> Traced Regex -> [ TypedVarName Text ] -> ([ Text ] -> TestStep a) -> TestStep a
     Flush :: Process -> Maybe Regex -> TestStep ()
-    Guard :: SourceLine -> EvalTrace -> Bool -> TestStep ()
+    Guard :: CallStack -> Bool -> TestStep ()
     DisconnectNode :: Node -> TestStep a -> TestStep a
     DisconnectNodes :: Network -> TestStep a -> TestStep a
     DisconnectUpstream :: Network -> TestStep a -> TestStep a

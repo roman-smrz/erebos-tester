@@ -208,8 +208,8 @@ runStep = \case
     Flush p regex -> do
         atomicallyTest $ flushProcessOutput p regex
 
-    Guard line vars expr -> do
-        testStepGuard line vars expr
+    Guard stack expr -> do
+        testStepGuard stack expr
 
     DisconnectNode node inner -> do
         withDisconnectedUp (nodeUpstream node) $ runStep inner
@@ -343,6 +343,6 @@ expect sline p (Traced trace re) tvars inner = do
 
          Nothing -> exprFailed (T.pack "expect") (CallStack [ ( sline, trace ) ]) (Just $ procName p)
 
-testStepGuard :: SourceLine -> EvalTrace -> Bool -> TestRun ()
-testStepGuard sline vars x = do
-    when (not x) $ exprFailed (T.pack "guard") (CallStack [ ( sline, vars ) ]) Nothing
+testStepGuard :: CallStack -> Bool -> TestRun ()
+testStepGuard stack x = do
+    when (not x) $ exprFailed (T.pack "guard") stack Nothing
