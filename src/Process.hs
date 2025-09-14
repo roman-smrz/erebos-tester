@@ -178,7 +178,7 @@ closeProcess timeout p = do
 
 closeTestProcess :: Process -> TestRun ()
 closeTestProcess process = do
-    timeout <- liftIO . readMVar =<< asks (teTimeout . fst)
+    timeout <- getCurrentTimeout
     closeProcess timeout process
 
 withProcess :: Either Network Node -> ProcName -> Maybe Signal -> String -> (Process -> TestRun a) -> TestRun a

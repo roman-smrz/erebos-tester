@@ -8,6 +8,8 @@ module Run.Monad (
     finally,
     forkTest,
     forkTestUsing,
+
+    getCurrentTimeout,
 ) where
 
 import Control.Concurrent
@@ -43,7 +45,7 @@ data TestEnv = TestEnv
     , teOptions :: TestOptions
     , teNextObjId :: MVar Int
     , teProcesses :: MVar [ Process ]
-    , teTimeout :: MVar Scientific
+    , teTimeout :: MVar ( Scientific, Integer ) -- ( positive timeout, number of zero multiplications )
     , teGDB :: Maybe (MVar GDB)
     }
 
@@ -130,3 +132,9 @@ forkTestUsing fork act = do
         case res of
             Left e -> atomically $ writeTVar (teFailed $ fst tenv) (Just e)
             Right () -> return ()
+
+getCurrentTimeout :: TestRun Scientific
+getCurrentTimeout = do
+    ( timeout, zeros ) <- liftIO . readMVar =<< asks (teTimeout . fst)
+    return $ if zeros > 0 then 0
+                          else timeout

@@ -60,7 +60,7 @@ runTest out opts gdefs test = do
     failedVar <- newTVarIO Nothing
     objIdVar <- newMVar 1
     procVar <- newMVar []
-    timeoutVar <- newMVar $ optTimeout opts
+    timeoutVar <- newMVar ( optTimeout opts, 0 )
 
     mgdb <- if optGDB opts
         then flip runReaderT out $ do
@@ -321,7 +321,7 @@ exprFailed desc stack pname = do
 
 expect :: SourceLine -> Process -> Traced Regex -> [TypedVarName Text] -> ([ Text ] -> TestRun ()) -> TestRun ()
 expect sline p (Traced trace re) tvars inner = do
-    timeout <- liftIO . readMVar =<< asks (teTimeout . fst)
+    timeout <- getCurrentTimeout
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
         line <- readTVar (procOutput p)
