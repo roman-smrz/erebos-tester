@@ -202,8 +202,8 @@ runStep = \case
         outProc OutputChildStdin p line
         send p line
 
-    Expect line p expr captures inner -> do
-        expect line p expr captures $ runStep . inner
+    Expect line p expr timeout captures inner -> do
+        expect line p expr timeout captures $ runStep . inner
 
     Flush p regex -> do
         atomicallyTest $ flushProcessOutput p regex
@@ -318,9 +318,9 @@ exprFailed desc stack pname = do
     outLine (OutputMatchFail stack) (Just prompt) $ desc <> " failed"
     throwError Failed
 
-expect :: SourceLine -> Process -> Traced Regex -> [TypedVarName Text] -> ([ Text ] -> TestRun ()) -> TestRun ()
-expect sline p (Traced trace re) tvars inner = do
-    timeout <- getCurrentTimeout
+expect :: SourceLine -> Process -> Traced Regex -> Scientific -> [TypedVarName Text] -> ([ Text ] -> TestRun ()) -> TestRun ()
+expect sline p (Traced trace re) etimeout tvars inner = do
+    timeout <- (etimeout *) <$> getCurrentTimeout
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
         line <- readTVar (procOutput p)

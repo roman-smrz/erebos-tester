@@ -434,6 +434,7 @@ testExpect = command "expect" $ Expect
     <$> cmdLine
     <*> (fromExprParam <$> paramOrContext "from")
     <*> param ""
+    <*> (maybe 1 fromExprParam <$> param "timeout")
     <*> param "capture"
     <*> innerBlockFunList
 

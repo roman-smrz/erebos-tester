@@ -261,7 +261,7 @@ send <string> to <process>
 Send line with `<string>` to the standard input of `<process>`.
 
 ```
-expect <regex> from <process> [capture <var1> [, <var2> ... ]]
+expect <regex> from <process> [timeout <timeout>] [capture <var1> [, <var2> ... ]]
 ```
 Check whether `<process>` produces line matching `<regex>` on standard output, and if this does not happen within current timeout, the test fails.
 Output lines produced before starting this command and not matched by some previous `expect` are accepted as well.
@@ -273,6 +273,9 @@ If e.g. only the beginning should be matched, the passed regular expression need
 The regular expression can contain capture groups – parts enclosed in parentheses (`(`, `)`).
 In that case the expect command has to have the `capture` clause with matching number of variable names.
 Results of the captures are then assigned to the newly created variables as strings.
+
+If the `timeout` clause is used, the current timeout value is multiplied by the given `<timeout>` for this `expect` call.
+Timeout of zero can be used to expect a matching output line to have been already produced in the past.
 
 ```
 flush [from <proc>] [matching <regex>]

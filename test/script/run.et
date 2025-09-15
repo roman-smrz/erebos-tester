@@ -111,10 +111,20 @@ test CallStack:
         send "load ${scripts.path}/callstack.et"
         expect /load-done/
 
-        send "run A"
+        send "run AG"
         expect /match-fail guard failed/
         expect /match-fail-line .*\/callstack.et:3:5: .*/
         expect /match-fail-var x 1/
         local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
+        flush
+
+        send "run AE"
+        expect /match-fail expect failed/
+        expect /match-fail-line .*\/callstack.et:8:5: .*/
+        expect /match-fail-var x 2/
+        local:
+            expect /(run-.*)/ capture done
+            guard (done == "run-failed")
+        flush
