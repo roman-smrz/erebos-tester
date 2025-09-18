@@ -233,11 +233,10 @@ withInternet :: (Network -> TestRun a) -> TestRun a
 withInternet inner = do
     testDir <- asks $ optTestDir . teOptions . fst
     inet <- newInternet testDir
-    res <- withNetwork (inetRoot inet) $ \net -> do
-        withTypedVar rootNetworkVar net $ do
-            inner net
-    delInternet inet
-    return res
+    flip finally (delInternet inet) $ do
+        withNetwork (inetRoot inet) $ \net -> do
+            withTypedVar rootNetworkVar net $ do
+                inner net
 
 withSubnet :: Network -> Maybe (TypedVarName Network) -> (Network -> TestRun a) -> TestRun a
 withSubnet parent tvname inner = do
