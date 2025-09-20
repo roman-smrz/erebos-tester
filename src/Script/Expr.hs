@@ -146,6 +146,12 @@ instance MonadEval SimpleEval where
     askDictionary = SimpleEval (asks snd)
     withDictionary f (SimpleEval inner) = SimpleEval (local (fmap f) inner)
 
+callStackVarName :: VarName
+callStackVarName = VarName "$STACK"
+
+callStackFqVarName :: FqVarName
+callStackFqVarName = LocalVarName callStackVarName
+
 eval :: forall m a. MonadEval m => Expr a -> m a
 eval = \case
     Let _ (TypedVarName name) valExpr expr -> do
@@ -166,12 +172,16 @@ eval = \case
         args <- mapM evalSome eargs
         return $ FunctionType $ \stack args' -> fun stack (args <> args')
     FunctionAbstraction expr -> do
-        val <- eval expr
-        return $ FunctionType $ const $ const val
+        gdefs <- askGlobalDefs
+        dict <- askDictionary
+        return $ FunctionType $ \stack _ ->
+            runSimpleEval (eval expr) gdefs (( callStackVarName, someConstValue stack ) : dict)
     FunctionEval sline efun -> do
-        FunctionType fun <- eval efun
         vars <- gatherVars efun
-        return $ fun (CallStack [ ( sline, vars ) ]) mempty
+        CallStack cs <- maybe (return $ CallStack []) (fromSomeVarValue (CallStack []) callStackFqVarName) =<< tryLookupVar callStackFqVarName
+        let cs' = CallStack (( sline, vars ) : cs)
+        FunctionType fun <- withVar callStackVarName cs' $ eval efun
+        return $ fun cs' mempty
     LambdaAbstraction (TypedVarName name) expr -> do
         gdefs <- askGlobalDefs
         dict <- askDictionary
@@ -373,6 +383,10 @@ data Traced a = Traced EvalTrace a
 type VarNameSelectors = ( FqVarName, [ Text ] )
 type EvalTrace = [ ( VarNameSelectors, SomeVarValue ) ]
 newtype CallStack = CallStack [ ( SourceLine, EvalTrace ) ]
+
+instance ExprType CallStack where
+    textExprType _ = T.pack "callstack"
+    textExprValue _ = T.pack "<callstack>"
 
 gatherVars :: forall a m. MonadEval m => Expr a -> m EvalTrace
 gatherVars = fmap (uniqOn fst . sortOn fst) . helper

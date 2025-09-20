@@ -6,3 +6,18 @@ test AE:
     spawn as p
     let x = 2
     expect /$x/ from p timeout 0.0
+
+def fg:
+    let x = 1
+    guard (x == 0)
+
+test BG:
+    fg
+
+def gg (x):
+    let y = 2
+    guard (x == y)
+
+test CG:
+    let z = 3
+    gg (z)

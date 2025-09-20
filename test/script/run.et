@@ -128,3 +128,25 @@ test CallStack:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
         flush
+
+        send "run BG"
+        expect /match-fail guard failed/
+        expect /match-fail-line .*\/callstack.et:12:5: .*/
+        expect /match-fail-var x 1/
+        expect /match-fail-line .*\/callstack.et:15:5: .*/
+        local:
+            expect /(run-.*)/ capture done
+            guard (done == "run-failed")
+        flush
+
+        send "run CG"
+        expect /match-fail guard failed/
+        expect /match-fail-line .*\/callstack.et:19:5: .*/
+        expect /match-fail-var x 3/
+        expect /match-fail-var y 2/
+        expect /match-fail-line .*\/callstack.et:23:5: .*/
+        expect /match-fail-var z 3/
+        local:
+            expect /(run-.*)/ capture done
+            guard (done == "run-failed")
+        flush
