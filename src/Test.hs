@@ -12,7 +12,7 @@ import Control.Monad.Reader
 
 import Data.Bifunctor
 import Data.Scientific
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import Data.Typeable
 
 import Network
@@ -57,7 +57,7 @@ data TestStep a where
     PacketLoss :: Scientific -> Node -> TestStep a -> TestStep a
     Wait :: TestStep ()
 
-instance Typeable a => ExprType (TestBlock a) where
+instance ExprType a => ExprType (TestBlock a) where
     textExprType _ = "test block"
     textExprValue _ = "<test block>"
 
@@ -66,6 +66,9 @@ data MultiplyTimeout = MultiplyTimeout Scientific
 
 instance ObjectType TestRun MultiplyTimeout where
     type ConstructorArgs MultiplyTimeout = Scientific
+
+    textObjectType _ _ = "MultiplyTimeout"
+    textObjectValue _ (MultiplyTimeout x) = pack (show x) <> "@MultiplyTimeout"
 
     createObject oid timeout
         | timeout >= 0 = do

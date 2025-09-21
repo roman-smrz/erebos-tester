@@ -199,6 +199,9 @@ data IgnoreProcessOutput = IgnoreProcessOutput Process Int
 instance ObjectType TestRun IgnoreProcessOutput where
     type ConstructorArgs IgnoreProcessOutput = ( Process, Maybe Regex )
 
+    textObjectType _ _ = "IgnoreProcessOutput"
+    textObjectValue _ (IgnoreProcessOutput _ _) = "<IgnoreProcessOutput>"
+
     createObject oid ( process@Process {..}, regex ) = do
         liftIO $ atomically $ do
             flushProcessOutput process regex

@@ -39,6 +39,10 @@ data ExprListUnpacker a = forall e. ExprType e => ExprListUnpacker (a -> [e]) (P
 data ExprEnumerator a = ExprEnumerator (a -> a -> [a]) (a -> a -> a -> [a])
 
 
+instance ExprType () where
+    textExprType _ = "Unit"
+    textExprValue () = "()"
+
 instance ExprType Integer where
     textExprType _ = T.pack "integer"
     textExprValue x = T.pack (show x)

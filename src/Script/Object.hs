@@ -7,7 +7,10 @@ module Script.Object (
 ) where
 
 import Data.Kind
+import Data.Text (Text)
 import Data.Typeable
+
+import Script.Expr.Class
 
 
 newtype ObjectId = ObjectId Int
@@ -16,8 +19,16 @@ class Typeable a => ObjectType m a where
     type ConstructorArgs a :: Type
     type ConstructorArgs a = ()
 
+    textObjectType :: proxy (m a) -> proxy a -> Text
+    textObjectValue :: proxy (m a) -> a -> Text
+
     createObject :: ObjectId -> ConstructorArgs a -> m (Object m a)
     destroyObject :: Object m a -> m ()
+
+instance (Typeable m, ObjectType m a) => ExprType (Object m a) where
+    textExprType _ = textObjectType (Proxy @(m a)) (Proxy @a)
+    textExprValue = textObjectValue (Proxy @(m a)) . objImpl
+
 
 data Object m a = ObjectType m a => Object
     { objId :: ObjectId
