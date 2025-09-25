@@ -175,13 +175,6 @@ instance ExprType a => ParamType (TypedVarName a) where
     paramNewVariables _ var = SomeNewVariables [ var ]
     paramNewVariablesEmpty _ = SomeNewVariables @a []
 
-instance ExprType a => ParamType (Expr a) where
-    parseParam _ = do
-        off <- stateOffset <$> getParserState
-        SomeExpr e <- literal <|> between (symbol "(") (symbol ")") someExpr
-        unifyExpr off Proxy e
-    showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
-
 instance ParamType a => ParamType [a] where
     type ParamRep [a] = [ParamRep a]
     parseParam _ = listOf (parseParam @a Proxy)
@@ -217,8 +210,8 @@ instance (ParamType a, ParamType b) => ParamType (Either a b) where
 
 instance ExprType a => ParamType (Traced a) where
     type ParamRep (Traced a) = Expr a
-    parseParam _ = parseParam (Proxy @(Expr a))
-    showParamType _ = showParamType (Proxy @(Expr a))
+    parseParam _ = parseParam (Proxy @(ExprParam a))
+    showParamType _ = showParamType (Proxy @(ExprParam a))
     paramExpr = Trace
 
 data SomeParam f = forall a. ParamType a => SomeParam (Proxy a) (f (ParamRep a))
