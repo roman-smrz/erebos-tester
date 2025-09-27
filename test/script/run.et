@@ -63,14 +63,15 @@ test SimpleRun:
 
 test RunConfig:
     node n
-    shell on n:
-        cp ${scripts.path}/erebos-tester.yaml .
-        mkdir tools
-        cp ${scripts.path}/tools/echo.sh ./tools/tool
-        mkdir scripts
-        # TODO: it seems that namespaces are not properly cleaned up after the failed test
-        #cp ${scripts.path}/trivial.et ./scripts/
-        cp ${scripts.path}/echo.et ./scripts/
+    local:
+        shell on n:
+            cp ${scripts.path}/erebos-tester.yaml .
+            mkdir tools
+            cp ${scripts.path}/tools/echo.sh ./tools/tool
+            mkdir scripts
+            # TODO: it seems that namespaces are not properly cleaned up after the failed test
+            #cp ${scripts.path}/trivial.et ./scripts/
+            cp ${scripts.path}/echo.et ./scripts/
 
     spawn as p on n
 
@@ -89,12 +90,13 @@ test RunConfig:
 
 test GetSysInfo:
     node n
-    shell on n:
-        cp ${scripts.path}/erebos-tester.yaml .
-        mkdir tools
-        cp ${scripts.path}/tools/sysinfo.sh ./tools/tool
-        mkdir scripts
-        cp ${scripts.path}/sysinfo.et ./scripts/
+    local:
+        shell on n:
+            cp ${scripts.path}/erebos-tester.yaml .
+            mkdir tools
+            cp ${scripts.path}/tools/sysinfo.sh ./tools/tool
+            mkdir scripts
+            cp ${scripts.path}/sysinfo.et ./scripts/
 
     spawn as p on n
 
