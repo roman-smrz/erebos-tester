@@ -69,8 +69,7 @@ test RunConfig:
             mkdir tools
             cp ${scripts.path}/tools/echo.sh ./tools/tool
             mkdir scripts
-            # TODO: it seems that namespaces are not properly cleaned up after the failed test
-            #cp ${scripts.path}/trivial.et ./scripts/
+            cp ${scripts.path}/trivial.et ./scripts/
             cp ${scripts.path}/echo.et ./scripts/
 
     spawn as p on n
@@ -79,8 +78,8 @@ test RunConfig:
         send "load-config"
         expect /load-config-done/
         send "run-all"
-        #expect /run-test-result AlwaysSucceeds done/
-        #expect /run-test-result AlwaysFails failed/
+        expect /run-test-result AlwaysSucceeds done/
+        expect /run-test-result AlwaysFails failed/
         expect /child-stdin p abcdef/
         expect /child-stdout p abcdef/
         expect /match p abcdef/
