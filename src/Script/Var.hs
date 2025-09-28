@@ -9,6 +9,8 @@ module Script.Var (
 import Data.Text (Text)
 import Data.Text qualified as T
 
+import Script.Expr.Class
+
 
 newtype VarName = VarName Text
     deriving (Eq, Ord)
@@ -40,6 +42,10 @@ unqualifyName (LocalVarName name) = name
 newtype TypedVarName a = TypedVarName { fromTypedVarName :: VarName }
     deriving (Eq, Ord)
 
+instance ExprType a => ExprType (TypedVarName a) where
+    textExprType _ = "TypedVarName"
+    textExprValue = textVarName . fromTypedVarName
+
 
 newtype ModuleName = ModuleName [ Text ]
     deriving (Eq, Ord, Show)
@@ -54,3 +60,7 @@ data SourceLine
 textSourceLine :: SourceLine -> Text
 textSourceLine (SourceLine text) = text
 textSourceLine SourceLineBuiltin = "<builtin>"
+
+instance ExprType SourceLine where
+    textExprType _ = "SourceLine"
+    textExprValue = textSourceLine

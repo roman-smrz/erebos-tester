@@ -79,3 +79,13 @@ instance ExprType a => ExprType [a] where
     textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
 
     exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
+
+instance ExprType a => ExprType (Maybe a) where
+    textExprType _ = textExprType @a Proxy <> "?"
+    textExprValue (Just x) = textExprValue x
+    textExprValue Nothing = "Nothing"
+
+instance (ExprType a, ExprType b) => ExprType (Either a b) where
+    textExprType _ = textExprType @a Proxy <> "|" <> textExprType @b Proxy
+    textExprValue (Left x) = "Left " <> textExprValue x
+    textExprValue (Right x) = "Right " <> textExprValue x

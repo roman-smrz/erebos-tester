@@ -58,8 +58,12 @@ data TestStep a where
     Wait :: TestStep ()
 
 instance ExprType a => ExprType (TestBlock a) where
-    textExprType _ = "test block"
-    textExprValue _ = "<test block>"
+    textExprType _ = "TestBlock"
+    textExprValue _ = "<test-block>"
+
+instance ExprType a => ExprType (TestStep a) where
+    textExprType _ = "TestStep"
+    textExprValue _ = "<test-step>"
 
 
 data MultiplyTimeout = MultiplyTimeout Scientific

@@ -33,6 +33,7 @@ import Network.Ip
 import Output
 import Process
 import Run.Monad
+import Script.Expr.Class
 import Script.Var
 
 
@@ -53,6 +54,22 @@ data ShellCommand = ShellCommand
     , cmdArguments :: [ Text ]
     , cmdSourceLine :: SourceLine
     }
+
+instance ExprType ShellScript where
+    textExprType _ = T.pack "ShellScript"
+    textExprValue _ = "<shell-script>"
+
+instance ExprType ShellStatement where
+    textExprType _ = T.pack "ShellStatement"
+    textExprValue _ = "<shell-statement>"
+
+instance ExprType ShellPipeline where
+    textExprType _ = T.pack "ShellPipeline"
+    textExprValue _ = "<shell-pipeline>"
+
+instance ExprType ShellCommand where
+    textExprType _ = T.pack "ShellCommand"
+    textExprValue _ = "<shell-command>"
 
 
 data ShellExecInfo = ShellExecInfo
