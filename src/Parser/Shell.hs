@@ -84,14 +84,17 @@ parseCommand = label "shell statement" $ do
         <*> args
         <*> pure line
 
-parsePipeline :: Expr (Maybe ShellPipeline) -> TestParser (Expr ShellPipeline)
-parsePipeline upper = do
+parsePipeline :: Maybe (Expr ShellPipeline) -> TestParser (Expr ShellPipeline)
+parsePipeline mbupper = do
     cmd <- parseCommand
-    let pipeline = ShellPipeline <$> cmd <*> upper
+    let pipeline =
+            case mbupper of
+                Nothing -> fmap (\ecmd -> ShellPipeline ecmd Nothing) cmd
+                Just upper -> liftA2 (\ecmd eupper -> ShellPipeline ecmd (Just eupper)) cmd upper
     choice
         [ do
             osymbol "|"
-            parsePipeline (Just <$> pipeline)
+            parsePipeline (Just pipeline)
 
         , do
             return pipeline
@@ -100,7 +103,7 @@ parsePipeline upper = do
 parseStatement :: TestParser (Expr [ ShellStatement ])
 parseStatement = do
     line <- getSourceLine
-    fmap ((: []) . flip ShellStatement line) <$> parsePipeline (pure Nothing)
+    fmap ((: []) . flip ShellStatement line) <$> parsePipeline Nothing
 
 shellScript :: TestParser (Expr ShellScript)
 shellScript = do
