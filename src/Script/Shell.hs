@@ -17,7 +17,6 @@ import Control.Monad.Reader
 import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
-import Data.Text.IO qualified as T
 
 import Foreign.C.Types
 import Foreign.Ptr
@@ -107,27 +106,24 @@ handledHandle (KeepHandle h) = h
 executeCommand :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ()
 executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} = do
     let args = cmdArguments scmd
-    case cmdCommand of
-        "echo" -> liftIO $ do
-            T.hPutStrLn (handledHandle pstdout) $ T.intercalate " " args
-            hFlush (handledHandle pstdout)
-            mapM_ closeIfRequested [ pstdin, pstdout, pstderr ]
-        cmd -> do
-            (_, _, _, phandle) <- liftIO $ createProcess_ "shell"
-                (proc (T.unpack cmd) (map T.unpack args))
-                    { std_in = UseHandle $ handledHandle pstdin
-                    , std_out = UseHandle $ handledHandle pstdout
-                    , std_err = UseHandle $ handledHandle pstderr
-                    , cwd = Just (nodeDir seiNode)
-                    , env = Just []
-                    }
-            mapM_ closeIfRequested [ pstdin, pstdout, pstderr ]
-            liftIO (waitForProcess phandle) >>= \case
-                ExitSuccess -> return ()
-                status -> do
-                    outLine OutputChildFail (Just $ textProcName seiProcName) $ "failed at: " <> textSourceLine cmdSourceLine
-                    liftIO $ putMVar seiStatusVar status
-                    throwError Failed
+    phandle <- liftIO $ do
+        (_, _, _, phandle) <- createProcess_ "shell"
+            (proc (T.unpack cmdCommand) (map T.unpack args))
+                { std_in = UseHandle $ handledHandle pstdin
+                , std_out = UseHandle $ handledHandle pstdout
+                , std_err = UseHandle $ handledHandle pstderr
+                , cwd = Just (nodeDir seiNode)
+                , env = Just []
+                }
+        return phandle
+
+    mapM_ closeIfRequested [ pstdin, pstdout, pstderr ]
+    liftIO (waitForProcess phandle) >>= \case
+        ExitSuccess -> return ()
+        status -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "failed at: " <> textSourceLine cmdSourceLine
+            liftIO $ putMVar seiStatusVar status
+            throwError Failed
 
 executePipeline :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellPipeline -> TestRun ()
 executePipeline sei pstdin pstdout pstderr ShellPipeline {..} = do
