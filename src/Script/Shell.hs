@@ -26,6 +26,7 @@ import Foreign.Storable
 import System.Exit
 import System.IO
 import System.Posix.IO qualified as P
+import System.Posix.Process
 import System.Posix.Types
 import System.Process hiding (ShellCommand)
 
@@ -106,7 +107,7 @@ handledHandle (KeepHandle h) = h
 executeCommand :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ()
 executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} = do
     let args = cmdArguments scmd
-    phandle <- liftIO $ do
+    pid <- liftIO $ do
         (_, _, _, phandle) <- createProcess_ "shell"
             (proc (T.unpack cmdCommand) (map T.unpack args))
                 { std_in = UseHandle $ handledHandle pstdin
@@ -115,14 +116,28 @@ executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} 
                 , cwd = Just (nodeDir seiNode)
                 , env = Just []
                 }
-        return phandle
+        Just pid <- getPid phandle
+        return pid
 
     mapM_ closeIfRequested [ pstdin, pstdout, pstderr ]
-    liftIO (waitForProcess phandle) >>= \case
-        ExitSuccess -> return ()
-        status -> do
+    liftIO (getProcessStatus True False pid) >>= \case
+        Just (Exited ExitSuccess) -> do
+            return ()
+        Just (Exited status) -> do
             outLine OutputChildFail (Just $ textProcName seiProcName) $ "failed at: " <> textSourceLine cmdSourceLine
             liftIO $ putMVar seiStatusVar status
+            throwError Failed
+        Just (Terminated sig _) -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "killed with " <> T.pack (show sig) <> " at: " <> textSourceLine cmdSourceLine
+            liftIO $ putMVar seiStatusVar (ExitFailure (- fromIntegral sig))
+            throwError Failed
+        Just (Stopped sig) -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "stopped with " <> T.pack (show sig) <> " at: " <> textSourceLine cmdSourceLine
+            liftIO $ putMVar seiStatusVar (ExitFailure (- fromIntegral sig))
+            throwError Failed
+        Nothing -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "no exit status"
+            liftIO $ putMVar seiStatusVar (ExitFailure (- 1))
             throwError Failed
 
 executePipeline :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellPipeline -> TestRun ()
