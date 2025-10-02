@@ -20,8 +20,8 @@ import Parser.Expr
 import Script.Expr
 import Script.Shell
 
-parseArgument :: TestParser (Expr Text)
-parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)) (Pure [])) $ some $ choice
+parseTextArgument :: TestParser (Expr Text)
+parseTextArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)) (Pure [])) $ some $ choice
     [ doubleQuotedString
     , singleQuotedString
     , standaloneEscapedChar
@@ -71,13 +71,18 @@ parseArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2 (:)
             [ char ' ' >> return " "
             ]
 
-parseArguments :: TestParser (Expr [ Text ])
+parseArgument :: TestParser (Expr ShellArgument)
+parseArgument = choice
+    [ fmap ShellArgument <$> parseTextArgument
+    ]
+
+parseArguments :: TestParser (Expr [ ShellArgument ])
 parseArguments = foldr (liftA2 (:)) (Pure []) <$> many parseArgument
 
 parseCommand :: TestParser (Expr ShellCommand)
 parseCommand = label "shell statement" $ do
     line <- getSourceLine
-    command <- parseArgument
+    command <- parseTextArgument
     args <- parseArguments
     return $ ShellCommand
         <$> command

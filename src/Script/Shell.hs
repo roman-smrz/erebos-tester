@@ -1,8 +1,9 @@
 module Script.Shell (
     ShellScript(..),
-    ShellStatement(..),
-    ShellPipeline(..),
-    ShellCommand(..),
+    ShellStatement(ShellStatement),
+    ShellPipeline(ShellPipeline),
+    ShellCommand(ShellCommand),
+    ShellArgument(..),
     withShellProcess,
 ) where
 
@@ -13,6 +14,7 @@ import Control.Monad.Except
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 
+import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -51,9 +53,15 @@ data ShellPipeline = ShellPipeline
 
 data ShellCommand = ShellCommand
     { cmdCommand :: Text
-    , cmdArguments :: [ Text ]
+    , cmdExtArguments :: [ ShellArgument ]
     , cmdSourceLine :: SourceLine
     }
+
+data ShellArgument
+    = ShellArgument Text
+
+cmdArguments :: ShellCommand -> [ Text ]
+cmdArguments = catMaybes . map (\case ShellArgument x -> Just x) . cmdExtArguments
 
 instance ExprType ShellScript where
     textExprType _ = T.pack "ShellScript"
@@ -70,6 +78,10 @@ instance ExprType ShellPipeline where
 instance ExprType ShellCommand where
     textExprType _ = T.pack "ShellCommand"
     textExprValue _ = "<shell-command>"
+
+instance ExprType ShellArgument where
+    textExprType _ = T.pack "ShellArgument"
+    textExprValue _ = "<shell-argument>"
 
 
 data ShellExecInfo = ShellExecInfo
@@ -93,15 +105,16 @@ handledHandle (KeepHandle h) = h
 
 
 executeCommand :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ()
-executeCommand ShellExecInfo {..} pstdin pstdout pstderr ShellCommand {..} = do
+executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} = do
+    let args = cmdArguments scmd
     case cmdCommand of
         "echo" -> liftIO $ do
-            T.hPutStrLn (handledHandle pstdout) $ T.intercalate " " cmdArguments
+            T.hPutStrLn (handledHandle pstdout) $ T.intercalate " " args
             hFlush (handledHandle pstdout)
             mapM_ closeIfRequested [ pstdin, pstdout, pstderr ]
         cmd -> do
             (_, _, _, phandle) <- liftIO $ createProcess_ "shell"
-                (proc (T.unpack cmd) (map T.unpack cmdArguments))
+                (proc (T.unpack cmd) (map T.unpack args))
                     { std_in = UseHandle $ handledHandle pstdin
                     , std_out = UseHandle $ handledHandle pstdout
                     , std_err = UseHandle $ handledHandle pstderr
