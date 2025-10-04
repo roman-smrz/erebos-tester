@@ -24,6 +24,7 @@ import Foreign.Marshal.Array
 import Foreign.Storable
 
 import System.Exit
+import System.FilePath
 import System.IO
 import System.Posix.IO qualified as P
 import System.Posix.Process
@@ -59,9 +60,12 @@ data ShellCommand = ShellCommand
 
 data ShellArgument
     = ShellArgument Text
+    | ShellRedirectStdin Text
+    | ShellRedirectStdout Bool Text
+    | ShellRedirectStderr Bool Text
 
 cmdArguments :: ShellCommand -> [ Text ]
-cmdArguments = catMaybes . map (\case ShellArgument x -> Just x) . cmdExtArguments
+cmdArguments = catMaybes . map (\case ShellArgument x -> Just x; _ -> Nothing) . cmdExtArguments
 
 instance ExprType ShellScript where
     textExprType _ = T.pack "ShellScript"
@@ -107,19 +111,35 @@ handledHandle (KeepHandle h) = h
 executeCommand :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ()
 executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} = do
     let args = cmdArguments scmd
+    ( pstdin', pstdout', pstderr' ) <- (\f -> foldM f ( pstdin, pstdout, pstderr ) cmdExtArguments) $ \cur@( cin, cout, cerr ) -> \case
+        ShellRedirectStdin path -> do
+            closeIfRequested cin
+            h <- liftIO $ openBinaryFile (nodeDir seiNode </> T.unpack path) ReadMode
+            return ( CloseHandle h, cout, cerr )
+        ShellRedirectStdout append path -> do
+            closeIfRequested cout
+            h <- liftIO $ openBinaryFile (nodeDir seiNode </> T.unpack path) $ if append then AppendMode else WriteMode
+            return ( cin, CloseHandle h, cerr )
+        ShellRedirectStderr append path -> do
+            closeIfRequested cerr
+            h <- liftIO $ openBinaryFile (nodeDir seiNode </> T.unpack path) $ if append then AppendMode else WriteMode
+            return ( cin, cout, CloseHandle h )
+        _ -> do
+            return cur
+
     pid <- liftIO $ do
         (_, _, _, phandle) <- createProcess_ "shell"
             (proc (T.unpack cmdCommand) (map T.unpack args))
-                { std_in = UseHandle $ handledHandle pstdin
-                , std_out = UseHandle $ handledHandle pstdout
-                , std_err = UseHandle $ handledHandle pstderr
+                { std_in = UseHandle $ handledHandle pstdin'
+                , std_out = UseHandle $ handledHandle pstdout'
+                , std_err = UseHandle $ handledHandle pstderr'
                 , cwd = Just (nodeDir seiNode)
                 , env = Just []
                 }
         Just pid <- getPid phandle
         return pid
 
-    mapM_ closeIfRequested [ pstdin, pstdout, pstderr ]
+    mapM_ closeIfRequested [ pstdin', pstdout', pstderr' ]
     liftIO (getProcessStatus True False pid) >>= \case
         Just (Exited ExitSuccess) -> do
             return ()

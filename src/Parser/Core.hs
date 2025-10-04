@@ -236,7 +236,7 @@ osymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy operatorChar) 
 wsymbol str = void $ try $ (string (TL.pack str) <* notFollowedBy wordChar) <* sc
 
 operatorChar :: (MonadParsec e s m, Token s ~ Char) => m (Token s)
-operatorChar = satisfy $ (`elem` ['.', '+', '-', '*', '/', '='])
+operatorChar = satisfy $ (`elem` [ '.', '+', '-', '*', '/', '=', '<', '>', '|' ])
 {-# INLINE operatorChar #-}
 
 localState :: TestParser a -> TestParser a

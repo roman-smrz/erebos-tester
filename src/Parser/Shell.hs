@@ -71,9 +71,29 @@ parseTextArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2
             [ char ' ' >> return " "
             ]
 
+parseRedirection :: TestParser (Expr ShellArgument)
+parseRedirection = choice
+    [ do
+        osymbol "<"
+        fmap ShellRedirectStdin <$> parseTextArgument
+    , do
+        osymbol ">"
+        fmap (ShellRedirectStdout False) <$> parseTextArgument
+    , do
+        osymbol ">>"
+        fmap (ShellRedirectStdout True) <$> parseTextArgument
+    , do
+        osymbol "2>"
+        fmap (ShellRedirectStderr False) <$> parseTextArgument
+    , do
+        osymbol "2>>"
+        fmap (ShellRedirectStderr True) <$> parseTextArgument
+    ]
+
 parseArgument :: TestParser (Expr ShellArgument)
 parseArgument = choice
-    [ fmap ShellArgument <$> parseTextArgument
+    [ parseRedirection
+    , fmap ShellArgument <$> parseTextArgument
     ]
 
 parseArguments :: TestParser (Expr [ ShellArgument ])

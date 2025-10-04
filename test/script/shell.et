@@ -74,7 +74,27 @@ test ShellPipe:
     expect_next_stdout from p:
         "bc"
         "b"
-
     with p:
         expect /run-test-result Pipe done/
+
+    expect_next_stdout from p:
+        "x"
+        "b"
+        "c"
+        "y"
+        "b"
+        "c"
+        "z"
+    with p:
+        expect /run-test-result Redirect done/
+
+    expect_next_stdout from p:
+        "c"
+        "e"
+        "g"
+        "bcdefg"
+    with p:
+        expect /run-test-result PipeRedirect done/
+
+    with p:
         expect /run-all-done/

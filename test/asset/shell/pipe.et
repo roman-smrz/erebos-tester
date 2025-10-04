@@ -3,3 +3,23 @@ test Pipe:
     shell on n as sh:
         echo abcd | grep -o '[bc]*'
         echo abcd | grep -o '[bcd]*' | grep -o '[ab]*'
+
+
+test Redirect:
+    node n
+    shell on n as sh:
+        echo a > file
+        echo b > file
+        echo c >> file
+        echo x
+        cat file
+        echo y
+        cat < file
+        echo z
+
+test PipeRedirect:
+    node n
+    shell on n as sh:
+        echo abcdefghi | grep -o '[b-h]*' | grep -o '[a-g]*' > file
+        cat < file | grep -o '[acegi]' | cat > file2
+        cat file2 - < file
