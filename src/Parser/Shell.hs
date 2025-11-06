@@ -29,7 +29,7 @@ parseTextArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2
     , unquotedString
     ]
   where
-    specialChars = [ '"', '\'', '\\', '$', '#', '|', '>', '<', ';', '[', ']', '{', '}', '(', ')', '*', '?', '~', '&', '!' ]
+    specialChars = [ '"', '\'', '\\', '$', '#', '|', '>', '<', ';', '[', ']'{-, '{', '}' -}, '(', ')'{-, '*', '?', '~', '&', '!' -} ]
 
     stringSpecialChars = [ '"', '\\', '$' ]
 
@@ -66,10 +66,7 @@ parseTextArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2
     standaloneEscapedChar :: TestParser (Expr Text)
     standaloneEscapedChar = do
         void $ char '\\'
-        fmap Pure $ choice $
-            map (\c -> char c >> return (T.singleton c)) specialChars ++
-            [ char ' ' >> return " "
-            ]
+        fmap T.singleton . Pure <$> printChar
 
 parseRedirection :: TestParser (Expr ShellArgument)
 parseRedirection = choice
