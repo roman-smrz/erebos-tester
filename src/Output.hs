@@ -92,7 +92,7 @@ outColor OutputAlways = "0"
 outColor OutputTestRaw = "0"
 
 outSign :: OutputType -> Text
-outSign OutputChildStdout = T.empty
+outSign OutputChildStdout = " "
 outSign OutputChildStderr = T.pack "!"
 outSign OutputChildStdin = T.empty
 outSign OutputChildInfo = T.pack "."
