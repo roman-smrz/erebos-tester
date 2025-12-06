@@ -3,7 +3,7 @@ module Process (
     ProcName(..),
     textProcName, unpackProcName,
     send,
-    outProc,
+    outProc, outProcName,
     lineReadingLoop,
     startProcessIOLoops,
     spawnOn,
@@ -88,7 +88,10 @@ send p line = liftIO $ do
     hFlush (procStdin p)
 
 outProc :: MonadOutput m => OutputType -> Process -> Text -> m ()
-outProc otype p line = outLine otype (Just $ textProcName $ procName p) line
+outProc otype p line = outProcName otype (procName p) line
+
+outProcName :: MonadOutput m => OutputType -> ProcName -> Text -> m ()
+outProcName otype pname line = outLine otype (Just $ textProcName pname) line
 
 lineReadingLoop :: MonadOutput m => Process -> Handle -> (Text -> m ()) -> m ()
 lineReadingLoop process h act =

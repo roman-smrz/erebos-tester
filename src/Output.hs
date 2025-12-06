@@ -53,6 +53,7 @@ data OutputType
     = OutputChildStdout
     | OutputChildStderr
     | OutputChildStdin
+    | OutputChildExec
     | OutputChildInfo
     | OutputChildFail
     | OutputMatch
@@ -83,6 +84,7 @@ outColor :: OutputType -> Text
 outColor OutputChildStdout = T.pack "0"
 outColor OutputChildStderr = T.pack "31"
 outColor OutputChildStdin = T.pack "0"
+outColor OutputChildExec = T.pack "33"
 outColor OutputChildInfo = T.pack "0"
 outColor OutputChildFail = T.pack "31"
 outColor OutputMatch = T.pack "32"
@@ -95,6 +97,7 @@ outSign :: OutputType -> Text
 outSign OutputChildStdout = " "
 outSign OutputChildStderr = T.pack "!"
 outSign OutputChildStdin = T.empty
+outSign OutputChildExec = "*"
 outSign OutputChildInfo = T.pack "."
 outSign OutputChildFail = T.pack "!!"
 outSign OutputMatch = T.pack "+"
@@ -112,6 +115,7 @@ outTestLabel = \case
     OutputChildStdout -> "child-stdout"
     OutputChildStderr -> "child-stderr"
     OutputChildStdin -> "child-stdin"
+    OutputChildExec -> "child-exec"
     OutputChildInfo -> "child-info"
     OutputChildFail -> "child-fail"
     OutputMatch -> "match"

@@ -188,9 +188,10 @@ runStep = \case
             opts <- asks $ teOptions . fst
             let pname = ProcName tname
                 tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
-                cmd = unwords $ tool : map (T.unpack . escape) args
+                cmd = T.unwords $ T.pack tool : map escape args
                 escape = ("'" <>) . (<> "'") . T.replace "'" "'\\''"
-            withProcess (Right node) pname Nothing cmd $ runStep . inner
+            outProcName OutputChildExec pname cmd
+            withProcess (Right node) pname Nothing (T.unpack cmd) $ runStep . inner
 
     SpawnShell mbname node script inner -> do
         let tname | Just (TypedVarName (VarName name)) <- mbname = name
