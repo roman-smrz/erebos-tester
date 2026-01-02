@@ -362,6 +362,39 @@ wait
 Wait for user input before continuing. Useful mostly for debugging or test development.
 
 
+### Shell interpreter
+
+**Experimental feature**: Functionality is not fully implemented and behavior may change in incompatible ways between releases.
+
+Using the `shell` expression, it's possible to embed a shell script inside a test script.
+The shell script is not passed to an external interpreter, but rather executed by the tester itself,
+which allows the use of variables from the rest of the test script:
+
+```
+test:
+    node some_node
+    let x = "abc"
+    shell as sh on some_node:
+        echo $x > some_file
+        echo ${some_node.ip} >> some_file
+        cat some_file | sed 's/a/A/' > other_file
+```
+
+The syntax is intended to be generally similar to the classic Bourne shell,
+however, only limited functionality is implemented so far (that includes executing commands, pipelines or input/output redirection).
+
+The general form of the `shell` expression is:
+
+```
+shell [as <name>] on <node>:
+    <shell commands>
+```
+
+Where `<node>` is the network node on which to run the script (it will be run in the network namespace of the node, and with working directory set to the node root),
+and `<name>`, if given, is the name of the variable that will refer to the shell process (this can be used e.g. in the `expect` command to check the standard output of the script).
+As with the `spawn` command, the resulting process is terminated at the end of the current scope.
+
+
 ### Functions
 
 When calling a function, parameters are usually passed using argument keywords
