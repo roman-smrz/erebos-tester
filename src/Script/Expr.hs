@@ -28,6 +28,7 @@ module Script.Expr (
 ) where
 
 import Control.Monad
+import Control.Monad.Except
 import Control.Monad.Reader
 
 import Data.Char
@@ -132,14 +133,17 @@ withTypedVar :: (MonadEval m, ExprType e) => TypedVarName e -> e -> m a -> m a
 withTypedVar (TypedVarName name) = withVar name
 
 
-newtype SimpleEval a = SimpleEval (Reader ( GlobalDefs, VariableDictionary ) a)
-    deriving (Functor, Applicative, Monad)
+newtype SimpleEval a = SimpleEval (ReaderT ( GlobalDefs, VariableDictionary ) (Except String) a)
+    deriving (Functor, Applicative, Monad, MonadError String)
 
 runSimpleEval :: SimpleEval a -> GlobalDefs -> VariableDictionary -> a
-runSimpleEval (SimpleEval x) = curry $ runReader x
+runSimpleEval (SimpleEval x) gdefs dict = either error id $ runExcept $ runReaderT x ( gdefs, dict )
+
+trySimpleEval :: SimpleEval a -> GlobalDefs -> VariableDictionary -> Maybe a
+trySimpleEval (SimpleEval x) gdefs dict = either (const Nothing) Just $ runExcept $ runReaderT x ( gdefs, dict )
 
 instance MonadFail SimpleEval where
-    fail = error . ("eval failed: " <>)
+    fail = throwError . ("eval failed: " <>)
 
 instance MonadEval SimpleEval where
     askGlobalDefs = SimpleEval (asks fst)
@@ -415,8 +419,10 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         e@(App (AnnRecord sel) _ x)
             | Just (var, sels) <- gatherSelectors x
             -> do
-                val <- SomeVarValue . VarValue [] mempty . const . const <$> eval e
-                return [ (( var, sels ++ [ sel ] ), val ) ]
+                gdefs <- askGlobalDefs
+                dict <- askDictionary
+                let mbVal = SomeVarValue . VarValue [] mempty . const . const <$> trySimpleEval (eval e) gdefs dict
+                return $ catMaybes [ (( var, sels ++ [ sel ] ), ) <$> mbVal ]
             | otherwise -> do
                 helper x
         App _ f x -> (++) <$> helper f <*> helper x
