@@ -48,7 +48,7 @@ data TestStep a where
     Spawn :: TypedVarName Process -> Either Network Node -> [ Text ] -> (Process -> TestStep a) -> TestStep a
     SpawnShell :: Maybe (TypedVarName Process) -> Node -> ShellScript -> (Process -> TestStep a) -> TestStep a
     Send :: Process -> Text -> TestStep ()
-    Expect :: SourceLine -> Process -> Traced Regex -> Scientific -> [ TypedVarName Text ] -> ([ Text ] -> TestStep a) -> TestStep a
+    Expect :: CallStack -> SourceLine -> Process -> Traced Regex -> Scientific -> [ TypedVarName Text ] -> ([ Text ] -> TestStep a) -> TestStep a
     Flush :: Process -> Maybe Regex -> TestStep ()
     Guard :: CallStack -> Bool -> TestStep ()
     DisconnectNode :: Node -> TestStep a -> TestStep a

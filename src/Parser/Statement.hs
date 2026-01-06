@@ -169,6 +169,12 @@ instance ParamType SourceLine where
     parseParam _ = mzero
     showParamType _ = "<source line>"
 
+instance ParamType CallStack where
+    type ParamRep CallStack = Expr CallStack
+    parseParam _ = mzero
+    showParamType _ = "<call stack>"
+    paramExpr = id
+
 instance ExprType a => ParamType (TypedVarName a) where
     parseParam _ = newVarName
     showParamType _ = "<variable>"
@@ -269,6 +275,9 @@ paramOrContext name = fromParamOrContext <$> param name
 cmdLine :: CommandDef SourceLine
 cmdLine = param ""
 
+callStack :: CommandDef CallStack
+callStack = param ""
+
 newtype InnerBlock a = InnerBlock { fromInnerBlock :: [ a ] -> TestBlock () }
 
 instance ExprType a => ParamType (InnerBlock a) where
@@ -320,6 +329,7 @@ command name (CommandDef types ctor) = do
             iparams <- forM params $ \case
                 (_, SomeParam (p :: Proxy p) Nothing)
                     | Just (Refl :: p :~: SourceLine) <- eqT -> return $ SomeParam p $ Identity line
+                    | Just (Refl :: p :~: CallStack) <- eqT -> return $ SomeParam p $ Identity $ Variable line callStackFqVarName
 
                     | SomeNewVariables (vars :: [ TypedVarName a ]) <- definedVariables
                     , Just (Refl :: p :~: InnerBlock a) <- eqT
@@ -424,7 +434,8 @@ testSpawn = command "spawn" $ Spawn
 
 testExpect :: TestParser (Expr (TestBlock ()))
 testExpect = command "expect" $ Expect
-    <$> cmdLine
+    <$> callStack
+    <*> cmdLine
     <*> (fromExprParam <$> paramOrContext "from")
     <*> param ""
     <*> (maybe 1 fromExprParam <$> param "timeout")

@@ -20,6 +20,7 @@ module Script.Expr (
 
     Traced(..), EvalTrace, CallStack(..), VarNameSelectors, gatherVars,
     AppAnnotation(..),
+    callStackVarName, callStackFqVarName,
 
     module Script.Var,
 
@@ -179,7 +180,7 @@ eval = \case
         gdefs <- askGlobalDefs
         dict <- askDictionary
         return $ FunctionType $ \stack _ ->
-            runSimpleEval (eval expr) gdefs (( callStackVarName, someConstValue stack ) : dict)
+            runSimpleEval (eval expr) gdefs (( callStackVarName, someConstValue stack ) : filter ((callStackVarName /=) . fst) dict)
     FunctionEval sline efun -> do
         vars <- gatherVars efun
         CallStack cs <- maybe (return $ CallStack []) (fromSomeVarValue (CallStack []) callStackFqVarName) =<< tryLookupVar callStackFqVarName

@@ -79,7 +79,7 @@ runTest out opts gdefs test = do
             }
         tstate = TestState
             { tsGlobals = gdefs
-            , tsLocals = []
+            , tsLocals = [ ( callStackVarName, someConstValue (CallStack []) ) ]
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty
@@ -203,8 +203,8 @@ runStep = \case
         outProc OutputChildStdin p line
         send p line
 
-    Expect line p expr timeout captures inner -> do
-        expect line p expr timeout captures $ runStep . inner
+    Expect stack line p expr timeout captures inner -> do
+        expect stack line p expr timeout captures $ runStep . inner
 
     Flush p regex -> do
         atomicallyTest $ flushProcessOutput p regex
@@ -319,8 +319,9 @@ exprFailed desc stack pname = do
     outLine (OutputMatchFail stack) (Just prompt) $ desc <> " failed"
     throwError Failed
 
-expect :: SourceLine -> Process -> Traced Regex -> Scientific -> [TypedVarName Text] -> ([ Text ] -> TestRun ()) -> TestRun ()
-expect sline p (Traced trace re) etimeout tvars inner = do
+expect :: CallStack -> SourceLine -> Process -> Traced Regex -> Scientific -> [ TypedVarName Text ] -> ([ Text ] -> TestRun ()) -> TestRun ()
+expect (CallStack cs) sline p (Traced trace re) etimeout tvars inner = do
+    let stack = CallStack (( sline, trace ) : cs)
     timeout <- (etimeout *) <$> getCurrentTimeout
     delay <- liftIO $ registerDelay $ ceiling $ 1000000 * timeout
     mbmatch <- atomicallyTest $ (Nothing <$ (check =<< readTVar delay)) <|> do
@@ -335,13 +336,13 @@ expect sline p (Traced trace re) etimeout tvars inner = do
              let vars = map (\(TypedVarName n) -> n) tvars
 
              when (length vars /= length capture) $ do
-                 outProc (OutputMatchFail (CallStack [ ( sline, [] ) ])) p $ T.pack "mismatched number of capture variables on " `T.append` textSourceLine sline
+                 outProc (OutputMatchFail stack) p $ T.pack "mismatched number of capture variables"
                  throwError Failed
 
              outProc OutputMatch p line
              inner capture
 
-         Nothing -> exprFailed (T.pack "expect") (CallStack [ ( sline, trace ) ]) (Just $ procName p)
+         Nothing -> exprFailed (T.pack "expect") stack (Just $ procName p)
 
 testStepGuard :: CallStack -> Bool -> TestRun ()
 testStepGuard stack x = do

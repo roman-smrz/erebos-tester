@@ -21,3 +21,21 @@ def gg (x):
 test CG:
     let z = 3
     gg (z)
+
+def fe on p:
+    let x = 1
+    expect /$x/ from p timeout 0.0
+
+test BE:
+    spawn as p
+    fe on p
+
+def ge (x) on p:
+    guard (x /= 0)
+    let y = 2
+    expect /$x $y/ from p timeout 0.0
+
+test CE:
+    spawn as p
+    let z = 3
+    ge (z) on p
