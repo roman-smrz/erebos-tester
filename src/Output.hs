@@ -193,6 +193,7 @@ testOutputLines otype@(OutputMatchFail (CallStack stack)) _ msg = concat
     [ [ T.concat [ outTestLabel otype, " ", msg ] ]
     , concat $ flip map stack $ \( sline, vars ) ->
         T.concat [ outTestLabel otype, "-line ", textSourceLine sline ] : showVars vars
+    , [ T.concat [ outTestLabel otype, "-done" ] ]
     ]
   where
     showVars =

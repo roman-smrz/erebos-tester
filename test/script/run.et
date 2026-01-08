@@ -117,6 +117,9 @@ test CallStack:
         expect /match-fail-line .*\/callstack.et:3:5: .*/
         expect /match-fail-var x 1/
         local:
+            expect /(match-fail-.*)/ capture done
+            guard (done == "match-fail-done")
+        local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
         flush
@@ -125,6 +128,9 @@ test CallStack:
         expect /match-fail expect failed/
         expect /match-fail-line .*\/callstack.et:8:5: .*/
         expect /match-fail-var x 2/
+        local:
+            expect /(match-fail-.*)/ capture done
+            guard (done == "match-fail-done")
         local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
@@ -135,6 +141,9 @@ test CallStack:
         expect /match-fail-line .*\/callstack.et:12:5: .*/
         expect /match-fail-var x 1/
         expect /match-fail-line .*\/callstack.et:15:5: .*/
+        local:
+            expect /(match-fail-.*)/ capture done
+            guard (done == "match-fail-done")
         local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
@@ -148,6 +157,9 @@ test CallStack:
         expect /match-fail-line .*\/callstack.et:23:5: .*/
         expect /match-fail-var z 3/
         local:
+            expect /(match-fail-.*)/ capture done
+            guard (done == "match-fail-done")
+        local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
         flush
@@ -157,6 +169,10 @@ test CallStack:
         expect /match-fail-line .*\/callstack.et:27:5: .*/
         expect /match-fail-var x 1/
         expect /match-fail-line .*\/callstack.et:31:5: .*/
+        expect /match-fail-var p .*/
+        local:
+            expect /(match-fail-.*)/ capture done
+            guard (done == "match-fail-done")
         local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
@@ -168,7 +184,11 @@ test CallStack:
         expect /match-fail-var x 3/
         expect /match-fail-var y 2/
         expect /match-fail-line .*\/callstack.et:41:5: .*/
+        expect /match-fail-var p .*/
         expect /match-fail-var z 3/
+        local:
+            expect /(match-fail-.*)/ capture done
+            guard (done == "match-fail-done")
         local:
             expect /(run-.*)/ capture done
             guard (done == "run-failed")
