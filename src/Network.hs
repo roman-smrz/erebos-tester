@@ -102,11 +102,11 @@ instance HasNetns Node where getNetns = nodeNetns
 
 instance ExprType Network where
     textExprType _ = T.pack "network"
-    textExprValue n = "s:" <> textNetworkName (netPrefix n)
+    textExprValue n = "<network:" <> textNetworkName (netPrefix n) <> ">"
 
 instance ExprType Node where
     textExprType _ = T.pack "node"
-    textExprValue n = T.pack "n:" <> textNodeName (nodeName n)
+    textExprValue n = T.pack "<node:" <> textNodeName (nodeName n) <> ">"
 
     recordMembers = map (first T.pack)
         [ ( "ifname", RecordSelector $ const ("veth0" :: Text) )

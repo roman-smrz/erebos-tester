@@ -169,7 +169,7 @@ test CallStack:
         expect /match-fail-line .*\/callstack.et:27:5: .*/
         expect /match-fail-var x 1/
         expect /match-fail-line .*\/callstack.et:31:5: .*/
-        expect /match-fail-var p .*/
+        expect /match-fail-var p <process:p#[0-9]+>/
         local:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
@@ -184,7 +184,7 @@ test CallStack:
         expect /match-fail-var x 3/
         expect /match-fail-var y 2/
         expect /match-fail-line .*\/callstack.et:41:5: .*/
-        expect /match-fail-var p .*/
+        expect /match-fail-var p <process:p#[0-9]+>/
         expect /match-fail-var z 3/
         local:
             expect /(match-fail-.*)/ capture done

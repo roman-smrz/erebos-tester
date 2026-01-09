@@ -75,7 +75,8 @@ gdbStart onCrash = do
     ignore <- liftIO $ newTVarIO ( 0, [] )
 
     let process = Process
-            { procName = ProcNameGDB
+            { procId = ProcessId (-2)
+            , procName = ProcNameGDB
             , procHandle = Left handle
             , procStdin = hin
             , procOutput = pout

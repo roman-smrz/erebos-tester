@@ -183,6 +183,9 @@ executeScript sei@ShellExecInfo {..} pstdin pstdout pstderr (ShellScript stateme
 
 spawnShell :: Node -> ProcName -> ShellScript -> TestRun Process
 spawnShell procNode procName script = do
+    idVar <- asks $ teNextProcId . fst
+    procId <- liftIO $ modifyMVar idVar (\x -> return ( x + 1, ProcessId x ))
+
     procOutput <- liftIO $ newTVarIO []
     procIgnore <- liftIO $ newTVarIO ( 0, [] )
     seiStatusVar <- liftIO $ newEmptyMVar

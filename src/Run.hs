@@ -59,6 +59,7 @@ runTest out opts gdefs test = do
 
     failedVar <- newTVarIO Nothing
     objIdVar <- newMVar 1
+    procIdVar <- newMVar 1
     procVar <- newMVar []
     timeoutVar <- newMVar ( optTimeout opts, 0 )
 
@@ -73,6 +74,7 @@ runTest out opts gdefs test = do
             , teFailed = failedVar
             , teOptions = opts
             , teNextObjId = objIdVar
+            , teNextProcId = procIdVar
             , teProcesses = procVar
             , teTimeout = timeoutVar
             , teGDB = fst <$> mgdb

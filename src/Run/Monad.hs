@@ -44,6 +44,7 @@ data TestEnv = TestEnv
     , teFailed :: TVar (Maybe Failed)
     , teOptions :: TestOptions
     , teNextObjId :: MVar Int
+    , teNextProcId :: MVar Int
     , teProcesses :: MVar [ Process ]
     , teTimeout :: MVar ( Scientific, Integer ) -- ( positive timeout, number of zero multiplications )
     , teGDB :: Maybe (MVar GDB)

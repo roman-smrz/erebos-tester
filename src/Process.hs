@@ -1,7 +1,7 @@
 module Process (
     Process(..),
-    ProcName(..),
-    textProcName, unpackProcName,
+    ProcessId(..), textProcId,
+    ProcName(..), textProcName, unpackProcName,
     send,
     outProc, outProcName,
     lineReadingLoop,
@@ -48,7 +48,8 @@ import Script.Expr.Class
 import Script.Object
 
 data Process = Process
-    { procName :: ProcName
+    { procId :: ProcessId
+    , procName :: ProcName
     , procHandle :: Either ProcessHandle ( ThreadId, MVar ExitCode )
     , procStdin :: Handle
     , procOutput :: TVar [ Text ]
@@ -62,17 +63,22 @@ instance Eq Process where
 
 instance ExprType Process where
     textExprType _ = T.pack "proc"
-    textExprValue n = T.pack "p:" <> textProcName (procName n)
+    textExprValue p = "<process:" <> textProcName (procName p) <> "#" <> textProcId (procId p) <> ">"
 
     recordMembers = map (first T.pack)
         [ ("node", RecordSelector $ procNode)
         ]
 
 
+newtype ProcessId = ProcessId Int
+
 data ProcName = ProcName Text
               | ProcNameTcpdump
               | ProcNameGDB
     deriving (Eq, Ord)
+
+textProcId :: ProcessId -> Text
+textProcId (ProcessId pid) = T.pack (show pid)
 
 textProcName :: ProcName -> Text
 textProcName (ProcName name) = name
@@ -138,6 +144,12 @@ spawnOn target procName procKillWith cmd = do
                     path' <- makeAbsolute path
                     return (path' ++ rest)
             _ -> return cmd
+
+    procId <- case procName of
+        ProcNameTcpdump -> return $ ProcessId (-1)
+        _ -> do
+            idVar <- asks $ teNextProcId . fst
+            liftIO $ modifyMVar idVar (\x -> return ( x + 1, ProcessId x ))
 
     let netns = either getNetns getNetns target
     currentEnv <- liftIO $ getEnvironment
