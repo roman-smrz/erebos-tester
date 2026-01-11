@@ -133,6 +133,13 @@ withVar name value = withDictionary (( name, someConstValue value ) : )
 withTypedVar :: (MonadEval m, ExprType e) => TypedVarName e -> e -> m a -> m a
 withTypedVar (TypedVarName name) = withVar name
 
+isInternalVar :: FqVarName -> Bool
+isInternalVar (GlobalVarName {}) = False
+isInternalVar (LocalVarName (VarName name))
+    | Just ( '$', _ ) <- T.uncons name = True
+    | otherwise                        = False
+
+
 
 newtype SimpleEval a = SimpleEval (ReaderT ( GlobalDefs, VariableDictionary ) (Except String) a)
     deriving (Functor, Applicative, Monad, MonadError String)
@@ -401,12 +408,15 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         Let _ (TypedVarName var) _ expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Variable _ var
             | GlobalVarName {} <- var -> return []
+            | isInternalVar var -> return []
             | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         DynVariable _ _ var
             | GlobalVarName {} <- var -> return []
+            | isInternalVar var -> return []
             | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         FunVariable _ _ var
             | GlobalVarName {} <- var -> return []
+            | isInternalVar var -> return []
             | otherwise -> maybe [] (\x -> [ (( var, [] ), x ) ]) <$> tryLookupVar var
         ArgsReq args expr -> withDictionary (filter ((`notElem` map fst (toList args)) . fst)) $ helper expr
         ArgsApp (FunctionArguments args) fun -> do
