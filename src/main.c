@@ -177,6 +177,13 @@ int erebos_tester_isolate_fs( const char * rwdir )
 		return -1;
 	}
 
+	ret = umount2( "/run/old_root", MNT_DETACH );
+	if( ret < 0 ){
+		fprintf( stderr, "failed to detach /run/old_root: %s\n", strerror( errno ));
+		free( cwd );
+		return -1;
+	}
+
 	ret = chdir( cwd );
 	if( ret < 0 ){
 		fprintf( stderr, "failed to chdir to %s: %s\n", cwd, strerror( errno ));
