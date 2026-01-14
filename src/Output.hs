@@ -58,6 +58,7 @@ data OutputType
     | OutputChildFail
     | OutputMatch
     | OutputMatchFail CallStack
+    | OutputIgnored
     | OutputError
     | OutputAlways
     | OutputTestRaw
@@ -89,6 +90,7 @@ outColor OutputChildInfo = T.pack "0"
 outColor OutputChildFail = T.pack "31"
 outColor OutputMatch = T.pack "32"
 outColor OutputMatchFail {} = T.pack "31"
+outColor OutputIgnored = "90"
 outColor OutputError = T.pack "31"
 outColor OutputAlways = "0"
 outColor OutputTestRaw = "0"
@@ -102,6 +104,7 @@ outSign OutputChildInfo = T.pack "."
 outSign OutputChildFail = T.pack "!!"
 outSign OutputMatch = T.pack "+"
 outSign OutputMatchFail {} = T.pack "/"
+outSign OutputIgnored = "-"
 outSign OutputError = T.pack "!!"
 outSign OutputAlways = T.empty
 outSign OutputTestRaw = T.empty
@@ -120,6 +123,7 @@ outTestLabel = \case
     OutputChildFail -> "child-fail"
     OutputMatch -> "match"
     OutputMatchFail {} -> "match-fail"
+    OutputIgnored -> "ignored"
     OutputError -> "error"
     OutputAlways -> "other"
     OutputTestRaw -> ""

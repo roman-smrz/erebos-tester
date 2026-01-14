@@ -209,7 +209,8 @@ runStep = \case
         expect stack line p expr timeout captures $ runStep . inner
 
     Flush p regex -> do
-        atomicallyTest $ flushProcessOutput p regex
+        mapM_ (outProc OutputIgnored p) =<<
+            atomicallyTest (flushProcessOutput p regex)
 
     Guard stack expr -> do
         testStepGuard stack expr

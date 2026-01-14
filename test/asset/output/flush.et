@@ -1,0 +1,13 @@
+test Test:
+    node n
+    shell on n as p:
+        echo a
+        echo b
+        echo c
+        echo d
+        echo e
+    with p:
+        expect /e/
+        flush matching /[b-z]/
+        expect /.*/
+        expect /.*/ timeout 0.0

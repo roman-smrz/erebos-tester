@@ -1,0 +1,55 @@
+module output
+
+asset scripts:
+    path: ../asset/output
+
+test FlushOutput:
+    spawn as p 
+    with p:
+        send "load ${scripts.path}/flush.et"
+        expect /load-done/
+
+        send "run Test"
+        expect /child-stdout p a/
+        expect /child-stdout p b/
+        expect /child-stdout p c/
+        expect /child-stdout p d/
+        expect /child-stdout p e/
+        expect /match p e/
+        expect /ignored p b/
+        expect /ignored p c/
+        expect /ignored p d/
+        expect /match p a/
+        expect /match-fail expect.*/
+
+        expect /(run-.*)/ capture done
+        guard (done == "run-failed")
+
+test IgnoreOutput:
+    spawn as p 
+    with p:
+        send "load ${scripts.path}/ignore.et"
+        expect /load-done/
+
+        send "run Test"
+        expect /child-stdout p a/
+        expect /child-stdout p b/
+        expect /child-stdout p c/
+        expect /child-stdout p d/
+        expect /child-stdin p x/
+        expect /child-stdout p e/
+        expect /child-stdout p F/
+        expect /child-stdout p g/
+        expect /child-stdout p H/
+        expect /match p d/
+        expect /ignored p b/
+        expect /ignored p c/
+        expect /match p a/
+        expect /ignored p e/
+        expect /match p H/
+        expect /ignored p g/
+        expect /match p F/
+        expect /match-fail expect.*/
+
+        expect /(run-.*)/ capture done
+        guard (done == "run-failed")

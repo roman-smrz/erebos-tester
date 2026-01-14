@@ -23,6 +23,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 
 import Data.Function
+import Data.List
 import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
@@ -115,10 +116,14 @@ startProcessIOLoops process@Process {..} hout herr = do
 
     void $ forkTest $ lineReadingLoop process hout $ \line -> do
         outProc OutputChildStdout process line
-        liftIO $ atomically $ do
+        ignored <- liftIO $ atomically $ do
             ignores <- map snd . snd <$> readTVar procIgnore
-            when (not $ any (matches line) ignores) $ do
+            let ignored = any (matches line) ignores
+            when (not ignored) $ do
                 modifyTVar procOutput (++ [ line ])
+            return ignored
+        when ignored $ do
+            outProc OutputIgnored process line
 
     void $ forkTest $ lineReadingLoop process herr $ \line -> do
         case procName of
@@ -218,18 +223,23 @@ instance ObjectType TestRun IgnoreProcessOutput where
     textObjectValue _ (IgnoreProcessOutput _ _) = "<IgnoreProcessOutput>"
 
     createObject oid ( process@Process {..}, regex ) = do
-        liftIO $ atomically $ do
-            flushProcessOutput process regex
+        ( obj, flushed ) <- liftIO $ atomically $ do
+            flushed <- flushProcessOutput process regex
             ( iid, list ) <- readTVar procIgnore
             writeTVar procIgnore ( iid + 1, ( iid, regex ) : list )
-            return $ Object oid $ IgnoreProcessOutput process iid
+            return ( Object oid $ IgnoreProcessOutput process iid, flushed )
+        mapM_ (outProc OutputIgnored process) flushed
+        return obj
 
     destroyObject Object { objImpl = IgnoreProcessOutput Process {..} iid } = do
         liftIO $ atomically $ do
             writeTVar procIgnore . fmap (filter ((iid /=) . fst)) =<< readTVar procIgnore
 
-flushProcessOutput :: Process -> Maybe Regex -> STM ()
+flushProcessOutput :: Process -> Maybe Regex -> STM [ Text ]
 flushProcessOutput p mbre = do
-    writeTVar (procOutput p) =<< case mbre of
-        Nothing -> return []
-        Just re -> filter (either error isNothing . regexMatch re) <$> readTVar (procOutput p)
+    current <- readTVar (procOutput p)
+    let ( ignore, keep ) = case mbre of
+            Nothing -> ( current, [] )
+            Just re -> partition (either error isJust . regexMatch re) current
+    writeTVar (procOutput p) keep
+    return ignore
