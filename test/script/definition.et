@@ -10,6 +10,7 @@ test Definition:
         expect /load-done/
 
         send "run Test"
+        expect /global-info - Starting test ‘Test’/
         expect /child-stdout p 4/
         expect /match p 4/
         expect /child-stdout p 11/

@@ -107,6 +107,9 @@ runTest out opts gdefs test = do
     resetOutputTime out
     testRunResult <- newEmptyMVar
 
+    flip runReaderT out $ do
+        void $ outLine OutputGlobalInfo Nothing $ "Starting test ‘" <> testName test <> "’"
+
     void $ forkOS $ do
         isolateFilesystem testDir >>= \case
             True -> do
@@ -134,7 +137,7 @@ runTest out opts gdefs test = do
             return True
         _ -> do
             flip runReaderT out $ do
-                void $ outLine OutputError Nothing $ "Test ‘" <> testName test <> "’ failed."
+                void $ outLine OutputGlobalError Nothing $ "Test ‘" <> testName test <> "’ failed."
             return False
 
 

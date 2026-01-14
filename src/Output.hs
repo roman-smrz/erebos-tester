@@ -50,7 +50,9 @@ data OutputStyle
     deriving (Eq)
 
 data OutputType
-    = OutputChildStdout
+    = OutputGlobalInfo
+    | OutputGlobalError
+    | OutputChildStdout
     | OutputChildStderr
     | OutputChildStdin
     | OutputChildExec
@@ -82,39 +84,50 @@ resetOutputTime Output {..} = do
     modifyMVar_ outStartedAt . const $ getTime Monotonic
 
 outColor :: OutputType -> Text
-outColor OutputChildStdout = T.pack "0"
-outColor OutputChildStderr = T.pack "31"
-outColor OutputChildStdin = T.pack "0"
-outColor OutputChildExec = T.pack "33"
-outColor OutputChildInfo = T.pack "0"
-outColor OutputChildFail = T.pack "31"
-outColor OutputMatch = T.pack "32"
-outColor OutputMatchFail {} = T.pack "31"
-outColor OutputIgnored = "90"
-outColor OutputError = T.pack "31"
-outColor OutputAlways = "0"
-outColor OutputTestRaw = "0"
+outColor = \case
+    OutputGlobalInfo -> "0"
+    OutputGlobalError -> "31"
+    OutputChildStdout -> "0"
+    OutputChildStderr -> "31"
+    OutputChildStdin -> "0"
+    OutputChildExec -> "33"
+    OutputChildInfo -> "0"
+    OutputChildFail -> "31"
+    OutputMatch -> "32"
+    OutputMatchFail {} -> "31"
+    OutputIgnored -> "90"
+    OutputError -> "31"
+    OutputAlways -> "0"
+    OutputTestRaw -> "0"
 
 outSign :: OutputType -> Text
-outSign OutputChildStdout = " "
-outSign OutputChildStderr = T.pack "!"
-outSign OutputChildStdin = T.empty
-outSign OutputChildExec = "*"
-outSign OutputChildInfo = T.pack "."
-outSign OutputChildFail = T.pack "!!"
-outSign OutputMatch = T.pack "+"
-outSign OutputMatchFail {} = T.pack "/"
-outSign OutputIgnored = "-"
-outSign OutputError = T.pack "!!"
-outSign OutputAlways = T.empty
-outSign OutputTestRaw = T.empty
+outSign = \case
+    OutputGlobalInfo -> ""
+    OutputGlobalError -> ""
+    OutputChildStdout -> " "
+    OutputChildStderr -> "!"
+    OutputChildStdin -> T.empty
+    OutputChildExec -> "*"
+    OutputChildInfo -> "."
+    OutputChildFail -> "!!"
+    OutputMatch -> "+"
+    OutputMatchFail {} -> "/"
+    OutputIgnored -> "-"
+    OutputError -> "!!"
+    OutputAlways -> T.empty
+    OutputTestRaw -> T.empty
 
 outArr :: OutputType -> Text
-outArr OutputChildStdin = "<"
-outArr _ = ">"
+outArr = \case
+    OutputGlobalInfo -> ""
+    OutputGlobalError -> ""
+    OutputChildStdin -> "<"
+    _ -> ">"
 
 outTestLabel :: OutputType -> Text
 outTestLabel = \case
+    OutputGlobalInfo -> "global-info"
+    OutputGlobalError -> "global-error"
     OutputChildStdout -> "child-stdout"
     OutputChildStderr -> "child-stderr"
     OutputChildStdin -> "child-stdin"
@@ -130,12 +143,19 @@ outTestLabel = \case
 
 printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
+    OutputGlobalError -> True
     OutputChildStderr -> True
     OutputChildFail -> True
     OutputMatchFail {} -> True
     OutputError -> True
     OutputAlways -> True
     _ -> False
+
+includeTestTime :: OutputType -> Bool
+includeTestTime = \case
+    OutputGlobalInfo -> False
+    OutputGlobalError -> False
+    _ -> True
 
 ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
 ioWithOutput act = liftIO . act =<< getOutput
@@ -155,7 +175,9 @@ outLine otype prompt line = ioWithOutput $ \out ->
         withMVar (outState out) $ \st -> do
             forM_ (normalOutputLines otype line) $ \line' -> do
                 outPrint st $ TL.fromChunks $ concat
-                    [ [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
+                    [ if includeTestTime otype
+                        then [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
+                        else []
                     , if outUseColor (outConfig out)
                         then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
                         else []
