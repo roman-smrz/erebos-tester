@@ -1,5 +1,16 @@
 # Revision history for erebos-tester
 
+## 0.3.4 -- 2026-01-15
+
+* Show call stack in error messages.
+* Verbose output now includes test names, command and arguments for spawned processes, and marks flushed/ignored output lines.
+* Added `ignore` builtin command.
+* Added `timeout` argument for the `expect` command.
+* Support zero as a timeout multiplier.
+* Make host filesystems read-only for the test process (except for test dir).
+* Implemented pipes and input/output redirection in shell scripts.
+* Support for GHC up to 9.14.
+
 ## 0.3.3 -- 2025-06-25
 
 * Added optional `timeout` setting to config file
