@@ -87,7 +87,8 @@ runTest out opts gdefs test = do
             , tsDisconnectedBridge = S.empty
             }
 
-    let sigHandler SignalInfo { siginfoSpecific = chld } = do
+    let sigHandler SignalInfo { siginfoSpecific = NoSignalSpecificInfo } = return ()
+        sigHandler SignalInfo { siginfoSpecific = chld } = do
             processes <- readMVar procVar
             forM_ processes $ \p -> do
                 mbpid <- either getPid (\_ -> return Nothing) (procHandle p)
