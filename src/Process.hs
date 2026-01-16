@@ -36,6 +36,7 @@ import System.Exit
 import System.FilePath
 import System.IO
 import System.IO.Error
+import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
@@ -181,19 +182,36 @@ spawnOn target procName procKillWith cmd = do
 closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Scientific -> Process -> m ()
 closeProcess timeout p = do
     liftIO $ hClose $ procStdin p
+    mbPid <- liftIO $ either getPid (\_ -> return Nothing) (procHandle p)
     case procKillWith p of
         Nothing -> return ()
-        Just sig -> liftIO $ either getPid (\_ -> return Nothing) (procHandle p) >>= \case
+        Just sig -> case mbPid of
             Nothing -> return ()
-            Just pid -> signalProcess sig pid
+            Just pid -> liftIO $ signalProcess sig pid
 
     liftIO $ void $ forkIO $ do
         threadDelay $ floor $ 1000000 * timeout
         either terminateProcess (killThread . fst) $ procHandle p
-    liftIO (either waitForProcess (takeMVar . snd) (procHandle p)) >>= \case
-        ExitSuccess -> return ()
-        ExitFailure code -> do
-            outProc OutputChildFail p $ T.pack $ "exit code: " ++ show code
+
+    status <- case mbPid of
+        Nothing -> Just . Exited <$> liftIO (either waitForProcess (takeMVar . snd) (procHandle p))
+        Just pid -> liftIO (getProcessStatus True False pid)
+    case status of
+        Just (Exited ExitSuccess) -> do
+            return ()
+        Just (Exited (ExitFailure code)) -> do
+            outProc OutputChildFail p $ "exit code: " <> T.pack (show code)
+            throwError Failed
+        Just (Terminated sig _)
+            | Just sig == procKillWith p -> return ()
+            | otherwise -> do
+                outProc OutputChildFail p $ "killed with signal " <> T.pack (show sig)
+                throwError Failed
+        Just (Stopped sig) -> do
+            outProc OutputChildFail p $ "stopped with signal " <> T.pack (show sig)
+            throwError Failed
+        Nothing -> do
+            outProc OutputChildFail p $ "no exit status"
             throwError Failed
 
 closeTestProcess :: Process -> TestRun ()
