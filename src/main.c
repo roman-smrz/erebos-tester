@@ -109,7 +109,7 @@ int main( int argc, char * argv[] )
 	};
 	ret = mount_setattr( -1, "/run/new_root", AT_RECURSIVE, attr_ro, sizeof( * attr_ro ) );
 	if( ret < 0 ){
-		fprintf( stderr, "failed set new_root as read-only: %s\n", strerror( errno ));
+		fprintf( stderr, "failed set sandbox root as read-only: %s\n", strerror( errno ));
 		return 1;
 	}
 
@@ -118,17 +118,24 @@ int main( int argc, char * argv[] )
 	};
 	ret = mount_setattr( -1, "/run/new_root/proc", AT_RECURSIVE, attr_rw, sizeof( * attr_rw ) );
 	if( ret < 0 ){
-		fprintf( stderr, "failed set new_root/proc as read-write: %s\n", strerror( errno ));
+		fprintf( stderr, "failed set sandbox /proc as read-write: %s\n", strerror( errno ));
 		return 1;
 	}
 	ret = mount_setattr( -1, "/run/new_root/tmp", AT_RECURSIVE, attr_rw, sizeof( * attr_rw ) );
 	if( ret < 0 ){
-		fprintf( stderr, "failed set new_root/tmp as read-write: %s\n", strerror( errno ));
+		if( errno == EINVAL ){
+			// Original /tmp is not a separate filesystem, so we can't just change the attributes
+			ret = mount( "/tmp", "/run/new_root/tmp", NULL, MS_BIND, NULL );
+			if( ret < 0 )
+				fprintf( stderr, "failed to bind-mount original /tmp in sandbox as read-write: %s\n", strerror( errno ));
+		} else {
+			fprintf( stderr, "failed set sandbox /tmp as read-write: %s\n", strerror( errno ));
+		}
 	}
 
 	ret = mount( "tmpfs", "/run/new_root/run", "tmpfs", 0, "size=4m" );
 	if( ret < 0 ){
-		fprintf( stderr, "failed to mount tmpfs on new_root/run: %s\n", strerror( errno ));
+		fprintf( stderr, "failed to mount tmpfs on sandbox /run: %s\n", strerror( errno ));
 		return 1;
 	}
 
