@@ -37,6 +37,7 @@ data CmdlineOptions = CmdlineOptions
     , optShowHelp :: Bool
     , optShowVersion :: Bool
     , optTestMode :: Bool
+    , optCmdlineTcpdump :: TcpdumpOption
     }
 
 defaultCmdlineOptions :: CmdlineOptions
@@ -49,7 +50,14 @@ defaultCmdlineOptions = CmdlineOptions
     , optShowHelp = False
     , optShowVersion = False
     , optTestMode = False
+    , optCmdlineTcpdump = TcpdumpAuto
     }
+
+data TcpdumpOption
+    = TcpdumpAuto
+    | TcpdumpManual FilePath
+    | TcpdumpOff
+
 
 options :: [ OptDescr (CmdlineOptions -> CmdlineOptions) ]
 options =
@@ -91,6 +99,12 @@ options =
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
+    , Option [] [ "no-tcpdump" ]
+        (NoArg (\opts -> opts { optCmdlineTcpdump = TcpdumpOff }))
+        "do not run tcpdump to capture network traffic"
+    , Option [] [ "tcpdump" ]
+        (OptArg (\str opts -> opts { optCmdlineTcpdump = maybe TcpdumpAuto TcpdumpManual str }) "<path>")
+        "use tcpdump to capture network traffic, at given <path> or found in PATH"
     , Option ['h'] ["help"]
         (NoArg $ \opts -> opts { optShowHelp = True })
         "show this help and exit"
@@ -199,7 +213,15 @@ main = do
                     hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found"
                     exitFailure
 
-    ok <- allM (runTest out (optTest opts) globalDefs) $
+    tcpdump <- case optCmdlineTcpdump opts of
+        TcpdumpAuto -> findExecutable "tcpdump"
+        TcpdumpManual path -> return (Just path)
+        TcpdumpOff -> return Nothing
+
+    let topts = (optTest opts)
+            { optTcpdump = tcpdump
+            }
+    ok <- allM (runTest out topts globalDefs) $
         concat $ replicate (optRepeat opts) tests
     when (not ok) exitFailure
 

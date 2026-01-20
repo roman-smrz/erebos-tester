@@ -253,7 +253,7 @@ withSubnet parent tvname inner = do
 
 withNetwork :: Network -> (Network -> TestRun a) -> TestRun a
 withNetwork net inner = do
-    tcpdump <- liftIO (findExecutable "tcpdump") >>= return . \case
+    tcpdump <- asks (optTcpdump . teOptions . fst) >>= return . \case
         Just path -> withProcess (Left net) ProcNameTcpdump (Just softwareTermination)
             (path ++ " -i br0 -w './br0.pcap' -U -Z root") . const
         Nothing -> id

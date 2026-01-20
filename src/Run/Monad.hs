@@ -63,6 +63,7 @@ data TestOptions = TestOptions
     , optProcTools :: [(ProcName, String)]
     , optTestDir :: FilePath
     , optTimeout :: Scientific
+    , optTcpdump :: Maybe FilePath
     , optGDB :: Bool
     , optForce :: Bool
     , optKeep :: Bool
@@ -75,6 +76,7 @@ defaultTestOptions = TestOptions
     , optProcTools = []
     , optTestDir = ".test"
     , optTimeout = 1
+    , optTcpdump = Nothing
     , optGDB = False
     , optForce = False
     , optKeep = False
