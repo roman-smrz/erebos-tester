@@ -58,6 +58,7 @@ data Process = Process
     , procIgnore :: TVar ( Int, [ ( Int, Maybe Regex ) ] )
     , procKillWith :: Maybe Signal
     , procNode :: Node
+    , procPid :: Maybe Pid
     }
 
 instance Eq Process where
@@ -68,7 +69,8 @@ instance ExprType Process where
     textExprValue p = "<process:" <> textProcName (procName p) <> "#" <> textProcId (procId p) <> ">"
 
     recordMembers = map (first T.pack)
-        [ ("node", RecordSelector $ procNode)
+        [ ( "node", RecordSelector $ procNode )
+        , ( "pid", RecordSelector $ maybe (0 :: Integer) fromIntegral . procPid )
         ]
 
 
@@ -169,6 +171,7 @@ spawnOn target procName procKillWith cmd = do
     procOutput <- liftIO $ newTVarIO []
     procIgnore <- liftIO $ newTVarIO ( 0, [] )
     let procNode = either (const undefined) id target
+    procPid <- liftIO $ getPid handle
     let process = Process {..}
 
     startProcessIOLoops process hout herr
@@ -182,10 +185,9 @@ spawnOn target procName procKillWith cmd = do
 closeProcess :: (MonadIO m, MonadOutput m, MonadError Failed m) => Scientific -> Process -> m ()
 closeProcess timeout p = do
     liftIO $ hClose $ procStdin p
-    mbPid <- liftIO $ either getPid (\_ -> return Nothing) (procHandle p)
     case procKillWith p of
         Nothing -> return ()
-        Just sig -> case mbPid of
+        Just sig -> case procPid p of
             Nothing -> return ()
             Just pid -> liftIO $ signalProcess sig pid
 
@@ -193,7 +195,7 @@ closeProcess timeout p = do
         threadDelay $ floor $ 1000000 * timeout
         either terminateProcess (killThread . fst) $ procHandle p
 
-    status <- case mbPid of
+    status <- case procPid p of
         Nothing -> Just . Exited <$> liftIO (either waitForProcess (takeMVar . snd) (procHandle p))
         Just pid -> liftIO (getProcessStatus True False pid)
     case status of

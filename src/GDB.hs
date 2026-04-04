@@ -73,6 +73,7 @@ gdbStart onCrash = do
         }
     pout <- liftIO $ newTVarIO []
     ignore <- liftIO $ newTVarIO ( 0, [] )
+    pid <- liftIO $ getPid handle
 
     let process = Process
             { procId = ProcessId (-2)
@@ -83,6 +84,7 @@ gdbStart onCrash = do
             , procIgnore = ignore
             , procKillWith = Nothing
             , procNode = undefined
+            , procPid = pid
             }
     gdb <- GDB
         <$> pure process

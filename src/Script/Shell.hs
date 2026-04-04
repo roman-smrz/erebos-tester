@@ -202,6 +202,7 @@ spawnShell procNode procName script = do
             hClose pstderr
 
     let procKillWith = Nothing
+    let procPid = Nothing
     let process = Process {..}
 
     startProcessIOLoops process hout herr

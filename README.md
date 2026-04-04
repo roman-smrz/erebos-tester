@@ -210,6 +210,9 @@ Members:
 `node`
 : Node on which the process is running.
 
+`pid`
+: PID of the corresponding system process, `0` if there is none.
+
 #### asset
 
 Represents an asset (file or directory), which can be used during test execution.
