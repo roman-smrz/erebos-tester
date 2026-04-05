@@ -38,6 +38,7 @@ import Network.Ip
 import Output
 import Parser
 import Process
+import Process.Signal
 import Run.Monad
 import Sandbox
 import Script.Expr
@@ -185,7 +186,7 @@ runStep = \case
     DeclNode name net inner -> do
         withNode net (Left name) $ runStep . inner
 
-    Spawn tvname@(TypedVarName (VarName tname)) target args inner -> do
+    Spawn tvname@(TypedVarName (VarName tname)) target args killWith inner -> do
         case target of
             Left net -> withNode net (Right tvname) go
             Right node -> go node
@@ -197,7 +198,7 @@ runStep = \case
                 cmd = T.unwords $ T.pack tool : map escape args
                 escape = ("'" <>) . (<> "'") . T.replace "'" "'\\''"
             outProcName OutputChildExec pname cmd
-            withProcess (Right node) pname Nothing (T.unpack cmd) $ runStep . inner
+            withProcess (Right node) pname killWith (T.unpack cmd) $ runStep . inner
 
     SpawnShell mbname node script inner -> do
         let tname | Just (TypedVarName (VarName name)) <- mbname = name
@@ -254,7 +255,7 @@ withSubnet parent tvname inner = do
 withNetwork :: Network -> (Network -> TestRun a) -> TestRun a
 withNetwork net inner = do
     tcpdump <- asks (optTcpdump . teOptions . fst) >>= return . \case
-        Just path -> withProcess (Left net) ProcNameTcpdump (Just softwareTermination)
+        Just path -> withProcess (Left net) ProcNameTcpdump (Just (Signal softwareTermination))
             (path ++ " -i br0 -w './br0.pcap' -U -Z root") . const
         Nothing -> id
 

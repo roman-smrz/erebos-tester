@@ -2,6 +2,7 @@ module Process (
     Process(..),
     ProcessId(..), textProcId,
     ProcName(..), textProcName, unpackProcName,
+    Signal,
     send,
     outProc, outProcName,
     lineReadingLoop,
@@ -37,13 +38,13 @@ import System.FilePath
 import System.IO
 import System.IO.Error
 import System.Posix.Process
-import System.Posix.Signals
 import System.Process
 
 import {-# SOURCE #-} GDB
 import Network
 import Network.Ip
 import Output
+import Process.Signal
 import Run.Monad
 import Script.Expr
 import Script.Expr.Class
@@ -189,7 +190,7 @@ closeProcess timeout p = do
         Nothing -> return ()
         Just sig -> case procPid p of
             Nothing -> return ()
-            Just pid -> liftIO $ signalProcess sig pid
+            Just pid -> signalProcess sig pid
 
     liftIO $ void $ forkIO $ do
         threadDelay $ floor $ 1000000 * timeout
@@ -205,7 +206,7 @@ closeProcess timeout p = do
             outProc OutputChildFail p $ "exit code: " <> T.pack (show code)
             throwError Failed
         Just (Terminated sig _)
-            | Just sig == procKillWith p -> return ()
+            | Just (Signal sig) == procKillWith p -> return ()
             | otherwise -> do
                 outProc OutputChildFail p $ "killed with signal " <> T.pack (show sig)
                 throwError Failed

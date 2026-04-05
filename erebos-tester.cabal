@@ -60,6 +60,7 @@ executable erebos-tester
         Parser.Statement
         Paths_erebos_tester
         Process
+        Process.Signal
         Run
         Run.Monad
         Sandbox

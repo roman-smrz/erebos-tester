@@ -45,7 +45,7 @@ data TestStep a where
     CreateObject :: forall o. ObjectType TestRun o => Proxy o -> ConstructorArgs o -> TestStep ()
     Subnet :: TypedVarName Network -> Network -> (Network -> TestStep a) -> TestStep a
     DeclNode :: TypedVarName Node -> Network -> (Node -> TestStep a) -> TestStep a
-    Spawn :: TypedVarName Process -> Either Network Node -> [ Text ] -> (Process -> TestStep a) -> TestStep a
+    Spawn :: TypedVarName Process -> Either Network Node -> [ Text ] -> Maybe Signal -> (Process -> TestStep a) -> TestStep a
     SpawnShell :: Maybe (TypedVarName Process) -> Node -> ShellScript -> (Process -> TestStep a) -> TestStep a
     Send :: Process -> Text -> TestStep ()
     Expect :: CallStack -> SourceLine -> Process -> Traced Regex -> Scientific -> [ TypedVarName Text ] -> ([ Text ] -> TestStep a) -> TestStep a

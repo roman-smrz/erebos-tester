@@ -430,6 +430,7 @@ testSpawn = command "spawn" $ Spawn
     <$> param "as"
     <*> (bimap fromExprParam fromExprParam <$> paramOrContext "on")
     <*> (maybe [] fromExprParam <$> param "args")
+    <*> (maybe Nothing (Just . fromExprParam) <$> param "killwith")
     <*> innerBlockFun
 
 testExpect :: TestParser (Expr (TestBlock ()))

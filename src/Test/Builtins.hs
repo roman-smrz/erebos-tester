@@ -9,17 +9,20 @@ import Data.Scientific
 import Data.Text (Text)
 
 import Process
+import Process.Signal
 import Script.Expr
 import Test
 
 builtins :: GlobalDefs
-builtins = M.fromList
-    [ fq "send" builtinSend
-    , fq "flush" builtinFlush
-    , fq "ignore" builtinIgnore
-    , fq "guard" builtinGuard
-    , fq "multiply_timeout" builtinMultiplyTimeout
-    , fq "wait" builtinWait
+builtins = M.fromList $ concat
+    [ [ fq "send" builtinSend
+      , fq "flush" builtinFlush
+      , fq "ignore" builtinIgnore
+      , fq "guard" builtinGuard
+      , fq "multiply_timeout" builtinMultiplyTimeout
+      , fq "wait" builtinWait
+      ]
+    , map (uncurry fq) signalBuiltins
     ]
   where
     fq name impl = (( ModuleName [ "$" ], VarName name ), impl )
