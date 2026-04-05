@@ -309,7 +309,7 @@ instance ExprType a => ParamType (ExprParam a) where
     type ParamRep (ExprParam a) = Expr a
     parseParam _ = do
         off <- stateOffset <$> getParserState
-        SomeExpr e <- literal <|> variable <|> between (symbol "(") (symbol ")") someExpr
+        SomeExpr e <- literal <|> variable <|> constructor <|> between (symbol "(") (symbol ")") someExpr
         unifyExpr off Proxy e
     showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
     paramExpr = fmap ExprParam

@@ -5,11 +5,13 @@ module Parser.Expr (
     varName,
     newVarName,
     addVarName,
+    constrName,
 
     someExpr,
     typedExpr,
     literal,
     variable,
+    constructor,
 
     stringExpansion,
 
@@ -82,6 +84,13 @@ addVarName off (TypedVarName name) = do
             T.pack "variable '" <> textVarName name <> T.pack "' already exists"
         Nothing -> return ()
     modify $ \s -> s { testVars = ( name, ( LocalVarName name, ExprTypePrim @a Proxy )) : testVars s }
+
+constrName :: TestParser VarName
+constrName = label "contructor name" $ do
+    lexeme $ try $ do
+        lead <- upperChar
+        rest <- takeWhileP Nothing (\x -> isAlphaNum x || x == '_')
+        return $ VarName $ TL.toStrict $ TL.fromChunks $ T.singleton lead : TL.toChunks rest
 
 someExpansion :: TestParser SomeExpr
 someExpansion = do
@@ -370,10 +379,17 @@ variable = label "variable" $ do
     e <- lookupVarExpr off sline name
     recordSelector e <|> return e
 
+constructor :: TestParser SomeExpr
+constructor = label "constructor" $ do
+    off <- stateOffset <$> getParserState
+    sline <- getSourceLine
+    name <- constrName
+    lookupVarExpr off sline name
+
 functionCall :: TestParser SomeExpr
 functionCall = do
     sline <- getSourceLine
-    variable >>= \case
+    (variable <|> constructor) >>= \case
         SomeExpr e'@(FunVariable argTypes _ _) -> do
             let check = checkFunctionArguments argTypes
             args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
