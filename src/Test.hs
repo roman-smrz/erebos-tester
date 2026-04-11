@@ -26,6 +26,7 @@ import Script.Shell
 
 data Test = Test
     { testName :: Text
+    , testTags :: [ Expr Tag ]
     , testSteps :: Expr (TestStep ())
     }
 

@@ -43,11 +43,33 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
         modify $ \s -> s
             { testContext = SomeExpr $ varExpr SourceLineBuiltin rootNetworkVar
             }
-        block (\name steps -> return $ Test name $ Scope <$> mconcat steps) header testStep
+        href <- L.indentLevel
+        testName <- header
+        osymbol ":" <* eol <* scn
+
+        ref <- L.indentGuard scn GT href
+        testTags <- preamble ref
+        testSteps <- fmap Scope <$> testBlock ref
+        return Test {..}
+
   where
     header = do
         wsymbol "test"
         lexeme $ TL.toStrict <$> takeWhileP (Just "test name") (/=':')
+
+    preamble :: Pos -> TestParser [ Expr Tag ]
+    preamble ref = fmap catMaybes $ many $ do
+        void $ L.indentGuard scn EQ ref
+        off <- stateOffset <$> getParserState
+        name <- try $ identifier <* osymbol ":"
+        case name of
+            "tag" -> do
+                Just <$> typedExpr <* eol <* scn
+            _ -> do
+                registerParseError $ FancyError off $ S.singleton $ ErrorFail $
+                    "unexpected test metadata ‘" <> T.unpack name <> "’"
+                takeWhileP Nothing (/= '\n') *> eol *> scn *> return Nothing
+
 
 parseDefinition :: Pos -> TestParser ( VarName, SomeExpr )
 parseDefinition href = label "symbol definition" $ do

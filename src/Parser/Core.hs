@@ -250,15 +250,6 @@ localState inner = do
 toplevel :: (a -> b) -> TestParser a -> TestParser b
 toplevel f = return . f <=< L.nonIndented scn
 
-block :: (a -> [b] -> TestParser c) -> TestParser a -> TestParser b -> TestParser c
-block merge header item = L.indentBlock scn $ do
-    h <- header
-    choice
-        [ do symbol ":"
-             return $ L.IndentSome Nothing (merge h) item
-        , L.IndentNone <$> merge h []
-        ]
-
 listOf :: TestParser a -> TestParser [a]
 listOf item = do
     x <- item
