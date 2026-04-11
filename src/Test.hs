@@ -1,5 +1,6 @@
 module Test (
     Test(..),
+    Tag(..),
     TestStep(..),
     TestBlock(..),
 
@@ -27,6 +28,12 @@ data Test = Test
     { testName :: Text
     , testSteps :: Expr (TestStep ())
     }
+
+data Tag = Tag ModuleName VarName
+
+instance ExprType Tag where
+    textExprType _ = "Tag"
+    textExprValue (Tag mname vname) = "<tag:" <> textModuleName mname <> "." <> textVarName vname <> ">"
 
 data TestBlock a where
     EmptyTestBlock :: TestBlock ()

@@ -125,13 +125,23 @@ parseAsset href = label "asset definition" $ do
     modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
     return ( name, expr )
 
+parseTag :: Pos -> TestParser ( VarName, SomeExpr )
+parseTag _ = label "tag definition" $ do
+    wsymbol "tag"
+    name <- constrName
+    void eol
+    cmn <- gets testCurrentModuleName
+    let expr = SomeExpr $ Pure $ Tag cmn name
+    modify $ \s -> s { testVars = ( name, ( GlobalVarName cmn name, someExprType expr )) : testVars s }
+    return ( name, expr )
+
 parseExport :: TestParser [ Toplevel ]
 parseExport = label "export declaration" $ toplevel id $ do
     ref <- L.indentLevel
     wsymbol "export"
     choice
       [ do
-        def@( name, _ ) <- parseDefinition ref <|> parseAsset ref
+        def@( name, _ ) <- parseDefinition ref <|> parseAsset ref <|> parseTag ref
         return [ ToplevelDefinition def, ToplevelExport name ]
       , do
         names <- listOf varName
@@ -168,6 +178,7 @@ parseTestModule absPath = do
         [ (: []) <$> parseTestDefinition
         , (: []) <$> toplevel ToplevelDefinition (parseDefinition pos1)
         , (: []) <$> toplevel ToplevelDefinition (parseAsset pos1)
+        , (: []) <$> toplevel ToplevelDefinition (parseTag pos1)
         , parseExport
         , parseImport
         ]
