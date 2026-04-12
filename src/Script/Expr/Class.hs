@@ -1,6 +1,7 @@
 module Script.Expr.Class (
     ExprType(..),
     ExprTypeConstr1(..),
+    TypeDeconstructor(..),
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
@@ -18,6 +19,9 @@ class Typeable a => ExprType a where
     textExprType :: proxy a -> Text
     textExprValue :: a -> Text
 
+    matchTypeConstructor :: proxy a -> TypeDeconstructor a
+    matchTypeConstructor _ = NoTypeDeconstructor
+
     recordMembers :: [(Text, RecordSelector a)]
     recordMembers = []
 
@@ -33,8 +37,12 @@ class Typeable a => ExprType a where
     exprEnumerator :: proxy a -> Maybe (ExprEnumerator a)
     exprEnumerator _ = Nothing
 
-class (forall b. ExprType b => ExprType (a b)) => ExprTypeConstr1 (a :: Type -> Type) where
+class (Typeable a, forall b. ExprType b => ExprType (a b)) => ExprTypeConstr1 (a :: Type -> Type) where
     textExprTypeConstr1 :: proxy a -> Text -> Text
+
+data TypeDeconstructor a
+    = NoTypeDeconstructor
+    | forall c x. (ExprTypeConstr1 c, ExprType x, c x ~ a) => TypeDeconstructor1 (Proxy c) (Proxy x)
 
 
 data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
@@ -82,6 +90,7 @@ instance ExprType Void where
 instance ExprType a => ExprType [ a ] where
     textExprType _ = textExprTypeConstr1 @[] Proxy (textExprType @a Proxy)
     textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
+    matchTypeConstructor _ = TypeDeconstructor1 Proxy Proxy
 
     exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
 

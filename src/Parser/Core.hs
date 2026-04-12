@@ -18,6 +18,7 @@ import qualified Text.Megaparsec.Char.Lexer as L
 
 import Network ()
 import Script.Expr
+import Script.Expr.Class
 import Script.Module
 import Test
 
@@ -180,6 +181,28 @@ unify off a (ExprTypeVar bname) = do
 unify _ res@(ExprTypePrim (Proxy :: Proxy a)) (ExprTypePrim (Proxy :: Proxy b))
     | Just (Refl :: a :~: b) <- eqT
     = return res
+
+unify _ res@(ExprTypeConstr1 (Proxy :: Proxy a)) (ExprTypeConstr1 (Proxy :: Proxy b))
+    | Just (Refl :: a :~: b) <- eqT
+    = return res
+
+unify off (ExprTypeApp ac aparams) (ExprTypeApp bc bparams)
+    | length aparams == length bparams
+    = do
+        c <- unify off ac bc
+        params <- zipWithM (unify off) aparams bparams
+        return $ case ( c, params ) of
+            ( ExprTypeConstr1 (Proxy :: Proxy c'), [ ExprTypePrim (Proxy :: Proxy p') ] )
+                -> ExprTypePrim (Proxy :: Proxy (c' p'))
+            _ -> ExprTypeApp c params
+
+unify off a@(ExprTypeApp {}) (ExprTypePrim bproxy)
+    | TypeDeconstructor1 c p <- matchTypeConstructor bproxy
+    = unify off a (ExprTypeApp (ExprTypeConstr1 c) [ ExprTypePrim p ])
+
+unify off (ExprTypePrim aproxy) b@(ExprTypeApp {})
+    | TypeDeconstructor1 c p <- matchTypeConstructor aproxy
+    = unify off (ExprTypeApp (ExprTypeConstr1 c) [ ExprTypePrim p ]) b
 
 unify off a b = do
     parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
