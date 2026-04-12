@@ -102,10 +102,18 @@ parseDefinition href = label "symbol definition" $ do
         let err msg = do
                 registerParseError . FancyError off . S.singleton . ErrorFail $ T.unpack msg
                 return ( vname, SomeArgumentType (OptionalArgument @DynamicType) )
+        let getConcreteType = \case
+                (ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy a)) [ pb ])
+                    | ExprTypePrim (_ :: Proxy b) <- getConcreteType pb
+                    -> ExprTypePrim (Proxy :: Proxy (a b))
+                t -> t
         gets (M.lookup tvar . testTypeUnif) >>= \case
-            Just (ExprTypePrim (_ :: Proxy a)) -> return ( vname, SomeArgumentType (RequiredArgument @a) )
-            Just (ExprTypeVar (TypeVar tvar')) -> err $ "ambiguous type for ‘" <> textVarName vname <> " : " <> tvar' <> "’"
-            Just (ExprTypeFunction {}) -> err $ "unsupported function type of ‘" <> textVarName vname <> "’"
+            Just t
+                | ExprTypePrim (_ :: Proxy a) <- getConcreteType t
+                -> return ( vname, SomeArgumentType (RequiredArgument @a) )
+
+                | otherwise
+                -> err $ "expected concrete type for ‘" <> textVarName vname <> " : " <> textSomeExprType t <> "’"
             Nothing -> err $ "ambiguous type for ‘" <> textVarName vname <> " : " <> tvarname <> "’"
 
     replaceDynArgs :: forall a. Expr a -> TestParser (Expr a)

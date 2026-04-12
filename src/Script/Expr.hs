@@ -253,8 +253,10 @@ newtype TypeVar = TypeVar Text
 
 data SomeExprType
     = forall a. ExprType a => ExprTypePrim (Proxy a)
+    | forall a. ExprTypeConstr1 a => ExprTypeConstr1 (Proxy a)
     | ExprTypeVar TypeVar
     | forall a. ExprType a => ExprTypeFunction (FunctionArguments SomeArgumentType) (Proxy a)
+    | ExprTypeApp SomeExprType [ SomeExprType ]
 
 someExprType :: SomeExpr -> SomeExprType
 someExprType (SomeExpr expr) = go expr
@@ -285,9 +287,14 @@ someExprType (SomeExpr expr) = go expr
     proxyOfFunctionType _ = Proxy
 
 textSomeExprType :: SomeExprType -> Text
-textSomeExprType (ExprTypePrim p) = textExprType p
-textSomeExprType (ExprTypeVar (TypeVar name)) = name
-textSomeExprType (ExprTypeFunction _ r) = "function:" <> textExprType r
+textSomeExprType = go []
+  where
+    go _ (ExprTypePrim p) = textExprType p
+    go (x : _) (ExprTypeConstr1 c) = textExprTypeConstr1 c x
+    go [] (ExprTypeConstr1 _) = "<incomplte type>"
+    go _ (ExprTypeVar (TypeVar name)) = name
+    go _ (ExprTypeFunction _ r) = "function:" <> textExprType r
+    go _ (ExprTypeApp c xs) = go (map textSomeExprType xs) c
 
 data AsFunType a
     = forall b. (a ~ FunctionType b, ExprType b) => IsFunType

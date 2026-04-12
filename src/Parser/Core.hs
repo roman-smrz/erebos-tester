@@ -104,17 +104,27 @@ lookupVarExpr off sline name = do
     ( fqn, etype ) <- lookupVarType off name
     case etype of
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
+        ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
         ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
+        stype@ExprTypeApp {} -> do
+            tvar <- newTypeVar
+            modify $ \s -> s { testTypeUnif = M.insert tvar stype $ testTypeUnif s }
+            return $ SomeExpr $ DynVariable tvar sline fqn
 
 lookupScalarVarExpr :: Int -> SourceLine -> VarName -> TestParser SomeExpr
 lookupScalarVarExpr off sline name = do
     ( fqn, etype ) <- lookupVarType off name
     case etype of
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
+        ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
         ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (pa :: Proxy a) -> do
             SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
+        stype@ExprTypeApp {} -> do
+            tvar <- newTypeVar
+            modify $ \s -> s { testTypeUnif = M.insert tvar stype $ testTypeUnif s }
+            return $ SomeExpr $ DynVariable tvar sline fqn
 
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do

@@ -1,10 +1,12 @@
 module Script.Expr.Class (
     ExprType(..),
+    ExprTypeConstr1(..),
     RecordSelector(..),
     ExprListUnpacker(..),
     ExprEnumerator(..),
 ) where
 
+import Data.Kind
 import Data.Maybe
 import Data.Scientific
 import Data.Text (Text)
@@ -30,6 +32,9 @@ class Typeable a => ExprType a where
 
     exprEnumerator :: proxy a -> Maybe (ExprEnumerator a)
     exprEnumerator _ = Nothing
+
+class (forall b. ExprType b => ExprType (a b)) => ExprTypeConstr1 (a :: Type -> Type) where
+    textExprTypeConstr1 :: proxy a -> Text -> Text
 
 
 data RecordSelector a = forall b. ExprType b => RecordSelector (a -> b)
@@ -74,11 +79,14 @@ instance ExprType Void where
     textExprType _ = T.pack "void"
     textExprValue _ = T.pack "<void>"
 
-instance ExprType a => ExprType [a] where
-    textExprType _ = "[" <> textExprType @a Proxy <> "]"
+instance ExprType a => ExprType [ a ] where
+    textExprType _ = textExprTypeConstr1 @[] Proxy (textExprType @a Proxy)
     textExprValue x = "[" <> T.intercalate ", " (map textExprValue x) <> "]"
 
     exprListUnpacker _ = Just $ ExprListUnpacker id (const Proxy)
+
+instance ExprTypeConstr1 [] where
+    textExprTypeConstr1 _ x = "[" <> x <> "]"
 
 instance ExprType a => ExprType (Maybe a) where
     textExprType _ = textExprType @a Proxy <> "?"
