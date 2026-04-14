@@ -108,7 +108,7 @@ lookupVarExpr off sline name = do
         ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
         ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
-        stype@ExprTypeApp {} -> do
+        stype -> do
             tvar <- newTypeVar
             modify $ \s -> s { testTypeUnif = M.insert tvar stype $ testTypeUnif s }
             return $ SomeExpr $ DynVariable tvar sline fqn
@@ -122,7 +122,7 @@ lookupScalarVarExpr off sline name = do
         ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (pa :: Proxy a) -> do
             SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
-        stype@ExprTypeApp {} -> do
+        stype -> do
             tvar <- newTypeVar
             modify $ \s -> s { testTypeUnif = M.insert tvar stype $ testTypeUnif s }
             return $ SomeExpr $ DynVariable tvar sline fqn
@@ -218,6 +218,21 @@ unifyExpr off pa expr = if
     -> do
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) (ExprTypeVar tvar)
         return $ Variable sline name
+
+    | HideType expr' <- expr
+    -> do
+        unifyExpr off pa expr'
+
+    | TypeQuant qvar expr' <- expr
+    -> do
+        tvar <- newTypeVar
+        unifyExpr off pa $ renameTypeVar qvar tvar expr'
+
+    | TypeLambda t tvar f <- expr
+    -> do
+        _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) t
+        Just (ExprTypePrim pt) <- M.lookup tvar <$> gets testTypeUnif
+        unifyExpr off pa (f $ ExprTypePrim pt)
 
     | Just (Refl :: FunctionType a :~: b) <- eqT
     -> do
