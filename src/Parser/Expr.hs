@@ -184,40 +184,52 @@ regex = label "regular expression" $ lexeme $ do
 list :: TestParser SomeExpr
 list = label "list" $ do
     symbol "["
-    SomeExpr x <- someExpr
 
-    let enumErr off = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-            "list range enumeration not defined for '" <> textExprType x <> "'"
-    let exprList = foldr (liftA2 (:)) (Pure [])
-    SomeExpr <$> choice
+    choice
         [do symbol "]"
-            return $ exprList [x]
+            tvar <- newTypeVar
+            return $ SomeExpr $
+                TypeQuant tvar $
+                    TypeLambda (ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy [])) [ ExprTypeVar tvar ]) tvar $
+                        \case
+                            (ExprTypePrim (Proxy :: Proxy a)) -> HideType $ Pure ([] :: [ a ])
+                            _ -> Undefined "incomplete type"
 
-        ,do off <- stateOffset <$> getParserState
-            osymbol ".."
-            ExprEnumerator fromTo _ <- maybe (enumErr off) return $ exprEnumerator x
-            y <- typedExpr
-            symbol "]"
-            return $ fromTo <$> x <*> y
+        ,do SomeExpr x <- someExpr
+            let enumErr off = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+                    "list range enumeration not defined for ‘" <> textExprType x <> "’"
+            let exprList = foldr (liftA2 (:)) (Pure [])
 
-        ,do symbol ","
-            y <- typedExpr
-
-            choice
+            SomeExpr <$> choice
                 [do symbol "]"
-                    return $ exprList [x, y]
+                    return $ exprList [ x ]
 
                 ,do off <- stateOffset <$> getParserState
                     osymbol ".."
-                    ExprEnumerator _ fromThenTo <- maybe (enumErr off) return $ exprEnumerator x
-                    z <- typedExpr
+                    ExprEnumerator fromTo _ <- maybe (enumErr off) return $ exprEnumerator x
+                    y <- typedExpr
                     symbol "]"
-                    return $ fromThenTo <$> x <*> y <*> z
+                    return $ fromTo <$> x <*> y
 
                 ,do symbol ","
-                    xs <- listOf typedExpr
-                    symbol "]"
-                    return $ exprList (x:y:xs)
+                    y <- typedExpr
+
+                    choice
+                        [do symbol "]"
+                            return $ exprList [ x, y ]
+
+                        ,do off <- stateOffset <$> getParserState
+                            osymbol ".."
+                            ExprEnumerator _ fromThenTo <- maybe (enumErr off) return $ exprEnumerator x
+                            z <- typedExpr
+                            symbol "]"
+                            return $ fromThenTo <$> x <*> y <*> z
+
+                        ,do symbol ","
+                            xs <- listOf typedExpr
+                            symbol "]"
+                            return $ exprList (x : y : xs)
+                        ]
                 ]
         ]
 
