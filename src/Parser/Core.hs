@@ -106,12 +106,8 @@ lookupVarExpr off sline name = do
     case etype of
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
         ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
-        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
-        stype -> do
-            tvar <- newTypeVar
-            modify $ \s -> s { testTypeUnif = M.insert tvar stype $ testTypeUnif s }
-            return $ SomeExpr $ DynVariable tvar sline fqn
+        stype -> return $ SomeExpr $ DynVariable stype sline fqn
 
 lookupScalarVarExpr :: Int -> SourceLine -> VarName -> TestParser SomeExpr
 lookupScalarVarExpr off sline name = do
@@ -119,13 +115,9 @@ lookupScalarVarExpr off sline name = do
     case etype of
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
         ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
-        ExprTypeVar tvar -> return $ SomeExpr $ DynVariable tvar sline fqn
         ExprTypeFunction args (pa :: Proxy a) -> do
             SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
-        stype -> do
-            tvar <- newTypeVar
-            modify $ \s -> s { testTypeUnif = M.insert tvar stype $ testTypeUnif s }
-            return $ SomeExpr $ DynVariable tvar sline fqn
+        stype -> return $ SomeExpr $ DynVariable stype sline fqn
 
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do
@@ -214,9 +206,9 @@ unifyExpr off pa expr = if
     | Just (Refl :: a :~: b) <- eqT
     -> return expr
 
-    | DynVariable tvar sline name <- expr
+    | DynVariable stype sline name <- expr
     -> do
-        _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) (ExprTypeVar tvar)
+        _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) stype
         return $ Variable sline name
 
     | HideType expr' <- expr

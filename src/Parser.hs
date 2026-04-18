@@ -125,7 +125,7 @@ parseDefinition href = label "symbol definition" $ do
         go unif = \case
             ArgsApp args body -> ArgsApp (fmap replaceArgs args) body
               where
-                replaceArgs (SomeExpr (DynVariable tvar sline vname))
+                replaceArgs (SomeExpr (DynVariable (ExprTypeVar tvar) sline vname))
                     | Just (ExprTypePrim (Proxy :: Proxy v)) <- M.lookup tvar unif
                     = SomeExpr (Variable sline vname :: Expr v)
                 replaceArgs (SomeExpr e) = SomeExpr (go unif e)

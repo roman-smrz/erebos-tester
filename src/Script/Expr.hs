@@ -56,7 +56,7 @@ import Util
 data Expr a where
     Let :: forall a b. ExprType b => SourceLine -> TypedVarName b -> Expr b -> Expr a -> Expr a
     Variable :: ExprType a => SourceLine -> FqVarName -> Expr a
-    DynVariable :: TypeVar -> SourceLine -> FqVarName -> Expr DynamicType
+    DynVariable :: SomeExprType -> SourceLine -> FqVarName -> Expr DynamicType
     FunVariable :: ExprType a => FunctionArguments SomeArgumentType -> SourceLine -> FqVarName -> Expr (FunctionType a)
     ArgsReq :: ExprType a => FunctionArguments ( VarName, SomeArgumentType ) -> Expr (FunctionType a) -> Expr (FunctionType a)
     ArgsApp :: ExprType a => FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
@@ -274,7 +274,7 @@ someExprType (SomeExpr expr) = go expr
   where
     go :: forall e. ExprType e => Expr e -> SomeExprType
     go = \case
-        DynVariable tvar _ _ -> ExprTypeVar tvar
+        DynVariable stype _ _ -> stype
         (e :: Expr a)
             | IsFunType <- asFunType e -> ExprTypeFunction (gof e) (proxyOfFunctionType e)
             | otherwise -> ExprTypePrim (Proxy @a)
@@ -304,9 +304,7 @@ renameTypeVar a b = go
     go orig = case orig of
         Let sline vname x y -> Let sline vname (go x) (go y)
         Variable {} -> orig
-        DynVariable tvar sline name
-            | tvar == a -> DynVariable b sline name
-            | otherwise -> orig
+        DynVariable stype sline name -> DynVariable (renameVarInType a b stype) sline name
         FunVariable {} -> orig
         ArgsReq args body -> ArgsReq args (go body)
         ArgsApp args fun -> ArgsApp (fmap (renameTypeVarInSomeExpr a b) args) (go fun)
