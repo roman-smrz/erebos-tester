@@ -4,7 +4,7 @@ module Parser.Expr (
 
     varName,
     newVarName,
-    addVarName,
+    addVarName, addVarNameType,
     constrName,
 
     someExpr,
@@ -78,12 +78,15 @@ newVarName = do
     return name
 
 addVarName :: forall a. ExprType a => Int -> TypedVarName a -> TestParser ()
-addVarName off (TypedVarName name) = do
+addVarName off tname = addVarNameType off tname (ExprTypePrim @a Proxy)
+
+addVarNameType :: forall a. ExprType a => Int -> TypedVarName a -> SomeExprType -> TestParser ()
+addVarNameType off (TypedVarName name) stype = do
     gets (lookup name . testVars) >>= \case
         Just _ -> registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             T.pack "variable '" <> textVarName name <> T.pack "' already exists"
         Nothing -> return ()
-    modify $ \s -> s { testVars = ( name, ( LocalVarName name, ExprTypePrim @a Proxy )) : testVars s }
+    modify $ \s -> s { testVars = ( name, ( LocalVarName name, stype )) : testVars s }
 
 constrName :: TestParser VarName
 constrName = label "contructor name" $ do

@@ -37,11 +37,11 @@ letStatement = do
     off <- stateOffset <$> getParserState
     name <- varName
     osymbol "="
-    SomeExpr e <- someExpr
+    se@(SomeExpr e) <- someExpr
 
     localState $ do
         let tname = TypedVarName name
-        addVarName off tname
+        addVarNameType off tname (someExprType se)
         void $ eol
         body <- testBlock indent
         return $ Let line tname e (TestBlockStep EmptyTestBlock . Scope <$> body)
