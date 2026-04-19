@@ -3,7 +3,6 @@ module Test.Builtins (
 ) where
 
 import Data.Map qualified as M
-import Data.Maybe
 import Data.Proxy
 import Data.Scientific
 import Data.Text (Text)
@@ -27,47 +26,50 @@ builtins = M.fromList $ concat
   where
     fq name impl = (( ModuleName [ "$" ], VarName name ), impl )
 
-getArg :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> a
-getArg args = fromMaybe (error "parameter mismatch") . getArgMb args
+biVar :: ExprType a => Text -> Expr a
+biVar = Variable SourceLineBuiltin . LocalVarName . VarName
 
-getArgMb :: ExprType a => FunctionArguments SomeVarValue -> Maybe ArgumentKeyword -> Maybe a
-getArgMb (FunctionArguments args) kw = do
-    fromSomeVarValue (CallStack []) (LocalVarName (VarName "")) =<< M.lookup kw args
+biOpt :: ExprType a => Text -> Expr (Maybe a)
+biOpt = OptVariable SourceLineBuiltin . LocalVarName . VarName
 
-builtinSend :: SomeVarValue
-builtinSend = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlockStep EmptyTestBlock $ Send (getArg args (Just "to")) (getArg args Nothing)
+biArgs :: [ ( Maybe ArgumentKeyword, a ) ] -> FunctionArguments ( VarName, a )
+biArgs = FunctionArguments . M.fromList . map (\( kw, atype ) -> ( kw, ( VarName $ maybe "$0" (\(ArgumentKeyword tkw) -> "$" <> tkw) kw, atype ) ))
+
+builtinSend :: SomeExpr
+builtinSend = SomeExpr $ ArgsReq (biArgs atypes) $
+    FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (Send <$> biVar "$to" <*> biVar "$0")
   where
     atypes =
         [ ( Just "to", SomeArgumentType (ContextDefault @Process) )
         , ( Nothing, SomeArgumentType (RequiredArgument @Text) )
         ]
 
-builtinFlush :: SomeVarValue
-builtinFlush = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlockStep EmptyTestBlock $ Flush (getArg args (Just "from")) (getArgMb args (Just "matching"))
+builtinFlush :: SomeExpr
+builtinFlush = SomeExpr $ ArgsReq (biArgs atypes) $
+    FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (Flush <$> biVar "$from" <*> biOpt "$matching")
   where
     atypes =
         [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
         , ( Just "matching", SomeArgumentType (OptionalArgument @Regex) )
         ]
 
-builtinIgnore :: SomeVarValue
-builtinIgnore = SomeVarValue $ VarValue [] (FunctionArguments $ M.fromList atypes) $
-    \_ args -> TestBlockStep EmptyTestBlock $ CreateObject (Proxy @IgnoreProcessOutput) ( getArg args (Just "from"), getArgMb args (Just "matching") )
+builtinIgnore :: SomeExpr
+builtinIgnore = SomeExpr $ ArgsReq (biArgs atypes) $
+    FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (CreateObject (Proxy @IgnoreProcessOutput) <$> ((,) <$> biVar "$from" <*> biOpt "$matching"))
   where
     atypes =
         [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
         , ( Just "matching", SomeArgumentType (OptionalArgument @Regex) )
         ]
 
-builtinGuard :: SomeVarValue
-builtinGuard = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton Nothing (SomeArgumentType (RequiredArgument @Bool))) $
-    \stack args -> TestBlockStep EmptyTestBlock $ Guard stack (getArg args Nothing)
+builtinGuard :: SomeExpr
+builtinGuard = SomeExpr $
+    ArgsReq (biArgs [ ( Nothing, SomeArgumentType (RequiredArgument @Bool) ) ]) $
+    FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (Guard <$> Variable SourceLineBuiltin callStackFqVarName <*> biVar "$0")
 
-builtinMultiplyTimeout :: SomeVarValue
-builtinMultiplyTimeout = SomeVarValue $ VarValue [] (FunctionArguments $ M.singleton (Just "by") (SomeArgumentType (RequiredArgument @Scientific))) $
-    \_ args -> TestBlockStep EmptyTestBlock $ CreateObject (Proxy @MultiplyTimeout) (getArg args (Just "by"))
+builtinMultiplyTimeout :: SomeExpr
+builtinMultiplyTimeout = SomeExpr $ ArgsReq (biArgs $ [ ( Just "by", SomeArgumentType (RequiredArgument @Scientific) ) ]) $
+    FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (CreateObject (Proxy @MultiplyTimeout) <$> biVar "$by")
 
-builtinWait :: SomeVarValue
-builtinWait = someConstValue $ TestBlockStep EmptyTestBlock Wait
+builtinWait :: SomeExpr
+builtinWait = SomeExpr $ Pure $ TestBlockStep EmptyTestBlock Wait

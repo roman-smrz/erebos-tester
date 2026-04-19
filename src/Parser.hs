@@ -242,7 +242,7 @@ parseTestFile parsedModules mbModuleName path = do
             let initState = TestParserState
                     { testSourcePath = path
                     , testVars = concat
-                        [ map (\(( mname, name ), value ) -> ( name, ( GlobalVarName mname name, someVarValueType value ))) $ M.toList builtins
+                        [ map (\(( mname, name ), value ) -> ( name, ( GlobalVarName mname name, someExprType value ))) $ M.toList builtins
                         ]
                     , testContext = SomeExpr (Undefined "void" :: Expr Void)
                     , testNextTypeVar = 0

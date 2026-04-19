@@ -51,8 +51,8 @@ instance ExprType Signal where
         | otherwise = "<SIG_" <> T.pack (show sig) <> ">"
 
 
-signalBuiltins :: [ ( Text, SomeVarValue ) ]
-signalBuiltins = map (fmap someConstValue)
+signalBuiltins :: [ ( Text, SomeExpr ) ]
+signalBuiltins = map (fmap $ SomeExpr . Pure)
     [ ( "SIGHUP", Signal Posix.sigHUP )
     , ( "SIGINT", Signal Posix.sigINT )
     , ( "SIGQUIT", Signal Posix.sigQUIT )

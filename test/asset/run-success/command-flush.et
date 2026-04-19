@@ -1,0 +1,30 @@
+def expect_next from p (str):
+    expect /(.*)/ from p capture line
+    guard (line == str)
+
+test Test:
+    node n
+    shell on n as p:
+        cat
+
+    send "a1" to p
+    send "b" to p
+    send "x" to p
+    expect /x/ from p
+
+    flush from p matching /a.*/
+    send "a2" to p
+    send "c" to p
+
+    expect_next "b" from p
+    expect_next "a2" from p
+    expect_next "c" from p
+
+    send "d" to p
+    send "e" to p
+    send "f" to p
+    send "x" to p
+    expect /x/ from p
+    flush from p
+    send "g" to p
+    expect_next "g" from p

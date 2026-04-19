@@ -52,7 +52,7 @@ data TestEnv = TestEnv
 
 data TestState = TestState
     { tsGlobals :: GlobalDefs
-    , tsLocals :: [ ( VarName, SomeVarValue ) ]
+    , tsLocals :: [ ( VarName, SomeExpr ) ]
     , tsDisconnectedUp :: Set NetworkNamespace
     , tsDisconnectedBridge :: Set NetworkNamespace
     , tsNodePacketLoss :: Map NetworkNamespace Scientific

@@ -10,7 +10,6 @@ import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
 import Control.Monad.Except
-import Control.Monad.Fix
 import Control.Monad.Reader
 import Control.Monad.Writer
 
@@ -82,7 +81,7 @@ runTest out opts gdefs test = do
             }
         tstate = TestState
             { tsGlobals = gdefs
-            , tsLocals = [ ( callStackVarName, someConstValue (CallStack []) ) ]
+            , tsLocals = [ ( callStackVarName, SomeExpr $ Pure $ CallStack [] ) ]
             , tsNodePacketLoss = M.empty
             , tsDisconnectedUp = S.empty
             , tsDisconnectedBridge = S.empty
@@ -160,8 +159,7 @@ loadModules files = do
 
 
 evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
-evalGlobalDefs exprs = fix $ \gdefs ->
-    builtins `M.union` M.fromList (map (fmap (evalSomeWith gdefs)) exprs)
+evalGlobalDefs exprs = builtins `M.union` M.fromList exprs
 
 runBlock :: TestBlock () -> TestRun ()
 runBlock EmptyTestBlock = return ()
