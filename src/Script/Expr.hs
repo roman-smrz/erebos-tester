@@ -8,7 +8,7 @@ module Script.Expr (
     FunctionType, DynamicType,
     ExprType(..), SomeExpr(..),
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
-    renameTypeVar,
+    renameTypeVar, renameVarInType,
 
     VarValue(..), SomeVarValue(..),
     svvVariables, svvArguments,
@@ -63,8 +63,8 @@ data Expr a where
     FunctionAbstraction :: ExprType a => Expr a -> Expr (FunctionType a)
     FunctionEval :: ExprType a => SourceLine -> Expr (FunctionType a) -> Expr a
     HideType :: forall a. ExprType a => Expr a -> Expr DynamicType
-    TypeLambda :: forall a. ExprType a => SomeExprType -> TypeVar -> (SomeExprType -> Expr a) -> Expr DynamicType
-    TypeQuant :: forall a. ExprType a => TypeVar -> Expr a -> Expr DynamicType
+    TypeLambda :: TypeVar -> SomeExprType -> (SomeExprType -> Expr DynamicType) -> Expr DynamicType
+    TypeApp :: forall a. ExprType a => Expr DynamicType -> SomeExprType -> Expr a
     LambdaAbstraction :: ExprType a => TypedVarName a -> Expr b -> Expr (a -> b)
     Pure :: a -> Expr a
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
@@ -106,8 +106,8 @@ mapExpr f = go
         FunctionAbstraction expr -> f $ FunctionAbstraction (go expr)
         FunctionEval sline expr -> f $ FunctionEval sline (go expr)
         HideType expr -> HideType $ go expr
-        TypeLambda stype tvar efun -> TypeLambda stype tvar $ (go . efun)
-        TypeQuant tvar expr -> TypeQuant tvar $ go expr
+        TypeLambda tvar stype efun -> TypeLambda tvar stype (go . efun)
+        TypeApp expr stype -> TypeApp (go expr) stype
         LambdaAbstraction tvar expr -> f $ LambdaAbstraction tvar (go expr)
         e@Pure {} -> f e
         App ann efun earg -> f $ App ann (go efun) (go earg)
@@ -201,9 +201,20 @@ eval = \case
         let cs' = CallStack (( sline, vars ) : cs)
         FunctionType fun <- withVar callStackVarName cs' $ eval efun
         return $ fun cs' mempty
-    HideType expr -> return $ DynamicType expr
-    e@TypeLambda {} -> return $ DynamicType e
-    e@TypeQuant {} -> return $ DynamicType e
+    HideType expr -> DynamicType <$> eval expr
+    TypeLambda _ _ f -> do
+        gdefs <- askGlobalDefs
+        dict <- askDictionary
+        return $ DynamicType $ \t -> runSimpleEval (eval $ f t) gdefs dict
+    TypeApp expr stype -> do
+        DynamicType f <- eval expr
+        case cast f of
+            Just f' -> do
+                case f' stype of
+                    DynamicType x -> case cast x of
+                        Just x' -> return x'
+                        n@Nothing -> fail $ "type error in type application result " <> show ( typeOf x, typeOf n )
+            n@Nothing -> fail $ "type error in type application " <> show ( typeOf f, typeOf n )
     LambdaAbstraction (TypedVarName name) expr -> do
         gdefs <- askGlobalDefs
         dict <- askDictionary
@@ -249,7 +260,7 @@ instance ExprType a => ExprType (FunctionType a) where
     textExprType _ = "function type"
     textExprValue _ = "<function type>"
 
-data DynamicType = forall a. ExprType a => DynamicType (Expr a)
+data DynamicType = forall a. Typeable a => DynamicType a
 
 instance ExprType DynamicType where
     textExprType _ = "ambiguous type"
@@ -275,6 +286,8 @@ someExprType (SomeExpr expr) = go expr
     go :: forall e. ExprType e => Expr e -> SomeExprType
     go = \case
         DynVariable stype _ _ -> stype
+        HideType e -> go e
+        TypeLambda tvar stype _ -> ExprTypeForall tvar stype
         (e :: Expr a)
             | IsFunType <- asFunType e -> ExprTypeFunction (gof e) (proxyOfFunctionType e)
             | otherwise -> ExprTypePrim (Proxy @a)
@@ -290,6 +303,7 @@ someExprType (SomeExpr expr) = go expr
              in FunctionArguments $ args `M.difference` used
         FunctionAbstraction {} -> mempty
         FunctionEval {} -> error "someExprType: gof: function eval"
+        TypeApp {} -> error "someExprType: gof: type application"
         Pure {} -> error "someExprType: gof: pure"
         App {} -> error "someExprType: gof: app"
         Undefined {} -> error "someExprType: gof: undefined"
@@ -311,13 +325,11 @@ renameTypeVar a b = go
         FunctionAbstraction expr -> FunctionAbstraction (go expr)
         FunctionEval sline expr -> FunctionEval sline (go expr)
         HideType expr -> HideType (go expr)
-        TypeLambda stype tvar expr
-            | tvar == a -> TypeLambda (renameVarInType a b stype) b expr
-            | otherwise -> TypeLambda (renameVarInType a b stype) tvar (go . expr)
-        TypeQuant tvar expr
+        TypeLambda tvar stype expr
             | tvar == a -> orig
             | tvar == b -> error "type var collision"
-            | otherwise -> TypeQuant tvar (go expr)
+            | otherwise -> TypeLambda tvar (renameVarInType a b stype) (go . expr)
+        TypeApp expr stype -> TypeApp (go expr) (renameVarInType a b stype)
         LambdaAbstraction vname expr -> LambdaAbstraction vname (go expr)
         Pure {} -> orig
         App ann f x -> App ann (go f) (go x)
@@ -436,6 +448,7 @@ exprArgs = \case
          in FunctionArguments (args `M.difference` applied)
     FunctionAbstraction {} -> mempty
     FunctionEval {} -> mempty
+    TypeApp {} -> error "exprArgs: type application"
     Pure {} -> error "exprArgs: pure"
     App {} -> error "exprArgs: app"
     Undefined {} -> error "exprArgs: undefined"
@@ -494,7 +507,7 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
         FunctionEval _ efun -> helper efun
         HideType expr -> helper expr
         TypeLambda {} -> return []
-        TypeQuant _ expr -> helper expr
+        TypeApp expr _ -> helper expr
         LambdaAbstraction (TypedVarName var) expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Pure _ -> return []
         e@(App (AnnRecord sel) _ x)

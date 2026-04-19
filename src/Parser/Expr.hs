@@ -189,11 +189,10 @@ list = label "list" $ do
         [do symbol "]"
             tvar <- newTypeVar
             return $ SomeExpr $
-                TypeQuant tvar $
-                    TypeLambda (ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy [])) [ ExprTypeVar tvar ]) tvar $
-                        \case
-                            (ExprTypePrim (Proxy :: Proxy a)) -> HideType $ Pure ([] :: [ a ])
-                            _ -> Undefined "incomplete type"
+                TypeLambda tvar (ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy [])) [ ExprTypeVar tvar ]) $
+                    \case
+                        (ExprTypePrim (Proxy :: Proxy a)) -> HideType $ Pure ([] :: [ a ])
+                        _ -> Undefined "incomplete type"
 
         ,do SomeExpr x <- someExpr
             let enumErr off = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $

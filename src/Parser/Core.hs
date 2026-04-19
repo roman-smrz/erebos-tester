@@ -207,6 +207,14 @@ unifyExpr off pa expr = if
     -> return expr
 
     | DynVariable stype sline name <- expr
+    , ExprTypeForall qvar itype <- stype
+    -> do
+        tvar <- newTypeVar
+        _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) $ renameVarInType qvar tvar itype
+        rtype <- M.lookup tvar <$> gets testTypeUnif
+        return $ TypeApp (Variable sline name) $ fromMaybe (ExprTypeVar tvar) rtype
+
+    | DynVariable stype sline name <- expr
     -> do
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) stype
         return $ Variable sline name
@@ -215,12 +223,7 @@ unifyExpr off pa expr = if
     -> do
         unifyExpr off pa expr'
 
-    | TypeQuant qvar expr' <- expr
-    -> do
-        tvar <- newTypeVar
-        unifyExpr off pa $ renameTypeVar qvar tvar expr'
-
-    | TypeLambda t tvar f <- expr
+    | TypeLambda tvar t f <- expr
     -> do
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) t
         Just (ExprTypePrim pt) <- M.lookup tvar <$> gets testTypeUnif
