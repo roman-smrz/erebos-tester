@@ -106,7 +106,7 @@ lookupVarExpr off sline name = do
     case etype of
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
         ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
-        ExprTypeFunction args (_ :: Proxy a) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
+        ExprTypeFunction args (ExprTypePrim (_ :: Proxy a)) -> return $ SomeExpr $ (FunVariable args sline fqn :: Expr (FunctionType a))
         stype -> return $ SomeExpr $ DynVariable stype sline fqn
 
 lookupScalarVarExpr :: Int -> SourceLine -> VarName -> TestParser SomeExpr
@@ -115,7 +115,7 @@ lookupScalarVarExpr off sline name = do
     case etype of
         ExprTypePrim (Proxy :: Proxy a) -> return $ SomeExpr $ (Variable sline fqn :: Expr a)
         ExprTypeConstr1 _ -> return $ SomeExpr $ (Undefined "incomplete type" :: Expr DynamicType)
-        ExprTypeFunction args (pa :: Proxy a) -> do
+        ExprTypeFunction args (ExprTypePrim (pa :: Proxy a)) -> do
             SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
         stype -> return $ SomeExpr $ DynVariable stype sline fqn
 
