@@ -89,7 +89,7 @@ runSingleTest test = do
     globals <- gets tmsGlobals
     mbconfig <- asks tmiConfig
     let opts = defaultTestOptions
-            { optDefaultTool = fromMaybe "" $ configTool =<< mbconfig
+            { optDefaultTool = fromMaybe "/bin/true" $ configTool =<< mbconfig
             , optTestDir = ".test" <> show num
             , optKeep = True
             }
