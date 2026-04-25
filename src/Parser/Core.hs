@@ -219,7 +219,8 @@ unifyExpr off pa expr = if
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) stype
         return $ Variable sline name
 
-    | HideType expr' <- expr
+    | HideType (ExprTypePrim (_ :: Proxy b'')) (expr' :: Expr b') <- expr
+    , Just (Refl :: b'' :~: b') <- eqT
     -> do
         unifyExpr off pa expr'
 
