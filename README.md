@@ -234,8 +234,10 @@ let numbers = [1, 2, 4]
 ```
 
 List elements can be of any type, but all elements of a particular list must have the same type.
-
-Used in the `for` command.
+They can be concatenated using the `concat` function, which takes a list of lists as argument:
+```
+let list = concat [[1], [2, 3], [4]] # = [1, 2, 3, 4,]
+```
 
 ### Built-in commands
 

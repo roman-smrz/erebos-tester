@@ -1,0 +1,8 @@
+test Test:
+    let list1 = [ 1 ]
+    let list2 = [ 2, 3 ]
+    let empty = [  ]
+
+    let c1 = concat [[ 1 ]]
+    let c2 = concat [[ 1 ], [], empty]
+    let c3 = concat [ list1, list2, [ 6, 5 ], list2 ]

@@ -1,0 +1,16 @@
+module list
+
+asset scripts:
+    path: ../asset/list
+
+
+test ListConcat:
+    spawn as p 
+    with p:
+        send "load ${scripts.path}/concat.et"
+        expect /load-done/
+
+        send "run Test"
+        local:
+            expect /(run-.*)/ capture done
+            guard (done == "run-done")

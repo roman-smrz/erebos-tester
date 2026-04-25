@@ -6,6 +6,7 @@ import Data.Map qualified as M
 import Data.Proxy
 import Data.Scientific
 import Data.Text (Text)
+import Data.Text qualified as T
 
 import Process
 import Process.Signal
@@ -20,6 +21,7 @@ builtins = M.fromList $ concat
       , fq "guard" builtinGuard
       , fq "multiply_timeout" builtinMultiplyTimeout
       , fq "wait" builtinWait
+      , fq "concat" builtinConcat
       ]
     , map (uncurry fq) signalBuiltins
     ]
@@ -73,3 +75,14 @@ builtinMultiplyTimeout = SomeExpr $ ArgsReq (biArgs $ [ ( Just "by", SomeArgumen
 
 builtinWait :: SomeExpr
 builtinWait = SomeExpr $ Pure $ TestBlockStep EmptyTestBlock Wait
+
+builtinConcat :: SomeExpr
+builtinConcat = SomeExpr $ TypeLambda (TypeVar "a")
+    (ExprTypeFunction
+        (ExprTypeArguments $ FunctionArguments $ M.singleton Nothing $ SomeArgumentType RequiredArgument
+            (ExprTypeApp (ExprTypeConstr1 (Proxy @[])) [ ExprTypeApp (ExprTypeConstr1 (Proxy @[])) [ ExprTypeVar (TypeVar "a") ] ] ))
+        (ExprTypeApp (ExprTypeConstr1 (Proxy @[])) [ ExprTypeVar (TypeVar "a") ])
+    ) $ \case
+        ExprTypePrim (pa :: Proxy a) -> HideFunType (FunctionArguments $ M.singleton Nothing $ SomeArgumentType RequiredArgument (ExprTypePrim (Proxy :: Proxy [[ a ]]))) $
+            ArgsReq (biArgs [ ( Nothing, SomeArgumentType RequiredArgument (ExprTypePrim pa) ) ]) $ FunctionAbstraction $ (concat :: [[ a ]] -> [ a ]) <$> biVar "$0"
+        t -> Undefined ("ambiguous type ‘" <> T.unpack (textSomeExprType t) <> "’ for concat") :: Expr DynamicType
