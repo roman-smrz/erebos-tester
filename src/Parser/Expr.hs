@@ -426,17 +426,17 @@ recordSelector (SomeExpr expr) = do
 
 checkFunctionArguments :: FunctionArguments SomeArgumentType
                        -> Int -> Maybe ArgumentKeyword -> SomeExpr -> TestParser SomeExpr
-checkFunctionArguments (FunctionArguments argTypes) poff kw sexpr@(SomeExpr expr) = do
+checkFunctionArguments (FunctionArguments argTypes) poff kw expr = do
     case M.lookup kw argTypes of
-        Just (SomeArgumentType (_ :: ArgumentType expected)) -> do
-            withRecovery (\e -> registerParseError e >> return sexpr) $ do
-                SomeExpr <$> unifyExpr poff (Proxy @expected) expr
+        Just (SomeArgumentType _ stype) -> do
+            withRecovery (\e -> registerParseError e >> return expr) $ do
+                unifySomeExpr poff stype expr
         Nothing -> do
             registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
                 case kw of
                     Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword ‘" <> tkw <> "’"
                     Nothing                    -> "unexpected parameter"
-            return sexpr
+            return expr
 
 
 functionArguments :: (Int -> Maybe ArgumentKeyword -> a -> TestParser b) -> TestParser a -> TestParser a -> (Int -> Text -> TestParser a) -> TestParser (FunctionArguments b)

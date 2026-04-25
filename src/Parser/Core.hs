@@ -232,18 +232,19 @@ unifyExpr off pa expr = if
     | Just (Refl :: FunctionType a :~: b) <- eqT
     -> do
         let FunctionArguments remaining = exprArgs expr
-            showType ( Nothing, SomeArgumentType atype ) = "`<" <> textExprType atype <> ">'"
-            showType ( Just (ArgumentKeyword kw), SomeArgumentType atype ) = "`" <> kw <> " <" <> textExprType atype <> ">'"
+            showType ( Nothing, SomeArgumentType _ stype ) = "‘<" <> textSomeExprType stype <> ">’"
+            showType ( Just (ArgumentKeyword kw), SomeArgumentType _ stype ) = "‘" <> kw <> " <" <> textSomeExprType stype <> ">’"
             err = parseError . FancyError off . S.singleton . ErrorFail . T.unpack
 
         defaults <- fmap catMaybes $ forM (M.toAscList remaining) $ \case
-            arg@(_, SomeArgumentType RequiredArgument) -> err $ "missing " <> showType arg <> " argument"
-            (_, SomeArgumentType OptionalArgument) -> return Nothing
-            (kw, SomeArgumentType (ExprDefault def)) -> return $ Just ( kw, SomeExpr def )
-            (kw, SomeArgumentType atype@ContextDefault) -> do
+            arg@( _, SomeArgumentType RequiredArgument _ ) -> err $ "missing " <> showType arg <> " argument"
+            ( _, SomeArgumentType OptionalArgument _ ) -> return Nothing
+            ( kw, SomeArgumentType (ExprDefault def) _ ) -> return $ Just ( kw, def )
+            ( kw, SomeArgumentType ContextDefault (ExprTypePrim atype) ) -> do
                 SomeExpr context <- gets testContext
                 context' <- unifyExpr off atype context
                 return $ Just ( kw, SomeExpr context' )
+            ( _, SomeArgumentType ContextDefault _ ) -> err "non-primitive context requirement"
         sline <- getSourceLine
         return (FunctionEval sline $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
 
@@ -255,7 +256,26 @@ unifyExpr off pa expr = if
     | otherwise
     -> do
         parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-            "couldn't match expected type `" <> textExprType pa <> "' with actual type `" <> textExprType expr <> "'"
+            "couldn't match expected type ‘" <> textExprType pa <> "’ with actual type ‘" <> textExprType expr <> "’"
+
+
+unifySomeExpr :: Int -> SomeExprType -> SomeExpr -> TestParser SomeExpr
+unifySomeExpr off stype sexpr@(SomeExpr expr)
+    | ExprTypePrim pa <- stype
+    = SomeExpr <$> unifyExpr off pa expr
+
+    | ExprTypeConstr1 {} <- stype
+    = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ "unification with incomplete type"
+
+    | ExprTypeVar tvar <- stype
+    = do
+        _ <- unify off (ExprTypeVar tvar) (someExprType sexpr)
+        return sexpr
+
+    | otherwise
+    = do
+        parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+            "couldn't match expected type ‘" <> textSomeExprType stype <> "’ with actual type ‘" <> textSomeExprType (someExprType sexpr) <> "’"
 
 
 skipLineComment :: TestParser ()

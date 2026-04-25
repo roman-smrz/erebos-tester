@@ -40,8 +40,8 @@ builtinSend = SomeExpr $ ArgsReq (biArgs atypes) $
     FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (Send <$> biVar "$to" <*> biVar "$0")
   where
     atypes =
-        [ ( Just "to", SomeArgumentType (ContextDefault @Process) )
-        , ( Nothing, SomeArgumentType (RequiredArgument @Text) )
+        [ ( Just "to", SomeArgumentType ContextDefault (ExprTypePrim (Proxy @Process)) )
+        , ( Nothing, SomeArgumentType RequiredArgument (ExprTypePrim (Proxy @Text)) )
         ]
 
 builtinFlush :: SomeExpr
@@ -49,8 +49,8 @@ builtinFlush = SomeExpr $ ArgsReq (biArgs atypes) $
     FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (Flush <$> biVar "$from" <*> biOpt "$matching")
   where
     atypes =
-        [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
-        , ( Just "matching", SomeArgumentType (OptionalArgument @Regex) )
+        [ ( Just "from", SomeArgumentType ContextDefault (ExprTypePrim (Proxy @Process)) )
+        , ( Just "matching", SomeArgumentType OptionalArgument (ExprTypePrim (Proxy @Regex)) )
         ]
 
 builtinIgnore :: SomeExpr
@@ -58,17 +58,17 @@ builtinIgnore = SomeExpr $ ArgsReq (biArgs atypes) $
     FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (CreateObject (Proxy @IgnoreProcessOutput) <$> ((,) <$> biVar "$from" <*> biOpt "$matching"))
   where
     atypes =
-        [ ( Just "from", SomeArgumentType (ContextDefault @Process) )
-        , ( Just "matching", SomeArgumentType (OptionalArgument @Regex) )
+        [ ( Just "from", SomeArgumentType ContextDefault (ExprTypePrim (Proxy @Process)) )
+        , ( Just "matching", SomeArgumentType OptionalArgument (ExprTypePrim (Proxy @Regex)) )
         ]
 
 builtinGuard :: SomeExpr
 builtinGuard = SomeExpr $
-    ArgsReq (biArgs [ ( Nothing, SomeArgumentType (RequiredArgument @Bool) ) ]) $
+    ArgsReq (biArgs [ ( Nothing, SomeArgumentType RequiredArgument (ExprTypePrim (Proxy @Bool)) ) ]) $
     FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (Guard <$> Variable SourceLineBuiltin callStackFqVarName <*> biVar "$0")
 
 builtinMultiplyTimeout :: SomeExpr
-builtinMultiplyTimeout = SomeExpr $ ArgsReq (biArgs $ [ ( Just "by", SomeArgumentType (RequiredArgument @Scientific) ) ]) $
+builtinMultiplyTimeout = SomeExpr $ ArgsReq (biArgs $ [ ( Just "by", SomeArgumentType RequiredArgument (ExprTypePrim (Proxy @Scientific)) ) ]) $
     FunctionAbstraction $ TestBlockStep EmptyTestBlock <$> (CreateObject (Proxy @MultiplyTimeout) <$> biVar "$by")
 
 builtinWait :: SomeExpr

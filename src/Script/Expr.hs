@@ -457,12 +457,12 @@ exprArgs = \case
     App {} -> error "exprArgs: app"
     Undefined {} -> error "exprArgs: undefined"
 
-data SomeArgumentType = forall a. ExprType a => SomeArgumentType (ArgumentType a)
+data SomeArgumentType = SomeArgumentType ArgumentType SomeExprType
 
-data ArgumentType a
+data ArgumentType
     = RequiredArgument
     | OptionalArgument
-    | ExprDefault (Expr a)
+    | ExprDefault SomeExpr
     | ContextDefault
 
 
