@@ -7,6 +7,7 @@ module Parser.Expr (
     addVarName, addVarNameType,
     constrName,
 
+    TermComplexity(..),
     someExpr,
     typedExpr,
     literal,
@@ -103,7 +104,7 @@ someExpansion = do
             sline <- getSourceLine
             name <- VarName . TL.toStrict <$> takeWhile1P Nothing (\x -> isAlphaNum x || x == '_')
             lookupScalarVarExpr off sline name
-        , between (char '{') (char '}') someExpr
+        , between (char '{') (char '}') (someExpr FunctionTerm)
         ]
 
 expressionExpansion :: forall a. ExprType a => Text -> TestParser (Expr a)
@@ -197,7 +198,7 @@ list = label "list" $ do
                         (ExprTypePrim (Proxy :: Proxy a)) -> HideType (ExprTypePrim (Proxy @[ a ])) $ Pure ([] :: [ a ])
                         _ -> Undefined "incomplete type"
 
-        ,do SomeExpr x <- someExpr
+        ,do SomeExpr x <- someExpr FunctionTerm
             let enumErr off = parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
                     "list range enumeration not defined for ‘" <> textExprType x <> "’"
             let exprList = foldr (liftA2 (:)) (Pure [])
@@ -209,12 +210,12 @@ list = label "list" $ do
                 ,do off <- stateOffset <$> getParserState
                     osymbol ".."
                     ExprEnumerator fromTo _ <- maybe (enumErr off) return $ exprEnumerator x
-                    y <- typedExpr
+                    y <- typedExpr FunctionTerm
                     symbol "]"
                     return $ fromTo <$> x <*> y
 
                 ,do symbol ","
-                    y <- typedExpr
+                    y <- typedExpr FunctionTerm
 
                     choice
                         [do symbol "]"
@@ -223,12 +224,12 @@ list = label "list" $ do
                         ,do off <- stateOffset <$> getParserState
                             osymbol ".."
                             ExprEnumerator _ fromThenTo <- maybe (enumErr off) return $ exprEnumerator x
-                            z <- typedExpr
+                            z <- typedExpr FunctionTerm
                             symbol "]"
                             return $ fromThenTo <$> x <*> y <*> z
 
                         ,do symbol ","
-                            xs <- listOf typedExpr
+                            xs <- listOf (typedExpr FunctionTerm)
                             symbol "]"
                             return $ exprList (x : y : xs)
                         ]
@@ -254,14 +255,28 @@ applyBinOp off op x y = do
     y' <- unifyExpr off (Proxy @b) y
     return $ op <$> x' <*> y'
 
-someExpr :: TestParser SomeExpr
-someExpr = join inner <?> "expression"
+data TermComplexity
+    = SimpleTerm -- variable name, literal or more complex term in parentheses
+    | FunctionTerm -- simple term or function call
+
+someExpr :: TermComplexity -> TestParser SomeExpr
+someExpr complexity = label "expression" $ do
+    case complexity of
+        SimpleTerm -> join termSimple
+        FunctionTerm -> join inner
   where
-    inner = makeExprParser term table
+    inner = makeExprParser termFunction table
 
     parens = between (symbol "(") (symbol ")")
 
-    term = label "term" $ choice
+    termSimple = label "term" $ choice
+        [ parens inner
+        , return <$> literal
+        , return <$> variable
+        , return <$> constructor
+        ]
+
+    termFunction = label "term" $ choice
         [ parens inner
         , return <$> literal
         , return <$> functionCall
@@ -370,10 +385,10 @@ someExpr = join inner <?> "expression"
             region (const err) $
                 foldl1 (<|>) $ map (\(SomeBinOp op) -> tryop op (proxyOf e) (proxyOf f)) ops
 
-typedExpr :: forall a. ExprType a => TestParser (Expr a)
-typedExpr = do
+typedExpr :: forall a. ExprType a => TermComplexity -> TestParser (Expr a)
+typedExpr complexity = do
     off <- stateOffset <$> getParserState
-    SomeExpr e <- someExpr
+    SomeExpr e <- someExpr complexity
     unifyExpr off Proxy e
 
 literal :: TestParser SomeExpr
@@ -406,7 +421,7 @@ functionCall = do
     (variable <|> constructor) >>= \case
         SomeExpr e'@(FunVariable argTypes _ _) -> do
             let check = checkFunctionArguments argTypes
-            args <- functionArguments check someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
+            args <- functionArguments check (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
             return $ SomeExpr $ ArgsApp args e'
         e -> return e
 

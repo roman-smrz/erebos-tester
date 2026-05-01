@@ -37,7 +37,7 @@ letStatement = do
     off <- stateOffset <$> getParserState
     name <- varName
     osymbol "="
-    se@(SomeExpr e) <- someExpr
+    se@(SomeExpr e) <- someExpr FunctionTerm
 
     localState $ do
         let tname = TypedVarName name
@@ -55,7 +55,7 @@ forStatement = do
 
     wsymbol "in"
     loff <- stateOffset <$> getParserState
-    SomeExpr e <- someExpr
+    SomeExpr e <- someExpr FunctionTerm
     let err = parseError $ FancyError loff $ S.singleton $ ErrorFail $ T.unpack $
             "expected a list, expression has type '" <> textExprType e <> "'"
     ExprListUnpacker unpack _ <- maybe err return $ exprListUnpacker e
@@ -93,7 +93,7 @@ shellStatement = do
 
         , do
             parseParamKeyword "on" mbnode
-            node <- typedExpr
+            node <- typedExpr SimpleTerm
             parseParams ref mbpname (Just node)
 
         , do
@@ -120,7 +120,7 @@ exprStatement :: TestParser (Expr (TestBlock ()))
 exprStatement = do
     ref <- L.indentLevel
     off <- stateOffset <$> getParserState
-    SomeExpr expr <- someExpr
+    SomeExpr expr <- someExpr FunctionTerm
     choice
         [ continuePartial off ref expr
         , unifyExpr off Proxy expr
@@ -136,7 +136,7 @@ exprStatement = do
         blockOf indent $ do
             coff <- stateOffset <$> getParserState
             sline <- getSourceLine
-            args <- functionArguments (checkFunctionArguments (exprArgs fun)) someExpr literal (\poff -> lookupVarExpr poff sline . VarName)
+            args <- functionArguments (checkFunctionArguments (exprArgs fun)) (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
             let fun' = ArgsApp args fun
             choice
                 [ continuePartial coff indent fun'
@@ -309,7 +309,7 @@ instance ExprType a => ParamType (ExprParam a) where
     type ParamRep (ExprParam a) = Expr a
     parseParam _ = do
         off <- stateOffset <$> getParserState
-        SomeExpr e <- literal <|> variable <|> constructor <|> between (symbol "(") (symbol ")") someExpr
+        SomeExpr e <- someExpr SimpleTerm
         unifyExpr off Proxy e
     showParamType _ = "<" ++ T.unpack (textExprType @a Proxy) ++ ">"
     paramExpr = fmap ExprParam
@@ -393,7 +393,7 @@ testWith = do
     wsymbol "with"
 
     off <- stateOffset <$> getParserState
-    ctx@(SomeExpr (_ :: Expr ctxe)) <- someExpr
+    ctx@(SomeExpr (_ :: Expr ctxe)) <- someExpr SimpleTerm
     let expected =
             [ ExprTypePrim @Network Proxy
             , ExprTypePrim @Node Proxy

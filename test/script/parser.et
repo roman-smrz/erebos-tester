@@ -11,3 +11,9 @@ test Parser:
 
         send "load ${scripts.path}/indent.et"
         expect /load-done/
+
+        send "load ${scripts.path}/function.et"
+        expect /load-done/
+
+        send "load ${scripts.path}/function-fail.et"
+        expect /load-failed parse-error/

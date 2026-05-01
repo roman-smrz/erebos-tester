@@ -64,7 +64,7 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
         name <- try $ identifier <* osymbol ":"
         case name of
             "tag" -> do
-                Just <$> typedExpr <* eol <* scn
+                Just <$> typedExpr FunctionTerm <* eol <* scn
             _ -> do
                 registerParseError $ FancyError off $ S.singleton $ ErrorFail $
                     "unexpected test metadata ‘" <> T.unpack name <> "’"
@@ -89,7 +89,7 @@ parseDefinition href = label "symbol definition" $ do
                 SomeExpr <$> testBlock ref
             , do
                 osymbol "="
-                someExpr <* eol
+                someExpr FunctionTerm <* eol
             ]
         scn
         atypes' <- getInferredTypes atypes

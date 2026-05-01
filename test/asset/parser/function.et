@@ -1,0 +1,10 @@
+def f (x) and y = (x + y) + 1
+
+def g (x) and y = (x + (y+1))
+
+test Test:
+    guard (1 == 1)
+    guard (f 1 and 2 == 4)
+    guard (f 1 and 2 == g 1 and 2)
+    guard (f 1 and (g 2 and 3) == g 1 and 2 + 4)
+    guard (f (10 + g and 1 1) and (g 2 and 3) == g 1 and 2 + 10 +6)
