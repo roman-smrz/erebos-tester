@@ -57,7 +57,7 @@ data Expr a where
     Let :: forall a b. ExprType b => SourceLine -> TypedVarName b -> Expr b -> Expr a -> Expr a
     Variable :: ExprType a => SourceLine -> FqVarName -> Expr a
     DynVariable :: SomeExprType -> SourceLine -> FqVarName -> Expr DynamicType
-    FunVariable :: ExprType a => FunctionArguments SomeArgumentType -> SourceLine -> FqVarName -> Expr (FunctionType a)
+    FunVariable :: ExprType a => SomeExprType -> SourceLine -> FqVarName -> Expr (FunctionType a)
     OptVariable :: ExprType a => SourceLine -> FqVarName -> Expr (Maybe a)
     ArgsReq :: ExprType a => FunctionArguments ( VarName, SomeArgumentType ) -> Expr (FunctionType a) -> Expr (FunctionType a)
     ArgsApp :: ExprType a => FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
@@ -286,7 +286,8 @@ data SomeExprType
     = forall a. ExprType a => ExprTypePrim (Proxy a)
     | forall a. ExprTypeConstr1 a => ExprTypeConstr1 (Proxy a)
     | ExprTypeVar TypeVar
-    | ExprTypeFunction (FunctionArguments SomeArgumentType) SomeExprType
+    | ExprTypeFunction SomeExprType SomeExprType
+    | ExprTypeArguments (FunctionArguments SomeArgumentType)
     | ExprTypeApp SomeExprType [ SomeExprType ]
     | ExprTypeForall TypeVar SomeExprType
 
@@ -296,13 +297,14 @@ someExprType (SomeExpr expr) = go expr
     go :: forall e. ExprType e => Expr e -> SomeExprType
     go = \case
         DynVariable stype _ _ -> stype
+        e@(FunVariable args _ _) -> ExprTypeFunction args (ExprTypePrim (proxyOfFunctionType e))
         HideType stype _ -> stype
         TypeLambda tvar stype _ -> ExprTypeForall tvar stype
 
         ArgsReq args inner -> exprTypeFunction (fmap snd args) (go inner)
         ArgsApp (FunctionArguments used) inner
-            | ExprTypeFunction (FunctionArguments args) x <- go inner
-            -> ExprTypeFunction (FunctionArguments (args `M.difference` used)) x
+            | ExprTypeFunction (ExprTypeArguments (FunctionArguments args)) x <- go inner
+            -> ExprTypeFunction (ExprTypeArguments (FunctionArguments (args `M.difference` used))) x
         FunctionAbstraction inner -> exprTypeFunction mempty (go inner)
         FunctionEval _ inner
             | ExprTypeFunction _ x <- go inner -> x
@@ -310,8 +312,11 @@ someExprType (SomeExpr expr) = go expr
         (_ :: Expr a) -> ExprTypePrim (Proxy @a)
 
     exprTypeFunction :: FunctionArguments SomeArgumentType -> SomeExprType -> SomeExprType
-    exprTypeFunction args (ExprTypeFunction args' inner) = ExprTypeFunction (args <> args') inner
-    exprTypeFunction args inner = ExprTypeFunction args inner
+    exprTypeFunction args (ExprTypeFunction (ExprTypeArguments args') inner) = ExprTypeFunction (ExprTypeArguments (args <> args')) inner
+    exprTypeFunction args inner = ExprTypeFunction (ExprTypeArguments args) inner
+
+    proxyOfFunctionType :: Expr (FunctionType a) -> Proxy a
+    proxyOfFunctionType _ = Proxy
 
 
 renameTypeVar :: TypeVar -> TypeVar -> Expr a -> Expr a
@@ -353,7 +358,8 @@ renameVarInType a b = go
         ExprTypeConstr1 {} -> orig
         ExprTypeVar tvar | tvar == a -> ExprTypeVar b
                          | otherwise -> orig
-        ExprTypeFunction {} -> orig
+        ExprTypeFunction args result -> ExprTypeFunction (go args) (go result)
+        ExprTypeArguments args -> ExprTypeArguments (fmap (\(SomeArgumentType atype stype) -> SomeArgumentType atype (go stype)) args)
         ExprTypeApp c xs -> ExprTypeApp (go c) (map go xs)
         ExprTypeForall tvar stype
             | tvar == a -> orig
@@ -369,6 +375,7 @@ textSomeExprType = go []
     go [] (ExprTypeConstr1 _) = "<incomplte type>"
     go _ (ExprTypeVar (TypeVar name)) = name
     go _ (ExprTypeFunction _ r) = "function:" <> textSomeExprType r
+    go _ (ExprTypeArguments _) = "{…}"
     go _ (ExprTypeApp c xs) = go (map textSomeExprType xs) c
     go _ (ExprTypeForall (TypeVar name) ctype) = "∀" <> name <> "." <> go [] ctype
 
@@ -429,7 +436,7 @@ textSomeVarValue (SomeVarValue (VarValue _ args value))
 someVarValueType :: SomeVarValue -> SomeExprType
 someVarValueType (SomeVarValue (VarValue _ args _ :: VarValue a))
     | anull args = ExprTypePrim (Proxy @a)
-    | otherwise  = ExprTypeFunction args (ExprTypePrim (Proxy @a))
+    | otherwise  = ExprTypeFunction (ExprTypeArguments args) (ExprTypePrim (Proxy @a))
 
 
 newtype ArgumentKeyword = ArgumentKeyword Text
@@ -445,7 +452,8 @@ exprArgs :: Expr (FunctionType a) -> FunctionArguments SomeArgumentType
 exprArgs = \case
     Let _ _ _ expr -> exprArgs expr
     Variable {} -> mempty
-    FunVariable args _ _ -> args
+    FunVariable (ExprTypeArguments args) _ _ -> args
+    FunVariable _ _ _ -> error "exprArgs: type-var args"
     ArgsReq args expr -> fmap snd args <> exprArgs expr
     ArgsApp (FunctionArguments applied) expr ->
         let FunctionArguments args = exprArgs expr

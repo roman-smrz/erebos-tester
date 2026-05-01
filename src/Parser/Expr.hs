@@ -162,7 +162,7 @@ quotedString = label "string" $ lexeme $ do
 regex :: TestParser (Expr Regex)
 regex = label "regular expression" $ lexeme $ do
     off <- stateOffset <$> getParserState
-    void $ char '/'
+    void $ try $ char '/' <* notFollowedBy (char '=') -- TODO: better parsing rules for regexes
     let inner = choice
             [ char '/' >> return []
             , takeWhile1P Nothing (`notElem` ['/', '\\', '$']) >>= \s -> (Pure (RegexPart (TL.toStrict s)) :) <$> inner
@@ -418,12 +418,27 @@ constructor = label "constructor" $ do
 functionCall :: TestParser SomeExpr
 functionCall = do
     sline <- getSourceLine
-    (variable <|> constructor) >>= \case
-        SomeExpr e'@(FunVariable argTypes _ _) -> do
-            let check = checkFunctionArguments argTypes
-            args <- functionArguments check (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
-            return $ SomeExpr $ ArgsApp args e'
-        e -> return e
+    off <- stateOffset <$> getParserState
+
+    fun <- variable <|> constructor
+    FunctionArguments margs <- functionArguments (\poff _ e -> return ( poff, e )) (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
+    if M.null margs
+      then return fun
+      else do
+        dict <- newTypeVar
+        res <- newTypeVar
+        SomeExpr (expr :: Expr fa) <- unifySomeExpr off (ExprTypeFunction (ExprTypeVar dict) (ExprTypeVar res)) fun
+        Just (ExprTypeArguments argTypes) <- M.lookup dict <$> gets testTypeUnif
+        args <- fmap (FunctionArguments . M.fromAscList) $ mapM (\( kw, ( poff, e ) ) -> ( kw, ) <$> checkFunctionArguments argTypes poff kw e) $ M.toAscList margs
+        M.lookup res <$> gets testTypeUnif >>= \case
+            Just (ExprTypePrim (_ :: Proxy a))
+                | Just (Refl :: FunctionType a :~: fa) <- eqT
+                -> return $ SomeExpr $ ArgsApp args expr
+                | otherwise -> error $ "type mismatch after function unification: " <> show ( typeRep (Proxy @(FunctionType a)), typeRep (Proxy @fa) )
+            _
+                | Just (Refl :: FunctionType DynamicType :~: fa) <- eqT
+                -> return $ SomeExpr $ ArgsApp args expr
+                | otherwise -> error $ "type mismatch after function unification: " <> show ( typeRep (Proxy @(FunctionType DynamicType)), typeRep (Proxy @fa) )
 
 recordSelector :: SomeExpr -> TestParser SomeExpr
 recordSelector (SomeExpr expr) = do

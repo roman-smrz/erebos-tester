@@ -4,6 +4,12 @@ def g (x) and y = (x + (y+1))
 
 test Test:
     guard (1 == 1)
+    guard (1 /= 2)
+    let x = 2
+    guard (x == x)
+    guard (x /= 1)
+    guard (x /= x + 1)
+
     guard (f 1 and 2 == 4)
     guard (f 1 and 2 == g 1 and 2)
     guard (f 1 and (g 2 and 3) == g 1 and 2 + 4)

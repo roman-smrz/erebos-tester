@@ -273,6 +273,17 @@ unifySomeExpr off stype sexpr@(SomeExpr expr)
         _ <- unify off (ExprTypeVar tvar) (someExprType sexpr)
         return sexpr
 
+    | ExprTypeFunction args res <- stype
+    = case someExprType sexpr of
+        ExprTypeFunction args' res' -> do
+            _ <- unify off args args'
+            _ <- unify off res res'
+            return sexpr
+        _ -> do
+            _ <- unify off args (ExprTypeArguments mempty)
+            SomeExpr expr' <- unifySomeExpr off res sexpr
+            return $ SomeExpr $ FunctionAbstraction expr'
+
     | otherwise
     = do
         parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
