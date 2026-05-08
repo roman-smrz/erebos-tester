@@ -178,6 +178,11 @@ unify _ res@(ExprTypeConstr1 (Proxy :: Proxy a)) (ExprTypeConstr1 (Proxy :: Prox
     | Just (Refl :: a :~: b) <- eqT
     = return res
 
+unify off (ExprTypeFunction args res) (ExprTypeFunction args' res')
+    = ExprTypeFunction
+        <$> unify off args args'
+        <*> unify off res res'
+
 unify off (ExprTypeApp ac aparams) (ExprTypeApp bc bparams)
     | length aparams == length bparams
     = do
@@ -198,7 +203,7 @@ unify off (ExprTypePrim aproxy) b@(ExprTypeApp {})
 
 unify off a b = do
     parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-        "couldn't match expected type `" <> textSomeExprType a <> "' with actual type `" <> textSomeExprType b <> "'"
+        "couldn't match expected type ‘" <> textSomeExprType a <> "’ with actual type ‘" <> textSomeExprType b <> "’"
 
 
 unifyExpr :: forall a b proxy. (ExprType a, ExprType b) => Int -> proxy a -> Expr b -> TestParser (Expr a)
@@ -261,7 +266,7 @@ unifyExpr off pa expr = if
 
 
 unifySomeExpr :: Int -> SomeExprType -> SomeExpr -> TestParser SomeExpr
-unifySomeExpr off stype sexpr@(SomeExpr expr)
+unifySomeExpr off stype sexpr@(SomeExpr (expr :: Expr a))
     | ExprTypePrim pa <- stype
     = SomeExpr <$> unifyExpr off pa expr
 
@@ -272,6 +277,20 @@ unifySomeExpr off stype sexpr@(SomeExpr expr)
     = do
         _ <- unify off (ExprTypeVar tvar) (someExprType sexpr)
         return sexpr
+
+    | Just (Refl :: a :~: DynamicType) <- eqT
+    , ExprTypeForall qvar itype <- someExprType sexpr
+    = do
+        tvar <- newTypeVar
+        itype' <- unify off stype $ renameVarInType qvar tvar itype
+        rtype <- M.lookup tvar <$> gets testTypeUnif
+        case itype' of
+            ExprTypeFunction _ (ExprTypePrim (Proxy :: Proxy r)) ->
+                return $ SomeExpr (TypeApp expr (fromMaybe (ExprTypeVar tvar) rtype) :: Expr (FunctionType a))
+            ExprTypeFunction _ _ ->
+                return $ SomeExpr (TypeApp expr (fromMaybe (ExprTypeVar tvar) rtype) :: Expr (FunctionType DynamicType))
+            _ ->
+                return $ SomeExpr (TypeApp expr (fromMaybe (ExprTypeVar tvar) rtype) :: Expr DynamicType)
 
     | ExprTypeFunction args res <- stype
     = case someExprType sexpr of
@@ -286,8 +305,8 @@ unifySomeExpr off stype sexpr@(SomeExpr expr)
 
     | otherwise
     = do
-        parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-            "couldn't match expected type ‘" <> textSomeExprType stype <> "’ with actual type ‘" <> textSomeExprType (someExprType sexpr) <> "’"
+        _ <- unify off stype (someExprType sexpr)
+        return sexpr
 
 
 skipLineComment :: TestParser ()
