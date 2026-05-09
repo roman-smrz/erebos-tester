@@ -179,7 +179,7 @@ eval = \case
         val <- eval valExpr
         withVar name val $ eval expr
     Variable _ name -> evalSomeExpr name =<< lookupVar name
-    DynVariable _ _ name -> fail $ "ambiguous type of ‘" <> unpackFqVarName name <> "’"
+    DynVariable _ _ name -> evalSomeExpr name =<< lookupVar name
     FunVariable _ _ name -> evalSomeExpr name =<< lookupVar name
     OptVariable _ name -> maybe (return Nothing) (fmap Just . evalSomeExpr name) =<< tryLookupVar name
     ArgsReq (FunctionArguments req) efun -> do
