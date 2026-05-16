@@ -136,8 +136,8 @@ exprStatement = do
         blockOf indent $ do
             coff <- stateOffset <$> getParserState
             sline <- getSourceLine
-            args <- functionArguments (checkFunctionArguments (exprArgs fun)) (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
-            let fun' = ArgsApp args fun
+            args <- functionArguments (\poff _ e -> return ( poff, e )) (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
+            SomeExpr fun' <- applyFunctionArguments args (SomeExpr fun)
             choice
                 [ continuePartial coff indent fun'
                 , unifyExpr coff Proxy fun'

@@ -16,8 +16,8 @@ module Parser.Expr (
 
     stringExpansion,
 
-    checkFunctionArguments,
     functionArguments,
+    applyFunctionArguments,
 ) where
 
 import Control.Applicative (liftA2)
@@ -418,27 +418,9 @@ constructor = label "constructor" $ do
 functionCall :: TestParser SomeExpr
 functionCall = do
     sline <- getSourceLine
-    off <- stateOffset <$> getParserState
-
     fun <- variable <|> constructor
-    FunctionArguments margs <- functionArguments (\poff _ e -> return ( poff, e )) (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
-    if M.null margs
-      then return fun
-      else do
-        dict <- newTypeVar
-        res <- newTypeVar
-        SomeExpr (expr :: Expr fa) <- unifySomeExpr off (ExprTypeFunction (ExprTypeVar dict) (ExprTypeVar res)) fun
-        Just (ExprTypeArguments argTypes) <- M.lookup dict <$> gets testTypeUnif
-        args <- fmap (FunctionArguments . M.fromAscList) $ mapM (\( kw, ( poff, e ) ) -> ( kw, ) <$> checkFunctionArguments argTypes poff kw e) $ M.toAscList margs
-        M.lookup res <$> gets testTypeUnif >>= \case
-            Just (ExprTypePrim (_ :: Proxy a))
-                | Just (Refl :: FunctionType a :~: fa) <- eqT
-                -> return $ SomeExpr $ ArgsApp args expr
-                | otherwise -> error $ "type mismatch after function unification: " <> show ( typeRep (Proxy @(FunctionType a)), typeRep (Proxy @fa) )
-            _
-                | Just (Refl :: FunctionType DynamicType :~: fa) <- eqT
-                -> return $ SomeExpr $ ArgsApp args expr
-                | otherwise -> error $ "type mismatch after function unification: " <> show ( typeRep (Proxy @(FunctionType DynamicType)), typeRep (Proxy @fa) )
+    args <- functionArguments (\poff _ e -> return ( poff, e )) (someExpr FunctionTerm) literal (\poff -> lookupVarExpr poff sline . VarName)
+    applyFunctionArguments args fun
 
 recordSelector :: SomeExpr -> TestParser SomeExpr
 recordSelector (SomeExpr expr) = do
@@ -452,21 +434,6 @@ recordSelector (SomeExpr expr) = do
   where
     applyRecordSelector :: ExprType a => Text -> Expr a -> RecordSelector a -> SomeExpr
     applyRecordSelector m e (RecordSelector f) = SomeExpr $ App (AnnRecord m) (pure f) e
-
-
-checkFunctionArguments :: FunctionArguments SomeArgumentType
-                       -> Int -> Maybe ArgumentKeyword -> SomeExpr -> TestParser SomeExpr
-checkFunctionArguments (FunctionArguments argTypes) poff kw expr = do
-    case M.lookup kw argTypes of
-        Just (SomeArgumentType _ stype) -> do
-            withRecovery (\e -> registerParseError e >> return expr) $ do
-                unifySomeExpr poff stype expr
-        Nothing -> do
-            registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
-                case kw of
-                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword ‘" <> tkw <> "’"
-                    Nothing                    -> "unexpected parameter"
-            return expr
 
 
 functionArguments :: (Int -> Maybe ArgumentKeyword -> a -> TestParser b) -> TestParser a -> TestParser a -> (Int -> Text -> TestParser a) -> TestParser (FunctionArguments b)
@@ -496,3 +463,51 @@ functionArguments check param lit promote = do
     pparam = between (symbol "(") (symbol ")") param <|> lit
 
     checkAndInsert off kw x cont = M.insert kw <$> check off kw x <*> cont
+
+
+applyFunctionArguments :: FunctionArguments ( Int, SomeExpr ) -> SomeExpr -> TestParser SomeExpr
+applyFunctionArguments (FunctionArguments margs) sexpr
+    | M.null margs = return sexpr
+applyFunctionArguments args sexpr@(SomeExpr (expr :: Expr a))
+    | Just (Refl :: a :~: DynamicType) <- eqT
+    , ExprTypeForall qvar itype <- someExprType sexpr
+    = do
+        tvar <- newTypeVar
+        case renameVarInType qvar tvar itype of
+            ExprTypeFunction (ExprTypeArguments args') res' -> do
+                ( used, ( _, unexpectedArgs ) ) <- unifyArguments args' args
+                unexpectedArguments unexpectedArgs
+                t <- fromMaybe (ExprTypeVar tvar) . M.lookup tvar <$> gets testTypeUnif
+                resolveKnownTypeVars res' >>= \case
+                    res''@(ExprTypePrim (Proxy :: Proxy r)) ->
+                        return $ SomeExpr (ArgsApp used (ExposeFunType args' (TypeApp res'' t expr) :: Expr (FunctionType r)))
+                    r ->
+                        return $ SomeExpr (ArgsApp used (ExposeFunType args' (TypeApp r t expr) :: Expr (FunctionType DynamicType)))
+            _ -> do
+                unexpectedArguments args
+                return sexpr
+
+    | otherwise
+    = case someExprType sexpr of
+        ExprTypeFunction (ExprTypeArguments args') res' -> do
+            ( used, ( _, unexpectedArgs ) ) <- unifyArguments args' args
+            unexpectedArguments unexpectedArgs
+            resolveKnownTypeVars res' >>= \case
+                ExprTypePrim (Proxy :: Proxy r)
+                    | Just (Refl :: a :~: FunctionType r) <- eqT
+                    -> return $ SomeExpr (ArgsApp used expr)
+                _
+                    | Just (Refl :: a :~: FunctionType DynamicType) <- eqT
+                    -> return $ SomeExpr (ArgsApp used expr)
+                _ ->
+                    error $ "expecting function type, got: " <> show (typeRep expr)
+        _ -> do
+            unexpectedArguments args
+            return sexpr
+  where
+    unexpectedArguments (FunctionArguments amap) = do
+        forM_ (M.toAscList amap) $ \( kw, ( poff, _ ) ) ->
+            registerParseError $ FancyError poff $ S.singleton $ ErrorFail $ T.unpack $
+                case kw of
+                    Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword ‘" <> tkw <> "’"
+                    Nothing                    -> "unexpected parameter"

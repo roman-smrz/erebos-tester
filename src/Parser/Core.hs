@@ -1,6 +1,7 @@
 module Parser.Core where
 
 import Control.Applicative
+import Control.Arrow
 import Control.Monad
 import Control.Monad.State
 
@@ -119,6 +120,26 @@ lookupScalarVarExpr off sline name = do
             SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
         stype -> return $ SomeExpr $ DynVariable stype sline fqn
 
+
+resolveKnownTypeVars :: SomeExprType -> TestParser SomeExprType
+resolveKnownTypeVars stype = case stype of
+    ExprTypePrim {} -> return stype
+    ExprTypeConstr1 {} -> return stype
+    ExprTypeVar tvar -> do
+        gets (M.lookup tvar . testTypeUnif) >>= \case
+            Just stype' -> resolveKnownTypeVars stype'
+            Nothing -> return stype
+    ExprTypeFunction args body -> ExprTypeFunction <$> resolveKnownTypeVars args <*> resolveKnownTypeVars body
+    ExprTypeArguments args -> ExprTypeArguments <$> mapM (\(SomeArgumentType a t) -> SomeArgumentType a <$> resolveKnownTypeVars t) args
+    ExprTypeApp ctor params -> do
+        ctor' <- resolveKnownTypeVars ctor
+        params' <- mapM resolveKnownTypeVars params
+        return $ case ( ctor', params' ) of
+            ( ExprTypeConstr1 (Proxy :: Proxy c'), [ ExprTypePrim (Proxy :: Proxy p') ] )
+                -> ExprTypePrim (Proxy :: Proxy (c' p'))
+            _ -> ExprTypeApp ctor' params'
+    ExprTypeForall tvar inner -> ExprTypeForall tvar <$> resolveKnownTypeVars inner
+
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do
     cur <- gets testTypeUnif
@@ -206,6 +227,23 @@ unify off a b = do
         "couldn't match expected type ‘" <> textSomeExprType a <> "’ with actual type ‘" <> textSomeExprType b <> "’"
 
 
+unifyArguments
+    :: FunctionArguments SomeArgumentType
+    -> FunctionArguments ( Int, SomeExpr )
+    -> TestParser ( FunctionArguments SomeExpr, ( FunctionArguments SomeArgumentType, FunctionArguments ( Int, SomeExpr ) ) )
+unifyArguments (FunctionArguments am) (FunctionArguments bm) = (toArgs *** (toArgs *** toArgs)) <$> go (M.toAscList am) (M.toAscList bm)
+  where
+    toArgs = FunctionArguments . M.fromAscList
+    go [] bs = return ( [], ( [], bs ) )
+    go as [] = return ( [], ( as, [] ) )
+    go (a@( ak, SomeArgumentType _ at ) : as) (b@( bk, ( off, expr ) ) : bs)
+        | ak < bk = second (first  (a :)) <$> go as (b : bs)
+        | bk < ak = second (second (b :)) <$> go (a : as) bs
+        | otherwise = do
+            expr' <- unifySomeExpr off at expr
+            first (( ak, expr' ) :) <$> go as bs
+
+
 unifyExpr :: forall a b proxy. (ExprType a, ExprType b) => Int -> proxy a -> Expr b -> TestParser (Expr a)
 unifyExpr off pa expr = if
     | Just (Refl :: a :~: b) <- eqT
@@ -237,23 +275,7 @@ unifyExpr off pa expr = if
         unifyExpr off pa (f $ ExprTypePrim pt)
 
     | Just (Refl :: FunctionType a :~: b) <- eqT
-    -> do
-        let FunctionArguments remaining = exprArgs expr
-            showType ( Nothing, SomeArgumentType _ stype ) = "‘<" <> textSomeExprType stype <> ">’"
-            showType ( Just (ArgumentKeyword kw), SomeArgumentType _ stype ) = "‘" <> kw <> " <" <> textSomeExprType stype <> ">’"
-            err = parseError . FancyError off . S.singleton . ErrorFail . T.unpack
-
-        defaults <- fmap catMaybes $ forM (M.toAscList remaining) $ \case
-            arg@( _, SomeArgumentType RequiredArgument _ ) -> err $ "missing " <> showType arg <> " argument"
-            ( _, SomeArgumentType OptionalArgument _ ) -> return Nothing
-            ( kw, SomeArgumentType (ExprDefault def) _ ) -> return $ Just ( kw, def )
-            ( kw, SomeArgumentType ContextDefault (ExprTypePrim atype) ) -> do
-                SomeExpr context <- gets testContext
-                context' <- unifyExpr off atype context
-                return $ Just ( kw, SomeExpr context' )
-            ( _, SomeArgumentType ContextDefault _ ) -> err "non-primitive context requirement"
-        sline <- getSourceLine
-        return (FunctionEval sline $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
+    -> evalRemainingArguments off (exprArgs expr) expr
 
     | Just (Refl :: DynamicType :~: b) <- eqT
     , Undefined msg <- expr
@@ -264,6 +286,25 @@ unifyExpr off pa expr = if
     -> do
         parseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
             "couldn't match expected type ‘" <> textExprType pa <> "’ with actual type ‘" <> textExprType expr <> "’"
+
+
+evalRemainingArguments :: ExprType a => Int -> FunctionArguments SomeArgumentType -> Expr (FunctionType a) -> TestParser (Expr a)
+evalRemainingArguments off (FunctionArguments remaining) expr = do
+    let showType ( Nothing, SomeArgumentType _ stype ) = "‘<" <> textSomeExprType stype <> ">’"
+        showType ( Just (ArgumentKeyword kw), SomeArgumentType _ stype ) = "‘" <> kw <> " <" <> textSomeExprType stype <> ">’"
+        err = parseError . FancyError off . S.singleton . ErrorFail . T.unpack
+
+    defaults <- fmap catMaybes $ forM (M.toAscList remaining) $ \case
+        arg@( _, SomeArgumentType RequiredArgument _ ) -> err $ "missing " <> showType arg <> " argument"
+        ( _, SomeArgumentType OptionalArgument _ ) -> return Nothing
+        ( kw, SomeArgumentType (ExprDefault def) _ ) -> return $ Just ( kw, def )
+        ( kw, SomeArgumentType ContextDefault (ExprTypePrim atype) ) -> do
+            SomeExpr context <- gets testContext
+            context' <- unifyExpr off atype context
+            return $ Just ( kw, SomeExpr context' )
+        ( _, SomeArgumentType ContextDefault _ ) -> err "non-primitive context requirement"
+    sline <- getSourceLine
+    return (FunctionEval sline $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
 
 
 unifySomeExpr :: Int -> SomeExprType -> SomeExpr -> TestParser SomeExpr
@@ -297,6 +338,23 @@ unifySomeExpr off stype sexpr@(SomeExpr (expr :: Expr a))
             _ <- unify off args (ExprTypeArguments mempty)
             SomeExpr expr' <- unifySomeExpr off res sexpr
             return $ SomeExpr $ FunctionAbstraction expr'
+
+    | ExprTypeApp _ _ <- stype
+    , ExprTypeFunction args' res' <- someExprType sexpr
+    = do
+        ( _, ( remaining, _ ) ) <- case args' of
+            ExprTypeArguments args'' -> do
+                unifyArguments args'' mempty
+            _ -> do
+                _ <- unify off (ExprTypeArguments mempty) args'
+                return ( mempty, ( mempty, mempty ) )
+        unify off stype res' >>= \case
+            ExprTypePrim (Proxy :: Proxy r) | Just (Refl :: a :~: FunctionType r) <- eqT ->
+                SomeExpr <$> evalRemainingArguments off remaining expr
+            _ | Just (Refl :: a :~: FunctionType DynamicType) <- eqT ->
+                SomeExpr <$> evalRemainingArguments off remaining expr
+            _ ->
+                error $ "expecting function type, got: " <> show (typeRep expr)
 
     | otherwise
     = do
