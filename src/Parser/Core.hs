@@ -215,19 +215,20 @@ unifyExpr off pa expr = if
     , ExprTypeForall qvar itype <- stype
     -> do
         tvar <- newTypeVar
-        _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) $ renameVarInType qvar tvar itype
+        res <- unify off (ExprTypePrim (Proxy :: Proxy a)) $ renameVarInType qvar tvar itype
         rtype <- M.lookup tvar <$> gets testTypeUnif
-        return $ TypeApp (Variable sline name) $ fromMaybe (ExprTypeVar tvar) rtype
+        return $ ExposePrimType $ TypeApp res (fromMaybe (ExprTypeVar tvar) rtype) (Variable sline name)
 
     | DynVariable stype sline name <- expr
     -> do
         _ <- unify off (ExprTypePrim (Proxy :: Proxy a)) stype
         return $ Variable sline name
 
-    | HideType (ExprTypePrim (_ :: Proxy b'')) (expr' :: Expr b') <- expr
-    , Just (Refl :: b'' :~: b') <- eqT
-    -> do
-        unifyExpr off pa expr'
+    | HidePrimType (_ :: Expr b') <- expr
+    -> unifyExpr off pa (ExposePrimType expr :: Expr b')
+
+    | HideFunType args (_ :: Expr (FunctionType b')) <- expr
+    -> unifyExpr off pa (ExposeFunType args expr :: Expr (FunctionType b'))
 
     | TypeLambda tvar t f <- expr
     -> do
@@ -284,13 +285,7 @@ unifySomeExpr off stype sexpr@(SomeExpr (expr :: Expr a))
         tvar <- newTypeVar
         itype' <- unify off stype $ renameVarInType qvar tvar itype
         rtype <- M.lookup tvar <$> gets testTypeUnif
-        case itype' of
-            ExprTypeFunction _ (ExprTypePrim (Proxy :: Proxy r)) ->
-                return $ SomeExpr (TypeApp expr (fromMaybe (ExprTypeVar tvar) rtype) :: Expr (FunctionType a))
-            ExprTypeFunction _ _ ->
-                return $ SomeExpr (TypeApp expr (fromMaybe (ExprTypeVar tvar) rtype) :: Expr (FunctionType DynamicType))
-            _ ->
-                return $ SomeExpr (TypeApp expr (fromMaybe (ExprTypeVar tvar) rtype) :: Expr DynamicType)
+        return $ SomeExpr (TypeApp itype' (fromMaybe (ExprTypeVar tvar) rtype) expr)
 
     | ExprTypeFunction args res <- stype
     = case someExprType sexpr of

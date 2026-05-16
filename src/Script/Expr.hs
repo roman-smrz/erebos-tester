@@ -63,9 +63,12 @@ data Expr a where
     ArgsApp :: ExprType a => FunctionArguments SomeExpr -> Expr (FunctionType a) -> Expr (FunctionType a)
     FunctionAbstraction :: ExprType a => Expr a -> Expr (FunctionType a)
     FunctionEval :: ExprType a => SourceLine -> Expr (FunctionType a) -> Expr a
-    HideType :: forall a. Typeable a => SomeExprType -> Expr a -> Expr DynamicType
+    HidePrimType :: forall a. ExprType a => Expr a -> Expr DynamicType
+    HideFunType :: forall a. ExprType a => FunctionArguments SomeArgumentType -> Expr (FunctionType a) -> Expr DynamicType
+    ExposePrimType :: forall a. ExprType a => Expr DynamicType -> Expr a
+    ExposeFunType :: forall a. ExprType a => FunctionArguments SomeArgumentType -> Expr DynamicType -> Expr (FunctionType a)
     TypeLambda :: TypeVar -> SomeExprType -> (SomeExprType -> Expr DynamicType) -> Expr DynamicType
-    TypeApp :: forall a. ExprType a => Expr DynamicType -> SomeExprType -> Expr a
+    TypeApp :: SomeExprType {- result type -} -> SomeExprType {- type argument -} -> Expr DynamicType -> Expr DynamicType
     LambdaAbstraction :: ExprType a => TypedVarName a -> Expr b -> Expr (a -> b)
     Pure :: a -> Expr a
     App :: AppAnnotation b -> Expr (a -> b) -> Expr a -> Expr b
@@ -107,9 +110,12 @@ mapExpr f = go
         ArgsApp args expr -> f $ ArgsApp (fmap (\(SomeExpr e) -> SomeExpr (go e)) args) (go expr)
         FunctionAbstraction expr -> f $ FunctionAbstraction (go expr)
         FunctionEval sline expr -> f $ FunctionEval sline (go expr)
-        HideType stype expr -> HideType stype $ go expr
+        HidePrimType expr -> f $ HidePrimType $ go expr
+        HideFunType args expr -> f $ HideFunType args $ go expr
+        ExposePrimType expr -> f $ ExposePrimType $ go expr
+        ExposeFunType args expr -> f $ ExposeFunType args $ go expr
         TypeLambda tvar stype efun -> TypeLambda tvar stype (go . efun)
-        TypeApp expr stype -> TypeApp (go expr) stype
+        TypeApp restype arg expr -> TypeApp restype arg (go expr)
         LambdaAbstraction tvar expr -> f $ LambdaAbstraction tvar (go expr)
         e@Pure {} -> f e
         App ann efun earg -> f $ App ann (go efun) (go earg)
@@ -204,19 +210,26 @@ eval = \case
         let cs' = CallStack (( sline, vars ) : cs)
         FunctionType fun <- withVar callStackVarName cs' $ eval efun
         return $ fun cs' mempty
-    HideType _ expr -> DynamicType <$> eval expr
+    HidePrimType expr -> DynamicType <$> eval expr
+    HideFunType _ expr -> DynamicType <$> eval expr
+    ExposePrimType expr -> do
+        DynamicType x <- eval expr
+        case cast x of
+            Just x' -> return x'
+            n@Nothing -> fail $ "type error in expose primitive type result " <> show ( typeOf x, typeOf n )
+    ExposeFunType _ expr -> do
+        DynamicType x <- eval expr
+        case cast x of
+            Just x' -> return x'
+            n@Nothing -> fail $ "type error in expose function type result " <> show ( typeOf x, typeOf n )
     TypeLambda _ _ f -> do
         gdefs <- askGlobalDefs
         dict <- askDictionary
         return $ DynamicType $ \t -> runSimpleEval (eval $ f t) gdefs dict
-    TypeApp expr stype -> do
+    TypeApp _ arg expr -> do
         DynamicType f <- eval expr
         case cast f of
-            Just f' -> do
-                case f' stype of
-                    DynamicType x -> case cast x of
-                        Just x' -> return x'
-                        n@Nothing -> fail $ "type error in type application result " <> show ( typeOf x, typeOf n )
+            Just f' -> return (f' arg)
             n@Nothing -> fail $ "type error in type application " <> show ( typeOf f, typeOf n )
     LambdaAbstraction (TypedVarName name) expr -> do
         gdefs <- askGlobalDefs
@@ -298,8 +311,11 @@ someExprType (SomeExpr expr) = go expr
     go = \case
         DynVariable stype _ _ -> stype
         e@(FunVariable args _ _) -> ExprTypeFunction args (ExprTypePrim (proxyOfFunctionType e))
-        HideType stype _ -> stype
+        HidePrimType (_ :: Expr a) -> ExprTypePrim (Proxy @a)
+        HideFunType args e -> ExprTypeFunction (ExprTypeArguments args) (ExprTypePrim (proxyOfFunctionType e))
+        e@(ExposeFunType args _) -> ExprTypeFunction (ExprTypeArguments args) (ExprTypePrim (proxyOfFunctionType e))
         TypeLambda tvar stype _ -> ExprTypeForall tvar stype
+        TypeApp stype _ _ -> stype
 
         ArgsReq args inner -> exprTypeFunction (fmap snd args) (go inner)
         ArgsApp (FunctionArguments used) inner
@@ -333,12 +349,15 @@ renameTypeVar a b = go
         ArgsApp args fun -> ArgsApp (fmap (renameTypeVarInSomeExpr a b) args) (go fun)
         FunctionAbstraction expr -> FunctionAbstraction (go expr)
         FunctionEval sline expr -> FunctionEval sline (go expr)
-        HideType stype expr -> HideType (renameVarInType a b stype) (go expr)
+        HidePrimType expr -> HidePrimType (go expr)
+        HideFunType args expr -> HideFunType args (go expr)
+        ExposePrimType {} -> orig
+        ExposeFunType {} -> orig
         TypeLambda tvar stype expr
             | tvar == a -> orig
             | tvar == b -> error "type var collision"
             | otherwise -> TypeLambda tvar (renameVarInType a b stype) (go . expr)
-        TypeApp expr stype -> TypeApp (go expr) (renameVarInType a b stype)
+        TypeApp restype arg expr -> TypeApp (renameVarInType a b restype) (renameVarInType a b arg) (go expr)
         LambdaAbstraction vname expr -> LambdaAbstraction vname (go expr)
         Pure {} -> orig
         App ann f x -> App ann (go f) (go x)
@@ -460,7 +479,8 @@ exprArgs = \case
          in FunctionArguments (args `M.difference` applied)
     FunctionAbstraction {} -> mempty
     FunctionEval {} -> mempty
-    TypeApp {} -> error "exprArgs: type application"
+    ExposePrimType {} -> mempty
+    ExposeFunType args _ -> args
     Pure {} -> error "exprArgs: pure"
     App {} -> error "exprArgs: app"
     Undefined {} -> error "exprArgs: undefined"
@@ -501,9 +521,12 @@ gatherVars = fmap (uniqOn fst . sortOn fst) . helper
             return $ concat (v : vs)
         FunctionAbstraction expr -> helper expr
         FunctionEval _ efun -> helper efun
-        HideType _ expr -> helper expr
+        HidePrimType expr -> helper expr
+        HideFunType _ expr -> helper expr
+        ExposePrimType expr -> helper expr
+        ExposeFunType _ expr -> helper expr
         TypeLambda {} -> return []
-        TypeApp expr _ -> helper expr
+        TypeApp _ _ expr -> helper expr
         LambdaAbstraction (TypedVarName var) expr -> withDictionary (filter ((var /=) . fst)) $ helper expr
         Pure _ -> return []
         e@(App (AnnRecord sel) _ x)

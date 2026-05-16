@@ -195,7 +195,7 @@ list = label "list" $ do
             return $ SomeExpr $
                 TypeLambda tvar (ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy [])) [ ExprTypeVar tvar ]) $
                     \case
-                        (ExprTypePrim (Proxy :: Proxy a)) -> HideType (ExprTypePrim (Proxy @[ a ])) $ Pure ([] :: [ a ])
+                        (ExprTypePrim (Proxy :: Proxy a)) -> HidePrimType $ Pure ([] :: [ a ])
                         _ -> Undefined "incomplete type"
 
         ,do SomeExpr x <- someExpr FunctionTerm
