@@ -55,7 +55,8 @@ forStatement = do
 
     wsymbol "in"
     loff <- stateOffset <$> getParserState
-    SomeExpr e <- someExpr FunctionTerm
+    tvar <- newTypeVar
+    SomeExpr e <- unifySomeExpr loff (ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy [])) [ ExprTypeVar tvar ]) =<< someExpr FunctionTerm
     let err = parseError $ FancyError loff $ S.singleton $ ErrorFail $ T.unpack $
             "expected a list, expression has type '" <> textExprType e <> "'"
     ExprListUnpacker unpack _ <- maybe err return $ exprListUnpacker e

@@ -3,6 +3,28 @@ test Test:
     let list2 = [ 2, 3 ]
     let empty = [  ]
 
+    node n
+
     let c1 = concat [[ 1 ]]
+    for i in c1:
+        shell on n:
+            echo "c1 $i"
+    local:
+        shell on n:
+            echo "c1-end"
+
     let c2 = concat [[ 1 ], [], empty]
+    for i in c2:
+        shell on n:
+            echo "c2 $i"
+    local:
+        shell on n:
+            echo "c2-end"
+
     let c3 = concat [ list1, list2, [ 6, 5 ], list2 ]
+    for i in c3:
+        shell on n:
+            echo "c3 $i"
+    local:
+        shell on n:
+            echo "c3-end"
