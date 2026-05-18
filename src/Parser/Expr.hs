@@ -302,6 +302,19 @@ someExpr complexity = label "expression" $ do
                              , SomeBinOp ((-) @Scientific)
                              ]
               ]
+            , [ let tvar = TypeVar "a"
+                    targs = FunctionArguments $ M.fromList
+                        [ ( Just "$l", ( VarName "$l", SomeArgumentType RequiredArgument $ ExprTypeApp (ExprTypeConstr1 (Proxy @[])) [ ExprTypeVar tvar ]) )
+                        , ( Just "$r", ( VarName "$r", SomeArgumentType RequiredArgument $ ExprTypeApp (ExprTypeConstr1 (Proxy @[])) [ ExprTypeVar tvar ]) )
+                        ]
+                 in infixrExpr "++" $ SomeExpr $ TypeLambda tvar (ExprTypeFunction (ExprTypeArguments $ fmap snd targs) (ExprTypeApp (ExprTypeConstr1 (Proxy @[])) [ ExprTypeVar tvar ])) $ \case
+                        ExprTypePrim (Proxy :: Proxy a) ->
+                            HideFunType (fmap snd targs) $ ArgsReq targs $
+                                FunctionAbstraction $ ((++) @a)
+                                    <$> (Variable SourceLineBuiltin $ LocalVarName $ VarName "$l")
+                                    <*> (Variable SourceLineBuiltin $ LocalVarName $ VarName "$r")
+                        t -> Undefined ("ambiguous type ‘" <> T.unpack (textSomeExprType t) <> "’ for operator ‘++’") :: Expr DynamicType
+              ]
             , [ binary' "==" (\op xs ys -> length xs == length ys && and (zipWith op xs ys)) $
                               [ SomeBinOp ((==) @Integer)
                               , SomeBinOp ((==) @Scientific)
@@ -343,6 +356,17 @@ someExpr complexity = label "expression" $ do
                     [T.pack "operator '", T.pack name, T.pack "' not defined for '", textExprType e, T.pack "'"]
             region (const err) $
                 choice $ map (\(SomeUnOp op) -> SomeExpr <$> applyUnOp off op e) ops
+
+
+    infixrExpr :: String -> SomeExpr -> Operator TestParser (TestParser SomeExpr)
+    infixrExpr name fun = InfixR $ do
+        void $ osymbol name
+        return $ \p q -> do
+            loff <- stateOffset <$> getParserState
+            l <- p
+            roff <- stateOffset <$> getParserState
+            r <- q
+            applyFunctionArguments (FunctionArguments $ M.fromList [ ( Just "$l", ( loff, l ) ), ( Just "$r", ( roff, r ) ) ]) fun
 
 
     binary :: String -> [SomeBinOp] -> Operator TestParser (TestParser SomeExpr)

@@ -28,6 +28,14 @@ test ListConcat:
             "c3 2"
             "c3 3"
             "c3-end"
+            "c4 1"
+            "c4 2"
+            "c4 3"
+            "c4 6"
+            "c4 5"
+            "c4 2"
+            "c4 3"
+            "c4-end"
         local:
             expect /(run-.*)/ capture done
             guard (done == "run-done")

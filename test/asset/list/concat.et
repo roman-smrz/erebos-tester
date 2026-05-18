@@ -28,3 +28,11 @@ test Test:
     local:
         shell on n:
             echo "c3-end"
+
+    let c4 = list1 ++ list2 ++ [ 6, 5 ] ++ list2
+    for i in c4:
+        shell on n:
+            echo "c4 $i"
+    local:
+        shell on n:
+            echo "c4-end"
