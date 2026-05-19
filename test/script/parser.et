@@ -17,3 +17,6 @@ test Parser:
 
         send "load ${scripts.path}/function-fail.et"
         expect /load-failed parse-error/
+
+        send "load ${scripts.path}/tags.et"
+        expect /load-done/

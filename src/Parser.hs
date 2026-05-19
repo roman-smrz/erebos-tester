@@ -153,6 +153,7 @@ parseTag _ = label "tag definition" $ do
     cmn <- gets testCurrentModuleName
     let expr = SomeExpr $ Pure $ Tag cmn name
     modify $ \s -> s { testVars = ( name, ( GlobalVarName cmn name, someExprType expr )) : testVars s }
+    scn
     return ( name, expr )
 
 parseExport :: TestParser [ Toplevel ]

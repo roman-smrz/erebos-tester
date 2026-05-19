@@ -1,0 +1,10 @@
+tag SomeTag
+
+tag OtherTag
+
+test First:
+    tag: SomeTag
+    tag: OtherTag
+    let x = 1
+    local:
+        let y = 1
