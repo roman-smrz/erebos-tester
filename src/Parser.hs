@@ -62,6 +62,7 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
         void $ L.indentGuard scn EQ ref
         off <- stateOffset <$> getParserState
         name <- try $ identifier <* osymbol ":"
+            <* ((eol >> mzero) <|> return ()) -- continue only if not on EOL
         case name of
             "tag" -> do
                 Just <$> typedExpr FunctionTerm <* eol <* scn

@@ -8,3 +8,13 @@ test First:
     let x = 1
     local:
         let y = 1
+
+test Second:
+    tag: SomeTag
+
+    local:
+        let x = 1
+
+test Third:
+    local:
+        let x = 1
