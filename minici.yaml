@@ -1,8 +1,8 @@
 job build:
-  shell:
-    - cabal build -fci --constraint='megaparsec >= 9.7.0'
-    - mkdir build
-    - cp $(cabal list-bin erebos-tester) build/erebos-tester
+  shell: |
+    cabal build --ghc-options='-Werror -Wno-error=unused-imports' --constraint='megaparsec >= 9.7.0'
+    mkdir build
+    cp $(cabal list-bin erebos-tester) build/erebos-tester
   artifact bin:
     path: build/erebos-tester
 

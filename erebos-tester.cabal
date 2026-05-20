@@ -21,11 +21,6 @@ extra-doc-files:
     README.md
     CHANGELOG.md
 
-flag ci
-    description:    Options for CI testing
-    default: False
-    manual: True
-
 source-repository head
     type:       git
     location:   https://code.erebosprotocol.net/tester
@@ -36,12 +31,6 @@ executable erebos-tester
         -fdefer-typed-holes
         -threaded
         -no-hs-main
-
-    if flag(ci)
-        ghc-options:
-            -Werror
-            -- sometimes needed for backward/forward compatibility:
-            -Wno-error=unused-imports
 
     main-is:
         Main.hs
