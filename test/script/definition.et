@@ -15,5 +15,7 @@ test Definition:
         expect /match p 4/
         expect /child-stdout p 11/
         expect /match p 11/
+        expect /run-test-result Test (.*)/ capture result
+        guard (result == "done")
         expect /(.*)/ capture done
         guard (done == "run-done")

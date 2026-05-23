@@ -2,7 +2,7 @@ module Main (main) where
 
 import Control.Monad
 
-import Data.List
+import Data.Char
 import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
@@ -20,11 +20,9 @@ import System.Posix.Types
 
 import Config
 import Output
+import Parser.Core
 import Process
 import Run
-import Script.Module
-import Script.Var
-import Test
 import TestMode
 import Util
 import Version
@@ -194,27 +192,11 @@ main = do
             | otherwise       = OutputStyleQuiet
     out <- startOutput outputStyle useColor
 
-    LoadedModules {..} <- loadModules (map fst files)
+    lm@LoadedModules {..} <- exitOnError =<< loadModules files
 
-    let excludedTests = optExclude opts ++ map (snd . fst) (filter (\( ( _, _ ), ts ) -> any (\(Tag _ t) -> textVarName t `elem` optExclude opts) ts) lmTags)
-    tests <- filter ((`notElem` excludedTests) . testName) <$> if null otests
-        then fmap concat $ forM (zip lmModules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
-            case mbTestName of
-                Nothing -> return moduleTests
-                Just name
-                    | Just test <- find ((name ==) . testName) moduleTests
-                    -> return [ test ]
-                    | otherwise
-                    -> do
-                        hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found in ‘" <> filePath <> "’"
-                        exitFailure
-        else forM otests $ \name -> if
-                | Just test <- find ((name ==) . testName) $ concatMap moduleTests lmModules
-                -> return test
-                | otherwise
-                -> do
-                    hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found"
-                    exitFailure
+    let tfSelect = if null otests then Nothing else Just otests
+        tfExclude = optExclude opts
+    tests <- exitOnError $ filterTests TestFilter {..} lm
 
     tcpdump <- case optCmdlineTcpdump opts of
         TcpdumpAuto -> findExecutable "tcpdump"
@@ -227,6 +209,16 @@ main = do
     ok <- allM (runTest out topts lmGlobalDefs) $
         concat $ replicate (optRepeat opts) tests
     when (not ok) exitFailure
+
+exitOnError :: Either CustomTestError a -> IO a
+exitOnError (Left err) = do
+    hPutStrLn stderr $ capitalize $ showCustomTestError err
+    exitFailure
+  where
+    capitalize (c : cs) = toUpper c : cs
+    capitalize [] = []
+exitOnError (Right x) = do
+    return x
 
 foreign export ccall testerMain :: IO ()
 testerMain :: IO ()

@@ -9,6 +9,7 @@ import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Set qualified as S
+import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
 import Data.Typeable
@@ -40,6 +41,8 @@ type TestParseError = ParseError TestStream CustomTestError
 data CustomTestError
     = ModuleNotFound ModuleName
     | FileNotFound FilePath
+    | TestNotFound Text (Maybe FilePath)
+    | TestOrTagNotFound Text (Maybe FilePath)
     | ImportModuleError (ParseErrorBundle TestStream CustomTestError)
     deriving (Eq)
 
@@ -52,15 +55,30 @@ instance Ord CustomTestError where
     compare (FileNotFound _) _                = LT
     compare _                (FileNotFound _) = GT
 
+    compare (TestNotFound a a') (TestNotFound b b') = compare ( a, a' ) ( b, b' )
+    compare (TestNotFound _ _ ) _                   = LT
+    compare _                   (TestNotFound _ _ ) = GT
+
+    compare (TestOrTagNotFound a a') (TestOrTagNotFound b b') = compare ( a, a' ) ( b, b' )
+    compare (TestOrTagNotFound _ _ ) _                        = LT
+    compare _                        (TestOrTagNotFound _ _ ) = GT
+
     -- Ord instance is required to store errors in Set, but there shouldn't be
     -- two ImportModuleErrors at the same possition, so "dummy" comparison
     -- should be ok.
     compare (ImportModuleError _) (ImportModuleError _) = EQ
 
 instance ShowErrorComponent CustomTestError where
-    showErrorComponent (ModuleNotFound name) = "module ‘" <> T.unpack (textModuleName name) <> "’ not found"
-    showErrorComponent (FileNotFound path) = "file ‘" <> path <> "’ not found"
     showErrorComponent (ImportModuleError bundle) = "error parsing imported module:\n" <> errorBundlePretty bundle
+    showErrorComponent err = showCustomTestError err
+
+showCustomTestError :: CustomTestError -> String
+showCustomTestError = \case
+    ModuleNotFound name -> "module ‘" <> T.unpack (textModuleName name) <> "’ not found"
+    FileNotFound path -> "file ‘" <> path <> "’ not found"
+    TestNotFound tname mbpath -> "test ‘" <> T.unpack tname <> "’ not found" <> maybe "" (\path -> " in ‘" <> path <> "’") mbpath
+    TestOrTagNotFound tname mbpath -> "test or tag ‘" <> T.unpack tname <> "’ not found" <> maybe "" (\path -> " in ‘" <> path <> "’") mbpath
+    ImportModuleError bundle -> errorBundlePretty bundle
 
 runTestParser :: TestStream -> TestParserState -> TestParser a -> IO (Either (ParseErrorBundle TestStream CustomTestError) a)
 runTestParser content initState (TestParser parser) = flip (flip runParserT (testSourcePath initState)) content . flip evalStateT initState $ parser

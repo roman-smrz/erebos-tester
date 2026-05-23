@@ -37,5 +37,6 @@ test ListConcat:
             "c4 3"
             "c4-end"
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-done")
+            expect /run-test-result Test (.*)/ capture result
+            guard (result == "done")
+            expect /run-done/

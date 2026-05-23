@@ -1,9 +1,13 @@
 module Run (
     module Run.Monad,
     runTest,
+
     LoadedModules(..),
-    loadModules, loadModulesErr,
+    loadModules,
     evalGlobalDefs,
+
+    TestFilter(..),
+    filterTests,
 ) where
 
 import Control.Applicative
@@ -15,6 +19,8 @@ import Control.Monad.Reader
 import Control.Monad.Writer
 
 import Data.Bifunctor
+import Data.Either
+import Data.List
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Proxy
@@ -22,6 +28,7 @@ import Data.Scientific
 import Data.Set qualified as S
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Typeable
 
 import System.Directory
 import System.Exit
@@ -29,8 +36,6 @@ import System.IO.Error
 import System.Posix.Process
 import System.Posix.Signals
 import System.Process
-
-import Text.Megaparsec (errorBundlePretty, showErrorComponent)
 
 import GDB
 import Network
@@ -149,33 +154,60 @@ data LoadedModules = LoadedModules
     , lmGlobalDefs :: GlobalDefs
     }
 
-loadModules :: [ FilePath ] -> IO LoadedModules
+loadModules :: [ ( FilePath, Maybe Text ) ] -> IO (Either CustomTestError LoadedModules)
 loadModules files = do
-    loadModulesErr files >>= \case
-        Right res -> do
-            return res
-        Left err -> do
-            case err of
-                ImportModuleError bundle ->
-                    putStr (errorBundlePretty bundle)
-                _ -> do
-                    putStrLn (showErrorComponent err)
-            exitFailure
+    parseTestFiles (map fst files) >>= \case
+        Right ( modules, allModules ) -> return $ do
+            lmModules <- forM (zip files modules) $ \( ( path, tsel ), m ) -> do
+                tests <- case tsel of
+                    Nothing -> return $ moduleTests m
+                    Just tname
+                        | Just test <- find ((tname ==) . testName) (moduleTests m)
+                        -> return [ test ]
+                        | otherwise
+                        -> throwError $ TestNotFound tname (Just path)
+                return m { moduleTests = tests }
 
-loadModulesErr :: [ FilePath ] -> IO (Either CustomTestError LoadedModules)
-loadModulesErr files = do
-    parseTestFiles files >>= \case
-        Right ( lmModules, allModules ) -> do
             let lmGlobalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
                 evalTags test = map (\e -> runSimpleEval (eval e) lmGlobalDefs []) $ testTags test
                 lmTags = concatMap (\Module {..} -> map (\test -> ( ( moduleName, testName test ), evalTags test )) moduleTests) lmModules
-            return $ Right $ LoadedModules {..}
+            Right $ LoadedModules {..}
         Left err -> do
             return $ Left err
 
 
 evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
 evalGlobalDefs exprs = builtins `M.union` M.fromList exprs
+
+
+data TestFilter = TestFilter
+    { tfSelect :: Maybe [ Text ]
+    , tfExclude :: [ Text ]
+    }
+
+filterTests :: TestFilter -> LoadedModules -> Either CustomTestError [ Test ]
+filterTests TestFilter {..} LoadedModules {..} = do
+    let allTests = concatMap (\m -> ( moduleName m, ) <$> moduleTests m) lmModules
+    let evalTerm :: Text -> Either CustomTestError (Either Text Tag)
+        evalTerm t =
+            case find ((VarName t ==) . snd . fst) $ M.toList lmGlobalDefs of
+                Just ( _, SomeExpr (expr :: Expr etype))
+                    | Just (Refl :: etype :~: Tag) <- eqT
+                    -> return $ Right $ runSimpleEval (eval expr) lmGlobalDefs []
+                Nothing
+                    | Just _ <- find ((t ==) . testName . snd) allTests
+                    -> return $ Left t
+                _ ->
+                    throwError $ TestOrTagNotFound t Nothing
+    exclude <- partitionEithers <$> mapM evalTerm tfExclude
+    let matches ( tnames, tags ) ( mname, test ) =
+            testName test `elem` tnames || maybe False (any (`elem` tags)) (lookup ( mname, testName test ) lmTags)
+    map snd . filter (not . matches exclude) <$> case tfSelect of
+        Nothing -> return allTests
+        Just tnames -> do
+            selected <- partitionEithers <$> mapM evalTerm tnames
+            return $ filter (matches selected) allTests
+
 
 runBlock :: TestBlock () -> TestRun ()
 runBlock EmptyTestBlock = return ()

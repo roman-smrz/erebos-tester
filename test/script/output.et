@@ -22,8 +22,9 @@ test FlushOutput:
         expect /match p a/
         expect /match-fail expect.*/
 
-        expect /(run-.*)/ capture done
-        guard (done == "run-failed")
+        expect /run-test-result Test (.*)/ capture result
+        guard (result == "failed")
+        expect /run-done/
 
 test IgnoreOutput:
     spawn as p 
@@ -51,5 +52,6 @@ test IgnoreOutput:
         expect /match p F/
         expect /match-fail expect.*/
 
-        expect /(run-.*)/ capture done
-        guard (done == "run-failed")
+        expect /run-test-result Test (.*)/ capture result
+        guard (result == "failed")
+        expect /run-done/

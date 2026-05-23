@@ -18,14 +18,16 @@ test TrivialRun:
 
         send "run AlwaysSucceeds"
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-done")
+            expect /run-test-result AlwaysSucceeds (.*)/ capture result
+            guard (result == "done")
+            expect /run-done/
 
         send "run AlwaysFails"
         local:
             expect /match-fail .*/
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result AlwaysFails (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
 
 
 test SimpleRun:
@@ -43,8 +45,9 @@ test SimpleRun:
 
             send "run Test"
             local:
-                expect /(run-.*)/ capture done
-                guard (done == "run-done")
+                expect /run-test-result Test (.*)/ capture result
+                guard (result == "done")
+                expect /run-done/
             flush
 
         for file in should_fail:
@@ -56,8 +59,9 @@ test SimpleRun:
 
             send "run Test"
             local:
-                expect /(run-.*)/ capture done
-                guard (done == "run-failed")
+                expect /run-test-result Test (.*)/ capture result
+                guard (result == "failed")
+                expect /run-done/
             flush
 
 
@@ -120,8 +124,9 @@ test CallStack:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result AG (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
         flush
 
         send "run AE"
@@ -132,8 +137,9 @@ test CallStack:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result AE (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
         flush
 
         send "run BG"
@@ -145,8 +151,9 @@ test CallStack:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result BG (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
         flush
 
         send "run CG"
@@ -160,8 +167,9 @@ test CallStack:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result CG (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
         flush
 
         send "run BE"
@@ -174,8 +182,9 @@ test CallStack:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result BE (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
         flush
 
         send "run CE"
@@ -190,6 +199,86 @@ test CallStack:
             expect /(match-fail-.*)/ capture done
             guard (done == "match-fail-done")
         local:
-            expect /(run-.*)/ capture done
-            guard (done == "run-failed")
+            expect /run-test-result CE (.*)/ capture result
+            guard (result == "failed")
+            expect /run-done/
         flush
+
+
+test RunTag:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/tags.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+        flush
+
+        send "run A"
+        local:
+            expect /run-test-result A1 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result A2 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-(.*)/ capture done
+            guard (done == "done")
+
+        send "run B C"
+        local:
+            expect /run-test-result B1 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result B2 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result C1 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result C2 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result BC (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-(.*)/ capture done
+            guard (done == "done")
+
+
+test RunTagExclude:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/tags.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+        flush
+
+        send "run * ^A ^C ^T2 ^B1"
+        local:
+            expect /run-test-result T1 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result B2 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-(.*)/ capture done
+            guard (done == "done")
+
+        send "run T1 B1 A C ^B ^A1"
+        local:
+            expect /run-test-result T1 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result A2 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result C1 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-test-result C2 (.*)/ capture result
+            guard (result == "done")
+        local:
+            expect /run-(.*)/ capture done
+            guard (done == "done")

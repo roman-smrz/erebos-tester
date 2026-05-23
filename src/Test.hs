@@ -31,6 +31,7 @@ data Test = Test
     }
 
 data Tag = Tag ModuleName VarName
+    deriving (Eq)
 
 instance ExprType Tag where
     textExprType _ = "Tag"

@@ -1,0 +1,38 @@
+export tag A
+export tag B
+export tag C
+
+test T1:
+    guard True
+
+test T2:
+    guard True
+
+test A1:
+    tag: A
+    guard True
+
+test A2:
+    tag: A
+    guard True
+
+test B1:
+    tag: B
+    guard True
+
+test B2:
+    tag: B
+    guard True
+
+test C1:
+    tag: C
+    guard True
+
+test C2:
+    tag: C
+    guard True
+
+test BC:
+    tag: B
+    tag: C
+    guard True

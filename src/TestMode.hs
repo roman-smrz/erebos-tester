@@ -118,6 +118,10 @@ showError prefix = \case
         cmdOut $ prefix <> " module-not-found" <> textModuleName moduleName
     FileNotFound notFoundPath -> do
         cmdOut $ prefix <> " file-not-found " <> T.pack notFoundPath
+    TestNotFound tname mbfile -> do
+        cmdOut $ prefix <> " test-not-found " <> tname <> maybe "" ((" " <>) . T.pack) mbfile
+    TestOrTagNotFound tname mbfile -> do
+        cmdOut $ prefix <> " test-or-tag-not-found " <> tname <> maybe "" ((" " <>) . T.pack) mbfile
     ImportModuleError bundle -> do
 #if MIN_VERSION_megaparsec(9,7,0)
         mapM_ (cmdOut . T.pack) $ lines $ errorBundlePrettyWith showParseError bundle
@@ -134,7 +138,7 @@ showError prefix = \case
 cmdLoad :: Command
 cmdLoad = do
     [ path ] <- asks tmiParams
-    liftIO (loadModulesErr [ T.unpack path ]) >>= \case
+    liftIO (loadModules [ ( T.unpack path, Nothing ) ]) >>= \case
         Right modules -> do
             modify $ \s -> s { tmsModules = Just modules }
             cmdOut "load-done"
@@ -143,7 +147,7 @@ cmdLoad = do
 cmdLoadConfig :: Command
 cmdLoadConfig = do
     Just config <- asks tmiConfig
-    liftIO (getConfigTestFiles config >>= loadModulesErr) >>= \case
+    liftIO (getConfigTestFiles config >>= loadModules . (map (, Nothing ))) >>= \case
         Right modules -> do
             modify $ \s -> s { tmsModules = Just modules }
             cmdOut "load-config-done"
@@ -151,14 +155,16 @@ cmdLoadConfig = do
 
 cmdRun :: Command
 cmdRun = do
-    [ name ] <- asks tmiParams
-    Just LoadedModules {..} <- gets tmsModules
-    case find ((name ==) . testName) $ concatMap moduleTests lmModules of
-        Nothing -> cmdOut "run-not-found"
-        Just test -> do
-            runSingleTest test >>= \case
-                True -> cmdOut "run-done"
-                False -> cmdOut "run-failed"
+    params <- asks tmiParams
+    let ( select, exclude ) = fmap (map (T.drop 1)) $ partition (("^" /=) . T.take 1) params
+    Just lm <- gets tmsModules
+    case filterTests (TestFilter (if select == [ "*" ] then Nothing else Just select) exclude) lm of
+        Left err -> showError "run-failed" err
+        Right tests -> do
+            forM_ tests $ \test -> do
+                res <- runSingleTest test
+                cmdOut $ "run-test-result " <> testName test <> " " <> (if res then "done" else "failed")
+            cmdOut "run-done"
 
 cmdRunAll :: Command
 cmdRunAll = do
