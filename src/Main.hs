@@ -194,11 +194,11 @@ main = do
             | otherwise       = OutputStyleQuiet
     out <- startOutput outputStyle useColor
 
-    ( modules, tags, globalDefs ) <- loadModules (map fst files)
+    LoadedModules {..} <- loadModules (map fst files)
 
-    let excludedTests = optExclude opts ++ map (snd . fst) (filter (\( ( _, _ ), ts ) -> any (\(Tag _ t) -> textVarName t `elem` optExclude opts) ts) tags)
+    let excludedTests = optExclude opts ++ map (snd . fst) (filter (\( ( _, _ ), ts ) -> any (\(Tag _ t) -> textVarName t `elem` optExclude opts) ts) lmTags)
     tests <- filter ((`notElem` excludedTests) . testName) <$> if null otests
-        then fmap concat $ forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
+        then fmap concat $ forM (zip lmModules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
             case mbTestName of
                 Nothing -> return moduleTests
                 Just name
@@ -209,7 +209,7 @@ main = do
                         hPutStrLn stderr $ "Test ‘" <> T.unpack name <> "’ not found in ‘" <> filePath <> "’"
                         exitFailure
         else forM otests $ \name -> if
-                | Just test <- find ((name ==) . testName) $ concatMap moduleTests modules
+                | Just test <- find ((name ==) . testName) $ concatMap moduleTests lmModules
                 -> return test
                 | otherwise
                 -> do
@@ -224,7 +224,7 @@ main = do
     let topts = (optTest opts)
             { optTcpdump = tcpdump
             }
-    ok <- allM (runTest out topts globalDefs) $
+    ok <- allM (runTest out topts lmGlobalDefs) $
         concat $ replicate (optRepeat opts) tests
     when (not ok) exitFailure
 

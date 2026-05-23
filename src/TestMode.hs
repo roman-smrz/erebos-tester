@@ -9,7 +9,6 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 
-import Data.Bifunctor
 import Data.List
 import Data.Maybe
 import Data.Text (Text)
@@ -37,17 +36,13 @@ data TestModeInput = TestModeInput
     }
 
 data TestModeState = TestModeState
-    { tmsModules :: [ Module ]
-    , tmsTags :: [ ( ( ModuleName, Text ), [ Tag ] ) ]
-    , tmsGlobals :: GlobalDefs
+    { tmsModules :: Maybe LoadedModules
     , tmsNextTestNumber :: Int
     }
 
 initTestModeState :: TestModeState
 initTestModeState = TestModeState
-    { tmsModules = mempty
-    , tmsTags = mempty
-    , tmsGlobals = mempty
+    { tmsModules = Nothing
     , tmsNextTestNumber = 1
     }
 
@@ -88,14 +83,14 @@ runSingleTest :: Test -> CommandM Bool
 runSingleTest test = do
     out <- asks tmiOutput
     num <- getNextTestNumber
-    globals <- gets tmsGlobals
+    Just LoadedModules {..} <- gets tmsModules
     mbconfig <- asks tmiConfig
     let opts = defaultTestOptions
             { optDefaultTool = fromMaybe "/bin/true" $ configTool =<< mbconfig
             , optTestDir = ".test" <> show num
             , optKeep = True
             }
-    liftIO (runTest out opts globals test)
+    liftIO (runTest out opts lmGlobalDefs test)
 
 
 newtype CommandM a = CommandM (ReaderT TestModeInput (StateT TestModeState (ExceptT String IO)) a)
@@ -117,27 +112,17 @@ commands =
     , ( "run-all", cmdRunAll )
     ]
 
-cmdLoad :: Command
-cmdLoad = do
-    [ path ] <- asks tmiParams
-    liftIO (parseTestFiles [ T.unpack path ]) >>= \case
-        Right ( modules, allModules ) -> do
-            let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
-            modify $ \s -> s
-                { tmsModules = modules
-                , tmsGlobals = globalDefs
-                }
-            cmdOut "load-done"
-
-        Left (ModuleNotFound moduleName) -> do
-            cmdOut $ "load-failed module-not-found" <> textModuleName moduleName
-        Left (FileNotFound notFoundPath) -> do
-            cmdOut $ "load-failed file-not-found " <> T.pack notFoundPath
-        Left (ImportModuleError bundle) -> do
+showError :: Text -> CustomTestError -> Command
+showError prefix = \case
+    ModuleNotFound moduleName -> do
+        cmdOut $ prefix <> " module-not-found" <> textModuleName moduleName
+    FileNotFound notFoundPath -> do
+        cmdOut $ prefix <> " file-not-found " <> T.pack notFoundPath
+    ImportModuleError bundle -> do
 #if MIN_VERSION_megaparsec(9,7,0)
-            mapM_ (cmdOut . T.pack) $ lines $ errorBundlePrettyWith showParseError bundle
+        mapM_ (cmdOut . T.pack) $ lines $ errorBundlePrettyWith showParseError bundle
 #endif
-            cmdOut $ "load-failed parse-error"
+        cmdOut $ prefix <> " parse-error"
   where
     showParseError _ SourcePos {..} _ = concat
         [ "parse-error"
@@ -146,22 +131,29 @@ cmdLoad = do
         , ":", show $ unPos sourceColumn
         ]
 
+cmdLoad :: Command
+cmdLoad = do
+    [ path ] <- asks tmiParams
+    liftIO (loadModulesErr [ T.unpack path ]) >>= \case
+        Right modules -> do
+            modify $ \s -> s { tmsModules = Just modules }
+            cmdOut "load-done"
+        Left err -> showError "load-failed" err
+
 cmdLoadConfig :: Command
 cmdLoadConfig = do
     Just config <- asks tmiConfig
-    ( modules, tags, globalDefs ) <- liftIO $ loadModules =<< getConfigTestFiles config
-    modify $ \s -> s
-        { tmsModules = modules
-        , tmsTags = tags
-        , tmsGlobals = globalDefs
-        }
-    cmdOut "load-config-done"
+    liftIO (getConfigTestFiles config >>= loadModulesErr) >>= \case
+        Right modules -> do
+            modify $ \s -> s { tmsModules = Just modules }
+            cmdOut "load-config-done"
+        Left err -> showError "load-config-failed" err
 
 cmdRun :: Command
 cmdRun = do
     [ name ] <- asks tmiParams
-    TestModeState {..} <- get
-    case find ((name ==) . testName) $ concatMap moduleTests tmsModules of
+    Just LoadedModules {..} <- gets tmsModules
+    case find ((name ==) . testName) $ concatMap moduleTests lmModules of
         Nothing -> cmdOut "run-not-found"
         Just test -> do
             runSingleTest test >>= \case
@@ -170,8 +162,8 @@ cmdRun = do
 
 cmdRunAll :: Command
 cmdRunAll = do
-    TestModeState {..} <- get
-    forM_ (concatMap moduleTests tmsModules) $ \test -> do
+    Just LoadedModules {..} <- gets tmsModules
+    forM_ (concatMap moduleTests lmModules) $ \test -> do
         res <- runSingleTest test
         cmdOut $ "run-test-result " <> testName test <> " " <> (if res then "done" else "failed")
     cmdOut "run-all-done"

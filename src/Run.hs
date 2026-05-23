@@ -1,7 +1,8 @@
 module Run (
     module Run.Monad,
     runTest,
-    loadModules,
+    LoadedModules(..),
+    loadModules, loadModulesErr,
     evalGlobalDefs,
 ) where
 
@@ -142,9 +143,15 @@ runTest out opts gdefs test = do
             return False
 
 
-loadModules :: [ FilePath ] -> IO ( [ Module ], [ ( ( ModuleName, Text ), [ Tag ] ) ], GlobalDefs )
+data LoadedModules = LoadedModules
+    { lmModules :: [ Module ]
+    , lmTags :: [ ( ( ModuleName, Text ), [ Tag ] ) ]
+    , lmGlobalDefs :: GlobalDefs
+    }
+
+loadModules :: [ FilePath ] -> IO LoadedModules
 loadModules files = do
-    ( modules, allModules ) <- parseTestFiles files >>= \case
+    loadModulesErr files >>= \case
         Right res -> do
             return res
         Left err -> do
@@ -154,10 +161,17 @@ loadModules files = do
                 _ -> do
                     putStrLn (showErrorComponent err)
             exitFailure
-    let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
-        evalTags test = map (\e -> runSimpleEval (eval e) globalDefs []) $ testTags test
-        tags = concatMap (\Module {..} -> map (\test -> ( ( moduleName, testName test ), evalTags test )) moduleTests) modules
-    return ( modules, tags, globalDefs )
+
+loadModulesErr :: [ FilePath ] -> IO (Either CustomTestError LoadedModules)
+loadModulesErr files = do
+    parseTestFiles files >>= \case
+        Right ( lmModules, allModules ) -> do
+            let lmGlobalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
+                evalTags test = map (\e -> runSimpleEval (eval e) lmGlobalDefs []) $ testTags test
+                lmTags = concatMap (\Module {..} -> map (\test -> ( ( moduleName, testName test ), evalTags test )) moduleTests) lmModules
+            return $ Right $ LoadedModules {..}
+        Left err -> do
+            return $ Left err
 
 
 evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs
