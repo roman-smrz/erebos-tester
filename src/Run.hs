@@ -142,7 +142,7 @@ runTest out opts gdefs test = do
             return False
 
 
-loadModules :: [ FilePath ] -> IO ( [ Module ], GlobalDefs )
+loadModules :: [ FilePath ] -> IO ( [ Module ], [ ( ( ModuleName, Text ), [ Tag ] ) ], GlobalDefs )
 loadModules files = do
     ( modules, allModules ) <- parseTestFiles files >>= \case
         Right res -> do
@@ -155,7 +155,9 @@ loadModules files = do
                     putStrLn (showErrorComponent err)
             exitFailure
     let globalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
-    return ( modules, globalDefs )
+        evalTags test = map (\e -> runSimpleEval (eval e) globalDefs []) $ testTags test
+        tags = concatMap (\Module {..} -> map (\test -> ( ( moduleName, testName test ), evalTags test )) moduleTests) modules
+    return ( modules, tags, globalDefs )
 
 
 evalGlobalDefs :: [ (( ModuleName, VarName ), SomeExpr ) ] -> GlobalDefs

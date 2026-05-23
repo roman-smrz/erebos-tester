@@ -38,6 +38,7 @@ data TestModeInput = TestModeInput
 
 data TestModeState = TestModeState
     { tmsModules :: [ Module ]
+    , tmsTags :: [ ( ( ModuleName, Text ), [ Tag ] ) ]
     , tmsGlobals :: GlobalDefs
     , tmsNextTestNumber :: Int
     }
@@ -45,6 +46,7 @@ data TestModeState = TestModeState
 initTestModeState :: TestModeState
 initTestModeState = TestModeState
     { tmsModules = mempty
+    , tmsTags = mempty
     , tmsGlobals = mempty
     , tmsNextTestNumber = 1
     }
@@ -147,9 +149,10 @@ cmdLoad = do
 cmdLoadConfig :: Command
 cmdLoadConfig = do
     Just config <- asks tmiConfig
-    ( modules, globalDefs ) <- liftIO $ loadModules =<< getConfigTestFiles config
+    ( modules, tags, globalDefs ) <- liftIO $ loadModules =<< getConfigTestFiles config
     modify $ \s -> s
         { tmsModules = modules
+        , tmsTags = tags
         , tmsGlobals = globalDefs
         }
     cmdOut "load-config-done"

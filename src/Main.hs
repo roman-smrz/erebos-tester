@@ -193,7 +193,7 @@ main = do
             | otherwise       = OutputStyleQuiet
     out <- startOutput outputStyle useColor
 
-    ( modules, globalDefs ) <- loadModules (map fst files)
+    ( modules, _, globalDefs ) <- loadModules (map fst files)
     tests <- filter ((`notElem` optExclude opts) . testName) <$> if null otests
         then fmap concat $ forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
             case mbTestName of

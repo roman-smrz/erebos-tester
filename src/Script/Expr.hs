@@ -4,6 +4,7 @@ module Script.Expr (
     MonadEval(..), VariableDictionary, GlobalDefs,
     lookupVar, tryLookupVar, withVar, withTypedVar,
     eval, evalSome, evalSomeWith,
+    runSimpleEval,
 
     FunctionType, DynamicType,
     ExprType(..), SomeExpr(..),
