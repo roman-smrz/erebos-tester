@@ -23,6 +23,7 @@ import Output
 import Process
 import Run
 import Script.Module
+import Script.Var
 import Test
 import TestMode
 import Util
@@ -94,8 +95,8 @@ options =
         (ReqArg (\str opts -> opts { optRepeat = read str }) "<count>")
         "number of times to repeat the test(s)"
     , Option [ 'e' ] [ "exclude" ]
-        (ReqArg (\str opts -> opts { optExclude = T.pack str : optExclude opts }) "<test>")
-        "exclude given test from execution"
+        (ReqArg (\str opts -> opts { optExclude = T.pack str : optExclude opts }) "<test|tag>")
+        "exclude given test or test tag from execution"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
@@ -193,8 +194,10 @@ main = do
             | otherwise       = OutputStyleQuiet
     out <- startOutput outputStyle useColor
 
-    ( modules, _, globalDefs ) <- loadModules (map fst files)
-    tests <- filter ((`notElem` optExclude opts) . testName) <$> if null otests
+    ( modules, tags, globalDefs ) <- loadModules (map fst files)
+
+    let excludedTests = optExclude opts ++ map (snd . fst) (filter (\( ( _, _ ), ts ) -> any (\(Tag _ t) -> textVarName t `elem` optExclude opts) ts) tags)
+    tests <- filter ((`notElem` excludedTests) . testName) <$> if null otests
         then fmap concat $ forM (zip modules files) $ \( Module {..}, ( filePath, mbTestName )) -> do
             case mbTestName of
                 Nothing -> return moduleTests
