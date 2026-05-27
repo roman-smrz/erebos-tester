@@ -196,7 +196,8 @@ main = do
 
     let tfSelect = if null otests then Nothing else Just otests
         tfExclude = optExclude opts
-    tests <- exitOnError $ filterTests TestFilter {..} lm
+        tfilter = maybe mempty testFilterFromConfig config <> TestFilter {..}
+    tests <- exitOnError $ filterTests tfilter lm
 
     tcpdump <- case optCmdlineTcpdump opts of
         TcpdumpAuto -> findExecutable "tcpdump"

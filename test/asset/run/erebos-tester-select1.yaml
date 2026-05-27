@@ -1,0 +1,2 @@
+tests: ./tags.et
+exclude: B

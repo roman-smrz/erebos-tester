@@ -1,0 +1,8 @@
+tests: ./tags.et
+select:
+  - T2
+  - A
+  - B
+exclude:
+  - A1
+  - C

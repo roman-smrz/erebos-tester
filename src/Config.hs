@@ -9,6 +9,7 @@ import Control.Monad.Combinators
 
 import Data.ByteString.Lazy qualified as BS
 import Data.Scientific
+import Data.Text (Text)
 import Data.Text qualified as T
 import Data.YAML
 
@@ -21,6 +22,8 @@ data Config = Config
     { configDir :: FilePath
     , configTool :: Maybe FilePath
     , configTests :: [ Pattern ]
+    , configSelect :: Maybe [ Text ]
+    , configExclude :: [ Text ]
     , configTimeout :: Maybe Scientific
     }
     deriving (Show)
@@ -33,6 +36,14 @@ instance FromYAML (FilePath -> Config) where
                 , m .:? "tests" .!= []      -- list of patterns
                 ]
             )
+        configSelect <- foldr1 (<|>)
+            [ fmap (Just . (: [])) (m .: "select") -- single item
+            , m .:? "select"                       -- list of items
+            ]
+        configExclude <- foldr1 (<|>)
+            [ fmap (: []) (m .: "exclude") -- single item
+            , m .:? "exclude" .!= []       -- list of items
+            ]
         configTimeout <- fmap fromNumber <$> m .:! "timeout"
         return $ \configDir -> Config {..}
 

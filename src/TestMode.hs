@@ -25,7 +25,6 @@ import Output
 import Parser
 import Run
 import Script.Expr
-import Script.Module
 import Test
 
 
@@ -109,7 +108,6 @@ commands =
     [ ( "load", cmdLoad )
     , ( "load-config", cmdLoadConfig )
     , ( "run", cmdRun )
-    , ( "run-all", cmdRunAll )
     ]
 
 showError :: Text -> CustomTestError -> Command
@@ -157,19 +155,13 @@ cmdRun :: Command
 cmdRun = do
     params <- asks tmiParams
     let ( select, exclude ) = fmap (map (T.drop 1)) $ partition (("^" /=) . T.take 1) params
+        pfilter = (TestFilter (if select == [ "*" ] then Nothing else Just select) exclude)
+    cfilter <- asks $ maybe mempty testFilterFromConfig . tmiConfig
     Just lm <- gets tmsModules
-    case filterTests (TestFilter (if select == [ "*" ] then Nothing else Just select) exclude) lm of
+    case filterTests (cfilter <> pfilter) lm of
         Left err -> showError "run-failed" err
         Right tests -> do
             forM_ tests $ \test -> do
                 res <- runSingleTest test
                 cmdOut $ "run-test-result " <> testName test <> " " <> (if res then "done" else "failed")
             cmdOut "run-done"
-
-cmdRunAll :: Command
-cmdRunAll = do
-    Just LoadedModules {..} <- gets tmsModules
-    forM_ (concatMap moduleTests lmModules) $ \test -> do
-        res <- runSingleTest test
-        cmdOut $ "run-test-result " <> testName test <> " " <> (if res then "done" else "failed")
-    cmdOut "run-all-done"

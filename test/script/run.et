@@ -81,14 +81,14 @@ test RunConfig:
     with p:
         send "load-config"
         expect /load-config-done/
-        send "run-all"
+        send "run *"
         expect /run-test-result AlwaysSucceeds done/
         expect /run-test-result AlwaysFails failed/
         expect /child-stdin p abcdef/
         expect /child-stdout p abcdef/
         expect /match p abcdef/
         expect /run-test-result ExpectEcho done/
-        expect /run-all-done/
+        expect /run-done/
 
 
 test GetSysInfo:
@@ -279,6 +279,49 @@ test RunTagExclude:
         local:
             expect /run-test-result C2 (.*)/ capture result
             guard (result == "done")
+        local:
+            expect /run-(.*)/ capture done
+            guard (done == "done")
+
+
+test RunExcludeConfig1:
+    node n
+    local:
+        shell on n:
+            cp ${scripts.path}/erebos-tester-select1.yaml erebos-tester.yaml
+            cp ${scripts.path}/tags.et .
+
+    spawn as p on n
+    with p:
+        send "load-config"
+        expect /load-config-done/
+        send "run *"
+        expect /run-test-result T1 done/
+        expect /run-test-result T2 done/
+        expect /run-test-result A1 done/
+        expect /run-test-result A2 done/
+        expect /run-test-result C1 done/
+        expect /run-test-result C2 done/
+        local:
+            expect /run-(.*)/ capture done
+            guard (done == "done")
+
+test RunExcludeConfig2:
+    node n
+    local:
+        shell on n:
+            cp ${scripts.path}/erebos-tester-select2.yaml erebos-tester.yaml
+            cp ${scripts.path}/tags.et .
+
+    spawn as p on n
+    with p:
+        send "load-config"
+        expect /load-config-done/
+        send "run *"
+        expect /run-test-result T2 done/
+        expect /run-test-result A2 done/
+        expect /run-test-result B1 done/
+        expect /run-test-result B2 done/
         local:
             expect /run-(.*)/ capture done
             guard (done == "done")

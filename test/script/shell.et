@@ -11,12 +11,12 @@ test ShellSpawn:
             guard (done == "load-done")
         flush
 
-        send "run-all"
+        send "run *"
         expect /run-test-result ShellTrue done/
         expect /child-fail sh failed at: .*: false/
         expect /child-fail sh exit code: 1/
         expect /run-test-result ShellFalse failed/
-        expect /run-all-done/
+        expect /run-done/
 
 
 def expect_next_stdout from p (expected):
@@ -32,7 +32,7 @@ test ShellEcho:
             guard (done == "load-done")
         flush
 
-        send "run-all"
+        send "run *"
 
     expect_next_stdout from p:
         "a b c"
@@ -57,7 +57,7 @@ test ShellEcho:
 
     with p:
         expect /run-test-result Echo done/
-        expect /run-all-done/
+        expect /run-done/
 
 
 test ShellPipe:
@@ -69,7 +69,7 @@ test ShellPipe:
             guard (done == "load-done")
         flush
 
-        send "run-all"
+        send "run *"
 
     expect_next_stdout from p:
         "bc"
@@ -97,4 +97,4 @@ test ShellPipe:
         expect /run-test-result PipeRedirect done/
 
     with p:
-        expect /run-all-done/
+        expect /run-done/

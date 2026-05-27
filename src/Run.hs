@@ -7,6 +7,7 @@ module Run (
     evalGlobalDefs,
 
     TestFilter(..),
+    testFilterFromConfig,
     filterTests,
 ) where
 
@@ -37,6 +38,7 @@ import System.Posix.Process
 import System.Posix.Signals
 import System.Process
 
+import Config
 import GDB
 import Network
 import Network.Ip
@@ -183,6 +185,20 @@ evalGlobalDefs exprs = builtins `M.union` M.fromList exprs
 data TestFilter = TestFilter
     { tfSelect :: Maybe [ Text ]
     , tfExclude :: [ Text ]
+    }
+
+instance Semigroup TestFilter where
+    a <> b
+        | isJust (tfSelect b) = b
+        | otherwise = a { tfExclude = tfExclude a <> tfExclude b }
+
+instance Monoid TestFilter where
+    mempty = TestFilter Nothing []
+
+testFilterFromConfig :: Config -> TestFilter
+testFilterFromConfig Config {..} = TestFilter
+    { tfSelect = configSelect
+    , tfExclude = configExclude
     }
 
 filterTests :: TestFilter -> LoadedModules -> Either CustomTestError [ Test ]
