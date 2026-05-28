@@ -88,7 +88,11 @@ This is a YAML file with following fields:
 
 * `tool`: path to the test tool, which may be overridden by the `--tool` command-line option.
 * `tests`: glob pattern that expands to all the test script files that should be used.
-* `timeout`: initial timeout for test steps like `expect`, given as `int` or `float`; defaults to `1` if not specified.
+* `select`: tests or tags to be selected for running by default (if not provided, all tests will be executed);
+    given as a single `string` or a list of `string`s.
+* `exclude`: tests or tags to be excluded from running (unless requested explicitly on command line);
+    given as a single `string` or a list of `string`s.
+* `timeout`: initial timeout in seconds for test steps like `expect`, given as `int` or `float`; defaults to `1` if not specified.
 
 Script language
 ---------------
@@ -221,6 +225,10 @@ Members:
 
 `path`
 : Path to the asset valid during the test execution.
+
+#### `Tag`
+
+Tag, which can be assigned to a test using the `tag: <Tag>` declaration.
 
 #### `Signal`
 
@@ -530,7 +538,7 @@ Such defined asset object can then be used in expressions within tests or functi
 
 ```
 test:
-    spawn p
+    spawn as p
     send to p "use-asset ${my_asset.path}"
 ```
 
@@ -545,6 +553,31 @@ just like other definitions:
 export asset my_asset:
     path: ../path/to/file
 ```
+
+### Tags
+
+Tags are a way to refer to a group of tests, instead of needing to list all their names individually;
+for example to mark broken tests, which can then be easily excluded from running until fixed.
+Tags are declared using the `tag` keyword on the top level of a module,
+and need to be `export`ed if they are to be referenced from outside of that module:
+
+```
+export tag Broken
+```
+
+Tags can be assigned to tests in a the test preamble before the first test steps
+using `tag: <Tag>` declaration, which can also be given multiple times:
+
+```
+test SomeBrokenTest:
+    tag: Broken
+    tag: OtherTag
+    spawn as p
+    ...
+```
+
+Such tags can then be used instead of test names to select or exclude tests on
+command line or in the configuration file.
 
 
 Optional dependencies
