@@ -1,5 +1,14 @@
 # Revision history for erebos-tester
 
+## 0.3.5 -- 2026-05-31
+
+* Added tags to group and filter tests.
+* Initial support for polymorphic types.
+* Added `concat` function and `++` operator to concatenate lists, and support for empty list expression.
+* Added `killwith` clause to set a signal used to terminate `spawn`ed process.
+* Added `pid` member to the `Process` type to get its system PID.
+* Added command-line options to set path of tcpdump or disable its use.
+
 ## 0.3.4 -- 2026-01-15
 
 * Show call stack in error messages.
