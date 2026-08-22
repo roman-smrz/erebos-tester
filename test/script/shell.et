@@ -123,3 +123,29 @@ test ShellWorkingDirectory:
             "$home"
             "$home"
             "/tmp"
+
+
+test ShellExitOnError:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/error-exit.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+
+        send "run Default"
+        expect /child-fail sh failed at: .*error-exit.et:4:9: false/
+        expect /run-test-result Default failed/
+        expect /run-done/
+        flush
+
+        send "run Disabled"
+        expect /run-test-result Disabled done/
+        expect /run-done/
+        flush
+
+        send "run Enabled"
+        expect /child-fail sh failed at: .*error-exit.et:18:9: false/
+        expect /run-test-result Enabled failed/
+        expect /run-done/
+        flush

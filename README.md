@@ -416,6 +416,9 @@ Where `<node>` is the network node on which to run the script (it will be run in
 and `<name>`, if given, is the name of the variable that will refer to the shell process (this can be used e.g. in the `expect` command to check the standard output of the script).
 As with the `spawn` command, the resulting process is terminated at the end of the current scope.
 
+By default the shell process exists with failure whenever any command exits with non-zero status.
+This behavior can be disabled using the `set +e` command (and re-enabled with `set -e`).
+
 
 ### Functions
 

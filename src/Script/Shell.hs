@@ -46,6 +46,7 @@ newtype ShellScript = ShellScript [ ShellStatement ]
 data ShellState = ShellState
     { shellWorkingDirectory :: FilePath
     , shellOldWorkingDirectory :: FilePath
+    , shellExitOnError :: Bool
     }
 
 data ShellStatement = ShellStatement
@@ -135,8 +136,9 @@ executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellComman
 
     ( getExitStatus, state' ) <- executeCommandProcess sei st (handledHandle pstdin') (handledHandle pstdout') (handledHandle pstderr') args cmdCommand
     let failedWithStatus status = do
-            liftIO $ putMVar seiStatusVar status
-            () <- throwError Failed
+            when (shellExitOnError st) $ do
+                liftIO $ putMVar seiStatusVar status
+                throwError Failed
             return state'
 
     mapM_ closeIfRequested [ pstdin', pstdout', pstderr' ]
@@ -191,6 +193,15 @@ executeCommandProcess ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstde
             liftIO $ hPutStrLn pstderr $ "pwd: too many arguments"
             return ( return (Exited (ExitFailure (-1))), st )
 
+    "set"
+        | [ "+e" ] <- args -> do
+            return ( return (Exited ExitSuccess), st { shellExitOnError = False } )
+        | [ "-e" ] <- args -> do
+            return ( return (Exited ExitSuccess), st { shellExitOnError = True } )
+        | otherwise -> do
+            liftIO $ hPutStrLn pstderr $ "set: " <> T.unpack (T.unwords args) <> ": not implemented"
+            return ( return (Exited (ExitFailure (-1))), st )
+
     cmd -> liftIO $ do
         (_, _, _, phandle) <- createProcess_ "shell"
             (proc (T.unpack cmd) (map T.unpack args))
@@ -231,6 +242,7 @@ executeScript sei@ShellExecInfo {..} pstdin pstdout pstderr (ShellScript stateme
     let initialState = ShellState
             { shellWorkingDirectory = nodeDir seiNode
             , shellOldWorkingDirectory = nodeDir seiNode
+            , shellExitOnError = True
             }
     _ <- (\f -> foldM f initialState statements) $ \st ShellStatement {..} -> do
         executePipeline sei st (KeepHandle pstdin) (KeepHandle pstdout) (KeepHandle pstderr) shellPipeline

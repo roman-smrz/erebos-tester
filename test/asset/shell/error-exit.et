@@ -1,0 +1,18 @@
+test Default:
+    node n
+    shell on n as sh:
+        false
+
+test Disabled:
+    node n
+    shell on n as sh:
+        set +e
+        false
+
+test Enabled:
+    node n
+    shell on n as sh:
+        set +e
+        false
+        set -e
+        false
