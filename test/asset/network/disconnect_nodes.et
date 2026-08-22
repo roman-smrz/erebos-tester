@@ -1,0 +1,46 @@
+test Test:
+    subnet s1
+    node n1_1 on s1
+    node n1_2 on s1
+
+    subnet s2
+    node n2_1 on s2
+    node n2_2 on s2
+
+    subnet s3
+    node n3 on s3
+
+    local:
+        shell on n1_1:
+            ping ${n1_2.ip} -c 1 -W 0.001
+            ping ${n2_2.ip} -c 1 -W 0.001
+            ping ${n3.ip} -c 1 -W 0.001
+
+        shell on n2_1:
+            ping ${n1_2.ip} -c 1 -W 0.001
+            ping ${n2_2.ip} -c 1 -W 0.001
+            ping ${n3.ip} -c 1 -W 0.001
+
+    local:
+        disconnect_nodes s1
+
+        shell on n1_1:
+            ! ping ${n1_2.ip} -c 1 -W 0.001
+            ! ping ${n2_2.ip} -c 1 -W 0.001
+            ! ping ${n3.ip} -c 1 -W 0.001
+
+        shell on n2_1:
+            ! ping ${n1_2.ip} -c 1 -W 0.001
+            ping ${n2_2.ip} -c 1 -W 0.001
+            ping ${n3.ip} -c 1 -W 0.001
+
+    local:
+        shell on n1_1:
+            ping ${n1_2.ip} -c 1 -W 0.001
+            ping ${n2_2.ip} -c 1 -W 0.001
+            ping ${n3.ip} -c 1 -W 0.001
+
+        shell on n2_1:
+            ping ${n1_2.ip} -c 1 -W 0.001
+            ping ${n2_2.ip} -c 1 -W 0.001
+            ping ${n3.ip} -c 1 -W 0.001

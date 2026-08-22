@@ -295,7 +295,7 @@ instance ExprType a => ParamType (InnerBlock a) where
         combine _ [] = error "inner block parameter count mismatch"
 
 innerBlock :: CommandDef (TestStep ())
-innerBlock = ($ ([] :: [ Void ])) <$> innerBlockFun
+innerBlock = ($ ([] :: [ Void ])) <$> innerBlockFunList
 
 innerBlockFun :: ExprType a => CommandDef (a -> TestStep ())
 innerBlockFun = (\f x -> f [ x ]) <$> innerBlockFunList
@@ -335,6 +335,9 @@ command name (CommandDef types ctor) = do
                     | SomeNewVariables (vars :: [ TypedVarName a ]) <- definedVariables
                     , Just (Refl :: p :~: InnerBlock a) <- eqT
                     -> SomeParam p . Identity . ( vars, ) <$> restOfParts cmdi partials
+
+                    | Just (Refl :: p :~: InnerBlock Void) <- eqT
+                    -> SomeParam p . Identity . ( [], ) <$> restOfParts cmdi partials
 
                 (sym, SomeParam p Nothing) -> choice
                     [ SomeParam p . Identity <$> paramDefault p

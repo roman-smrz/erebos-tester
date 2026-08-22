@@ -1,0 +1,27 @@
+test Test:
+    node n1
+    node n2
+    node n3
+
+    local:
+        shell on n1:
+            ping ${n3.ip} -c 1
+
+        shell on n2:
+            ping ${n3.ip} -c 1
+
+    local:
+        disconnect_node n1
+
+        shell on n1:
+            ! ping ${n3.ip} -c 1
+
+        shell on n2:
+            ping ${n3.ip} -c 1
+
+    local:
+        shell on n1:
+            ping ${n3.ip} -c 1
+
+        shell on n2:
+            ping ${n3.ip} -c 1

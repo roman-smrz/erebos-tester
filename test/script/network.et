@@ -1,0 +1,28 @@
+module network
+
+asset scripts:
+    path: ../asset/network
+
+
+def run_test_from using p (file):
+    guard (file /= "") # TODO: forces (file :: String)
+    send "" to p # TODO: forces (p :: Process)
+
+    with p:
+        send "load $file"
+        expect /load-done/
+
+        send "run Test"
+        expect /run-test-result Test (.*)/ capture result
+        guard (result == "done")
+        expect /run-done/
+
+
+test DisconnectNode:
+    spawn as p
+    run_test_from using p "${scripts.path}/disconnect_node.et"
+
+
+test DisconnectNodes:
+    spawn as p
+    run_test_from using p "${scripts.path}/disconnect_nodes.et"
