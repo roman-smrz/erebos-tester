@@ -47,6 +47,7 @@ data ShellState = ShellState
     { shellWorkingDirectory :: FilePath
     , shellOldWorkingDirectory :: FilePath
     , shellExitOnError :: Bool
+    , shellLastExitCode :: ExitCode
     }
 
 data ShellStatement = ShellStatement
@@ -134,17 +135,17 @@ executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellComman
         _ -> do
             return cur
 
-    ( getExitStatus, state' ) <- executeCommandProcess sei st (handledHandle pstdin') (handledHandle pstdout') (handledHandle pstderr') args cmdCommand
+    ( getExitStatus, st' ) <- executeCommandProcess sei st (handledHandle pstdin') (handledHandle pstdout') (handledHandle pstderr') args cmdCommand
     let failedWithStatus status = do
             when (shellExitOnError st) $ do
                 liftIO $ putMVar seiStatusVar status
                 throwError Failed
-            return state'
+            return st' { shellLastExitCode = status }
 
     mapM_ closeIfRequested [ pstdin', pstdout', pstderr' ]
     getExitStatus >>= \case
         Exited ExitSuccess -> do
-            return state'
+            return st' { shellLastExitCode = ExitSuccess }
         Exited status -> do
             outLine OutputChildFail (Just $ textProcName seiProcName) $ "failed at: " <> textSourceLine cmdSourceLine
             failedWithStatus status
@@ -243,11 +244,12 @@ executeScript sei@ShellExecInfo {..} pstdin pstdout pstderr (ShellScript stateme
             { shellWorkingDirectory = nodeDir seiNode
             , shellOldWorkingDirectory = nodeDir seiNode
             , shellExitOnError = True
+            , shellLastExitCode = ExitSuccess
             }
-    _ <- (\f -> foldM f initialState statements) $ \st ShellStatement {..} -> do
+    finalState <- (\f -> foldM f initialState statements) $ \st ShellStatement {..} -> do
         executePipeline sei st (KeepHandle pstdin) (KeepHandle pstdout) (KeepHandle pstderr) shellPipeline
 
-    liftIO $ putMVar seiStatusVar ExitSuccess
+    liftIO $ putMVar seiStatusVar (shellLastExitCode finalState)
 
 spawnShell :: Node -> ProcName -> ShellScript -> TestRun Process
 spawnShell procNode procName script = do

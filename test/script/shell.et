@@ -139,13 +139,18 @@ test ShellExitOnError:
         expect /run-done/
         flush
 
-        send "run Disabled"
-        expect /run-test-result Disabled done/
+        send "run DisabledSuccess"
+        expect /run-test-result DisabledSuccess done/
+        expect /run-done/
+        flush
+
+        send "run DisabledFailure"
+        expect /run-test-result DisabledFailure failed/
         expect /run-done/
         flush
 
         send "run Enabled"
-        expect /child-fail sh failed at: .*error-exit.et:18:9: false/
+        expect /child-fail sh failed at: .*error-exit.et:25:9: false/
         expect /run-test-result Enabled failed/
         expect /run-done/
         flush

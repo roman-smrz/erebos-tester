@@ -3,7 +3,14 @@ test Default:
     shell on n as sh:
         false
 
-test Disabled:
+test DisabledSuccess:
+    node n
+    shell on n as sh:
+        set +e
+        false
+        true
+
+test DisabledFailure:
     node n
     shell on n as sh:
         set +e
@@ -16,3 +23,4 @@ test Enabled:
         false
         set -e
         false
+        true
