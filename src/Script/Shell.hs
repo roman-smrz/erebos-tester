@@ -42,6 +42,10 @@ import Script.Var
 
 newtype ShellScript = ShellScript [ ShellStatement ]
 
+data ShellState = ShellState
+    { shellWorkingDirectory :: FilePath
+    }
+
 data ShellStatement = ShellStatement
     { shellPipeline :: ShellPipeline
     , shellSourceLine :: SourceLine
@@ -108,8 +112,8 @@ handledHandle (CloseHandle h) = h
 handledHandle (KeepHandle h) = h
 
 
-executeCommand :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ()
-executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} = do
+executeCommand :: ShellExecInfo -> ShellState -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ShellState
+executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellCommand {..} = do
     let args = cmdArguments scmd
     ( pstdin', pstdout', pstderr' ) <- (\f -> foldM f ( pstdin, pstdout, pstderr ) cmdExtArguments) $ \cur@( cin, cout, cerr ) -> \case
         ShellRedirectStdin path -> do
@@ -127,58 +131,72 @@ executeCommand ShellExecInfo {..} pstdin pstdout pstderr scmd@ShellCommand {..} 
         _ -> do
             return cur
 
-    pid <- liftIO $ do
+    ( getExitStatus, state' ) <- executeCommandProcess sei st (handledHandle pstdin') (handledHandle pstdout') (handledHandle pstderr') args cmdCommand
+    let failedWithStatus status = do
+            liftIO $ putMVar seiStatusVar status
+            () <- throwError Failed
+            return state'
+
+    mapM_ closeIfRequested [ pstdin', pstdout', pstderr' ]
+    getExitStatus >>= \case
+        Exited ExitSuccess -> do
+            return state'
+        Exited status -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "failed at: " <> textSourceLine cmdSourceLine
+            failedWithStatus status
+        Terminated sig _ -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "killed with " <> T.pack (show sig) <> " at: " <> textSourceLine cmdSourceLine
+            failedWithStatus (ExitFailure (- fromIntegral sig))
+        Stopped sig -> do
+            outLine OutputChildFail (Just $ textProcName seiProcName) $ "stopped with " <> T.pack (show sig) <> " at: " <> textSourceLine cmdSourceLine
+            failedWithStatus (ExitFailure (- fromIntegral sig))
+
+
+executeCommandProcess :: ShellExecInfo -> ShellState -> Handle -> Handle -> Handle -> [ Text ] -> Text -> TestRun ( TestRun ProcessStatus, ShellState )
+executeCommandProcess ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstderr args = \case
+    cmd -> liftIO $ do
         (_, _, _, phandle) <- createProcess_ "shell"
-            (proc (T.unpack cmdCommand) (map T.unpack args))
-                { std_in = UseHandle $ handledHandle pstdin'
-                , std_out = UseHandle $ handledHandle pstdout'
-                , std_err = UseHandle $ handledHandle pstderr'
-                , cwd = Just (nodeDir seiNode)
+            (proc (T.unpack cmd) (map T.unpack args))
+                { std_in = UseHandle pstdin
+                , std_out = UseHandle pstdout
+                , std_err = UseHandle pstderr
+                , cwd = Just shellWorkingDirectory
                 , env = Just []
                 }
         Just pid <- getPid phandle
-        return pid
+        let getProcessStatus' =
+                liftIO (getProcessStatus True False pid) >>= \case
+                    Just status -> return status
+                    Nothing -> do
+                        outLine OutputChildFail (Just $ textProcName seiProcName) $ "no exit status"
+                        return (Exited (ExitFailure (-1)))
+        return ( getProcessStatus', st )
 
-    mapM_ closeIfRequested [ pstdin', pstdout', pstderr' ]
-    liftIO (getProcessStatus True False pid) >>= \case
-        Just (Exited ExitSuccess) -> do
-            return ()
-        Just (Exited status) -> do
-            outLine OutputChildFail (Just $ textProcName seiProcName) $ "failed at: " <> textSourceLine cmdSourceLine
-            liftIO $ putMVar seiStatusVar status
-            throwError Failed
-        Just (Terminated sig _) -> do
-            outLine OutputChildFail (Just $ textProcName seiProcName) $ "killed with " <> T.pack (show sig) <> " at: " <> textSourceLine cmdSourceLine
-            liftIO $ putMVar seiStatusVar (ExitFailure (- fromIntegral sig))
-            throwError Failed
-        Just (Stopped sig) -> do
-            outLine OutputChildFail (Just $ textProcName seiProcName) $ "stopped with " <> T.pack (show sig) <> " at: " <> textSourceLine cmdSourceLine
-            liftIO $ putMVar seiStatusVar (ExitFailure (- fromIntegral sig))
-            throwError Failed
-        Nothing -> do
-            outLine OutputChildFail (Just $ textProcName seiProcName) $ "no exit status"
-            liftIO $ putMVar seiStatusVar (ExitFailure (- 1))
-            throwError Failed
 
-executePipeline :: ShellExecInfo -> HandleHandling -> HandleHandling -> HandleHandling -> ShellPipeline -> TestRun ()
-executePipeline sei pstdin pstdout pstderr ShellPipeline {..} = do
+executePipeline :: ShellExecInfo -> ShellState -> HandleHandling -> HandleHandling -> HandleHandling -> ShellPipeline -> TestRun ShellState
+executePipeline sei st pstdin pstdout pstderr ShellPipeline {..} = do
     case pipeUpstream of
         Nothing -> do
-            executeCommand sei pstdin pstdout pstderr pipeCommand
+            executeCommand sei st pstdin pstdout pstderr pipeCommand
 
         Just upstream -> do
             ( pipeRead, pipeWrite ) <- createPipeCloexec
             void $ forkTestUsing forkOS $ do
-                executePipeline sei pstdin (CloseHandle pipeWrite) (KeepHandle $ handledHandle pstderr) upstream
+                void $ executePipeline sei st pstdin (CloseHandle pipeWrite) (KeepHandle $ handledHandle pstderr) upstream
 
-            executeCommand sei (CloseHandle pipeRead) pstdout (KeepHandle $ handledHandle pstderr) pipeCommand
+            state' <- executeCommand sei st (CloseHandle pipeRead) pstdout (KeepHandle $ handledHandle pstderr) pipeCommand
             closeIfRequested pstderr
+            return state'
 
 executeScript :: ShellExecInfo -> Handle -> Handle -> Handle -> ShellScript -> TestRun ()
 executeScript sei@ShellExecInfo {..} pstdin pstdout pstderr (ShellScript statements) = do
     setNetworkNamespace $ getNetns seiNode
-    forM_ statements $ \ShellStatement {..} -> do
-        executePipeline sei (KeepHandle pstdin) (KeepHandle pstdout) (KeepHandle pstderr) shellPipeline
+    let initialState = ShellState
+            { shellWorkingDirectory = nodeDir seiNode
+            }
+    _ <- (\f -> foldM f initialState statements) $ \st ShellStatement {..} -> do
+        executePipeline sei st (KeepHandle pstdin) (KeepHandle pstdout) (KeepHandle pstderr) shellPipeline
+
     liftIO $ putMVar seiStatusVar ExitSuccess
 
 spawnShell :: Node -> ProcName -> ShellScript -> TestRun Process
