@@ -2,3 +2,18 @@ test Test:
     node n
     shell on n as sh:
         pwd
+        mkdir -p abc/def/ghi
+        cd abc/def
+        pwd
+        cd ..
+        pwd
+        cd def/ghi
+        pwd
+        cd -
+        pwd
+        cd -
+        pwd
+        cd
+        pwd
+        cd /tmp
+        pwd

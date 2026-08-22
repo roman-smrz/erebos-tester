@@ -23,6 +23,7 @@ import Foreign.Ptr
 import Foreign.Marshal.Array
 import Foreign.Storable
 
+import System.Directory
 import System.Exit
 import System.FilePath
 import System.IO
@@ -44,6 +45,7 @@ newtype ShellScript = ShellScript [ ShellStatement ]
 
 data ShellState = ShellState
     { shellWorkingDirectory :: FilePath
+    , shellOldWorkingDirectory :: FilePath
     }
 
 data ShellStatement = ShellStatement
@@ -154,6 +156,33 @@ executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellComman
 
 executeCommandProcess :: ShellExecInfo -> ShellState -> Handle -> Handle -> Handle -> [ Text ] -> Text -> TestRun ( TestRun ProcessStatus, ShellState )
 executeCommandProcess ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstderr args = \case
+    "cd"
+        | [] <- args -> liftIO $ do
+            hPutStrLn pstdout (nodeDir seiNode)
+            return ( return (Exited ExitSuccess), st
+                { shellWorkingDirectory = nodeDir seiNode
+                , shellOldWorkingDirectory = shellWorkingDirectory
+                } )
+        | [ "-" ] <- args -> liftIO $ do
+            hPutStrLn pstdout shellOldWorkingDirectory
+            return ( return (Exited ExitSuccess), st
+                { shellWorkingDirectory = shellOldWorkingDirectory
+                , shellOldWorkingDirectory = shellWorkingDirectory
+                } )
+        | [ dir ] <- args -> liftIO $ do
+            cd <- canonicalizePath $ shellWorkingDirectory </> T.unpack dir
+            doesDirectoryExist cd >>= \case
+                True -> return ( return (Exited ExitSuccess), st
+                    { shellWorkingDirectory = cd
+                    , shellOldWorkingDirectory = shellWorkingDirectory
+                    } )
+                False -> do
+                    hPutStrLn pstderr $ "cd: no such directory: " <> T.unpack dir
+                    return ( return (Exited (ExitFailure (-1))), st )
+        | otherwise -> do
+            liftIO $ hPutStrLn pstderr $ "cd: too many arguments"
+            return ( return (Exited (ExitFailure (-1))), st )
+
     "pwd"
         | [] <- args -> do
             liftIO $ hPutStrLn pstdout shellWorkingDirectory
@@ -161,6 +190,7 @@ executeCommandProcess ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstde
         | otherwise -> do
             liftIO $ hPutStrLn pstderr $ "pwd: too many arguments"
             return ( return (Exited (ExitFailure (-1))), st )
+
     cmd -> liftIO $ do
         (_, _, _, phandle) <- createProcess_ "shell"
             (proc (T.unpack cmd) (map T.unpack args))
@@ -200,6 +230,7 @@ executeScript sei@ShellExecInfo {..} pstdin pstdout pstderr (ShellScript stateme
     setNetworkNamespace $ getNetns seiNode
     let initialState = ShellState
             { shellWorkingDirectory = nodeDir seiNode
+            , shellOldWorkingDirectory = nodeDir seiNode
             }
     _ <- (\f -> foldM f initialState statements) $ \st ShellStatement {..} -> do
         executePipeline sei st (KeepHandle pstdin) (KeepHandle pstdout) (KeepHandle pstderr) shellPipeline

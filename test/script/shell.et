@@ -111,4 +111,15 @@ test ShellWorkingDirectory:
 
         send "run *"
 
-        expect from p /child-stdout sh (\/.*)/ capture orig_pwd
+        expect from p /child-stdout sh (\/.*)/ capture home
+        expect_next_stdout from p:
+            "$home/abc/def"
+            "$home/abc"
+            "$home/abc/def/ghi"
+            "$home/abc"
+            "$home/abc"
+            "$home/abc/def/ghi"
+            "$home/abc/def/ghi"
+            "$home"
+            "$home"
+            "/tmp"
