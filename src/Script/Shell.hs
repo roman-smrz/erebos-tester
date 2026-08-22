@@ -158,7 +158,17 @@ executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellComman
 
 
 executeCommandProcess :: ShellExecInfo -> ShellState -> Handle -> Handle -> Handle -> [ Text ] -> Text -> TestRun ( TestRun ProcessStatus, ShellState )
-executeCommandProcess ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstderr args = \case
+executeCommandProcess sei@ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstderr args = \case
+    "!"
+        | (cmd : args') <- args -> do
+            ( exit, st' ) <- executeCommandProcess sei st pstdin pstdout pstderr args' cmd
+            let exit' = exit >>= \case Exited ExitSuccess -> return (Exited (ExitFailure (-1)))
+                                       _                  -> return (Exited ExitSuccess)
+            return ( exit', st' )
+
+        | [] <- args -> do
+            return ( return (Exited (ExitFailure (-1))), st )
+
     "cd"
         | [] <- args -> liftIO $ do
             hPutStrLn pstdout (nodeDir seiNode)

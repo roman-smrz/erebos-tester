@@ -154,3 +154,29 @@ test ShellExitOnError:
         expect /run-test-result Enabled failed/
         expect /run-done/
         flush
+
+
+test ShellLogic:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/logic.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+
+        send "run NegateFalse"
+        expect /run-test-result NegateFalse done/
+        expect /run-done/
+        flush
+
+        send "run NegateTrue"
+        expect /child-fail sh failed at: .*logic.et:9:9: ! true/
+        expect /run-test-result NegateTrue failed/
+        expect /run-done/
+        flush
+
+        send "run NegateNothing"
+        expect /child-fail sh failed at: .*logic.et:14:9: !/
+        expect /run-test-result NegateNothing failed/
+        expect /run-done/
+        flush

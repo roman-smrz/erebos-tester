@@ -1,0 +1,14 @@
+test NegateFalse:
+    node n
+    shell on n as sh:
+        ! false
+
+test NegateTrue:
+    node n
+    shell on n as sh:
+        ! true
+
+test NegateNothing:
+    node n
+    shell on n as sh:
+        !
