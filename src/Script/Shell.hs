@@ -154,6 +154,13 @@ executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellComman
 
 executeCommandProcess :: ShellExecInfo -> ShellState -> Handle -> Handle -> Handle -> [ Text ] -> Text -> TestRun ( TestRun ProcessStatus, ShellState )
 executeCommandProcess ShellExecInfo {..} st@ShellState {..} pstdin pstdout pstderr args = \case
+    "pwd"
+        | [] <- args -> do
+            liftIO $ hPutStrLn pstdout shellWorkingDirectory
+            return ( return (Exited ExitSuccess), st )
+        | otherwise -> do
+            liftIO $ hPutStrLn pstderr $ "pwd: too many arguments"
+            return ( return (Exited (ExitFailure (-1))), st )
     cmd -> liftIO $ do
         (_, _, _, phandle) <- createProcess_ "shell"
             (proc (T.unpack cmd) (map T.unpack args))

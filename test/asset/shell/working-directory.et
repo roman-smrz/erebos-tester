@@ -1,0 +1,4 @@
+test Test:
+    node n
+    shell on n as sh:
+        pwd

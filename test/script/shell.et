@@ -98,3 +98,17 @@ test ShellPipe:
 
     with p:
         expect /run-done/
+
+
+test ShellWorkingDirectory:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/working-directory.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+        flush
+
+        send "run *"
+
+        expect from p /child-stdout sh (\/.*)/ capture orig_pwd
