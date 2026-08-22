@@ -71,21 +71,23 @@ parseTextArgument = lexeme $ fmap (App AnnNone (Pure T.concat) <$> foldr (liftA2
 parseRedirection :: TestParser (Expr ShellArgument)
 parseRedirection = choice
     [ do
-        osymbol "<"
+        rsymbol "<"
         fmap ShellRedirectStdin <$> parseTextArgument
     , do
-        osymbol ">"
+        rsymbol ">"
         fmap (ShellRedirectStdout False) <$> parseTextArgument
     , do
-        osymbol ">>"
+        rsymbol ">>"
         fmap (ShellRedirectStdout True) <$> parseTextArgument
     , do
-        osymbol "2>"
+        rsymbol "2>"
         fmap (ShellRedirectStderr False) <$> parseTextArgument
     , do
-        osymbol "2>>"
+        rsymbol "2>>"
         fmap (ShellRedirectStderr True) <$> parseTextArgument
     ]
+  where
+    rsymbol str = void $ try $ (string str <* notFollowedBy (satisfy $ (`elem` [ '<', '>', '|' ]))) <* sc
 
 parseArgument :: TestParser (Expr ShellArgument)
 parseArgument = choice
@@ -115,12 +117,14 @@ parsePipeline mbupper = do
                 Just upper -> liftA2 (\ecmd eupper -> ShellPipeline ecmd (Just eupper)) cmd upper
     choice
         [ do
-            osymbol "|"
+            psymbol "|"
             parsePipeline (Just pipeline)
 
         , do
             return pipeline
         ]
+  where
+    psymbol str = void $ try $ (string str <* notFollowedBy (satisfy $ (`elem` [ '<', '>', '|', '&' ]))) <* sc
 
 parseStatement :: TestParser (Expr [ ShellStatement ])
 parseStatement = do
