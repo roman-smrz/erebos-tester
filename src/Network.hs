@@ -123,10 +123,11 @@ nextPrefix _ used = maximum (0 : used) + 1
 
 newInternet :: MonadIO m => FilePath -> m Internet
 newInternet dir = do
+    adir <- liftIO $ makeAbsolute dir
     atomicallyWithIO $ do
         Internet
-            <$> pure dir
-            <*> newNetwork (IpPrefix [1]) dir
+            <$> pure adir
+            <*> newNetwork (IpPrefix [1]) adir
 
 delInternet :: MonadIO m => Internet -> m ()
 delInternet _ = liftIO $ do
