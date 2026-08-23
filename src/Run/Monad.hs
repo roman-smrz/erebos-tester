@@ -43,6 +43,7 @@ data TestEnv = TestEnv
     { teOutput :: Output
     , teFailed :: TVar (Maybe Failed)
     , teOptions :: TestOptions
+    , teTestDir :: FilePath
     , teNextObjId :: MVar Int
     , teNextProcId :: MVar Int
     , teProcesses :: MVar [ Process ]

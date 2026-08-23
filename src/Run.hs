@@ -32,6 +32,7 @@ import Data.Text qualified as T
 import Data.Typeable
 
 import System.Directory
+import System.FilePath
 import System.Exit
 import System.IO.Error
 import System.Posix.Process
@@ -58,7 +59,7 @@ import Test.Builtins
 
 runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool
 runTest out opts gdefs test = do
-    let testDir = optTestDir opts
+    let testDir = optTestDir opts </> T.unpack (textModuleName (testModuleName test) <> "." <> testName test)
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
     exists <- doesPathExist testDir
@@ -81,6 +82,7 @@ runTest out opts gdefs test = do
             { teOutput = out
             , teFailed = failedVar
             , teOptions = opts
+            , teTestDir = testDir
             , teNextObjId = objIdVar
             , teNextProcId = procIdVar
             , teProcesses = procVar
@@ -302,7 +304,7 @@ runStep = \case
 
 withInternet :: (Network -> TestRun a) -> TestRun a
 withInternet inner = do
-    testDir <- asks $ optTestDir . teOptions . fst
+    testDir <- asks $ teTestDir . fst
     inet <- newInternet testDir
     flip finally (delInternet inet) $ do
         withNetwork (inetRoot inet) $ \net -> do

@@ -45,6 +45,7 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
             }
         href <- L.indentLevel
         testName <- header
+        testModuleName <- gets testCurrentModuleName
         osymbol ":" <* eol <* scn
 
         ref <- L.indentGuard scn GT href
