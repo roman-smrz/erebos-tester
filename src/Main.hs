@@ -24,13 +24,13 @@ import Parser.Core
 import Process
 import Run
 import TestMode
-import Util
 import Version
 
 data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
     , optRepeat :: Int
     , optExclude :: [ Text ]
+    , optKeepGoing :: Bool
     , optVerbose :: Bool
     , optColor :: Maybe Bool
     , optShowHelp :: Bool
@@ -44,6 +44,7 @@ defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
     , optRepeat = 1
     , optExclude = []
+    , optKeepGoing = False
     , optVerbose = False
     , optColor = Nothing
     , optShowHelp = False
@@ -95,6 +96,9 @@ options =
     , Option [ 'e' ] [ "exclude" ]
         (ReqArg (\str opts -> opts { optExclude = T.pack str : optExclude opts }) "<test|tag>")
         "exclude given test or test tag from execution"
+    , Option [] [ "keep-going" ]
+        (NoArg $ \opts -> opts { optKeepGoing = True })
+        "keep going after a failed test"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
@@ -207,8 +211,16 @@ main = do
     let topts = (optTest opts)
             { optTcpdump = tcpdump
             }
-    ok <- allM (runTest out topts lmGlobalDefs) $
-        concat $ replicate (optRepeat opts) tests
+
+    let doRun (t : ts) = do
+            runTest out topts lmGlobalDefs t >>= \case
+                True -> doRun ts
+                False
+                    | optKeepGoing opts -> doRun ts >> return False
+                    | otherwise -> return False
+        doRun [] = return True
+
+    ok <- doRun $ concat $ replicate (optRepeat opts) tests
     when (not ok) exitFailure
 
 exitOnError :: Either CustomTestError a -> IO a
