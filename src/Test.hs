@@ -25,8 +25,7 @@ import Script.Object
 import Script.Shell
 
 data Test = Test
-    { testName :: Text
-    , testModuleName :: ModuleName
+    { testName :: TestName
     , testTags :: [ Expr Tag ]
     , testSteps :: Expr (TestStep ())
     }

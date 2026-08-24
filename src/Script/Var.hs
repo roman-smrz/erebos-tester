@@ -3,6 +3,7 @@ module Script.Var (
     FqVarName(..), textFqVarName, unpackFqVarName, unqualifyName,
     TypedVarName(..),
     ModuleName(..), textModuleName,
+    TestName(..), textTestName,
     SourceLine(..), textSourceLine,
 ) where
 
@@ -52,6 +53,17 @@ newtype ModuleName = ModuleName [ Text ]
 
 textModuleName :: ModuleName -> Text
 textModuleName (ModuleName parts) = T.intercalate "." parts
+
+
+data TestName = TestName
+    { testNameModule :: ModuleName
+    , testNameBase :: Text
+    }
+    deriving (Eq, Ord)
+
+textTestName :: TestName -> Text
+textTestName (TestName (ModuleName mparts) base) = T.intercalate "." (mparts ++ [ base ])
+
 
 data SourceLine
     = SourceLine Text

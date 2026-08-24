@@ -163,5 +163,5 @@ cmdRun = do
         Right tests -> do
             forM_ tests $ \test -> do
                 res <- runSingleTest test
-                cmdOut $ "run-test-result " <> testName test <> " " <> (if res then "done" else "failed")
+                cmdOut $ "run-test-result " <> testNameBase (testName test) <> " " <> (if res then "done" else "failed")
             cmdOut "run-done"

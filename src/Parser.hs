@@ -44,8 +44,10 @@ parseTestDefinition = label "test definition" $ toplevel ToplevelTest $ do
             { testContext = SomeExpr $ varExpr SourceLineBuiltin rootNetworkVar
             }
         href <- L.indentLevel
-        testName <- header
-        testModuleName <- gets testCurrentModuleName
+        testNameBase <- header
+        testNameModule <- gets testCurrentModuleName
+        let testName = TestName {..}
+
         osymbol ":" <* eol <* scn
 
         ref <- L.indentGuard scn GT href

@@ -73,7 +73,7 @@ runTests out opts gdefs tests = do
 
 runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool
 runTest out opts gdefs test = do
-    let testDir = optTestDir opts </> T.unpack (textModuleName (testModuleName test) <> "." <> testName test)
+    let testDir = optTestDir opts </> T.unpack (textTestName $ testName test)
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
     exists <- doesPathExist testDir
@@ -133,7 +133,7 @@ runTest out opts gdefs test = do
     testRunResult <- newEmptyMVar
 
     flip runReaderT out $ do
-        void $ outLine OutputGlobalInfo Nothing $ "Starting test ‘" <> testName test <> "’"
+        void $ outLine OutputGlobalInfo Nothing $ "Starting test ‘" <> textTestName (testName test) <> "’"
 
     void $ forkOS $ do
         isolateFilesystem testDir >>= \case
@@ -142,7 +142,7 @@ runTest out opts gdefs test = do
                     withInternet $ \_ -> do
                         runStep =<< eval (testSteps test)
                         when (optWait opts) $ do
-                            void $ outPromptGetLine $ "Test '" <> testName test <> "' completed, waiting..."
+                            void $ outPromptGetLine $ "Test ‘" <> textTestName (testName test) <> "’ completed, waiting..."
                 putMVar testRunResult tres
             _ -> do
                 putMVar testRunResult ( Left Failed, [] )
@@ -162,13 +162,13 @@ runTest out opts gdefs test = do
             return True
         _ -> do
             flip runReaderT out $ do
-                void $ outLine OutputGlobalError Nothing $ "Test ‘" <> testName test <> "’ failed."
+                void $ outLine OutputGlobalError Nothing $ "Test ‘" <> textTestName (testName test) <> "’ failed."
             return False
 
 
 data LoadedModules = LoadedModules
     { lmModules :: [ Module ]
-    , lmTags :: [ ( ( ModuleName, Text ), [ Tag ] ) ]
+    , lmTags :: [ ( TestName, [ Tag ] ) ]
     , lmGlobalDefs :: GlobalDefs
     }
 
@@ -180,7 +180,7 @@ loadModules files = do
                 tests <- case tsel of
                     Nothing -> return $ moduleTests m
                     Just tname
-                        | Just test <- find ((tname ==) . testName) (moduleTests m)
+                        | Just test <- find ((tname ==) . testNameBase . testName) (moduleTests m)
                         -> return [ test ]
                         | otherwise
                         -> throwError $ TestNotFound tname (Just path)
@@ -188,7 +188,7 @@ loadModules files = do
 
             let lmGlobalDefs = evalGlobalDefs $ concatMap (\m -> map (first ( moduleName m, )) $ moduleDefinitions m) allModules
                 evalTags test = map (\e -> runSimpleEval (eval e) lmGlobalDefs []) $ testTags test
-                lmTags = concatMap (\Module {..} -> map (\test -> ( ( moduleName, testName test ), evalTags test )) moduleTests) lmModules
+                lmTags = concatMap (\Module {..} -> map (\test -> ( testName test, evalTags test )) moduleTests) lmModules
             Right $ LoadedModules {..}
         Left err -> do
             return $ Left err
@@ -219,7 +219,7 @@ testFilterFromConfig Config {..} = TestFilter
 
 filterTests :: TestFilter -> LoadedModules -> Either CustomTestError [ Test ]
 filterTests TestFilter {..} LoadedModules {..} = do
-    let allTests = concatMap (\m -> ( moduleName m, ) <$> moduleTests m) lmModules
+    let allTests = concatMap moduleTests lmModules
     let evalTerm :: Text -> Either CustomTestError (Either Text Tag)
         evalTerm t =
             case find ((VarName t ==) . snd . fst) $ M.toList lmGlobalDefs of
@@ -227,14 +227,14 @@ filterTests TestFilter {..} LoadedModules {..} = do
                     | Just (Refl :: etype :~: Tag) <- eqT
                     -> return $ Right $ runSimpleEval (eval expr) lmGlobalDefs []
                 Nothing
-                    | Just _ <- find ((t ==) . testName . snd) allTests
+                    | Just _ <- find ((t ==) . testNameBase . testName) allTests
                     -> return $ Left t
                 _ ->
                     throwError $ TestOrTagNotFound t Nothing
     exclude <- partitionEithers <$> mapM evalTerm tfExclude
-    let matches ( tnames, tags ) ( mname, test ) =
-            testName test `elem` tnames || maybe False (any (`elem` tags)) (lookup ( mname, testName test ) lmTags)
-    map snd . filter (not . matches exclude) <$> case tfSelect of
+    let matches ( tnames, tags ) test =
+            testNameBase (testName test) `elem` tnames || maybe False (any (`elem` tags)) (lookup (testName test) lmTags)
+    filter (not . matches exclude) <$> case tfSelect of
         Nothing -> return allTests
         Just tnames -> do
             selected <- partitionEithers <$> mapM evalTerm tnames
