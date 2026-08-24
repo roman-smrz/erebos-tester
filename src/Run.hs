@@ -156,14 +156,17 @@ runTest out opts gdefs test = do
     [] <- readMVar procVar
 
     failed <- atomically $ readTVar (teFailed tenv)
-    case (res, failed) of
-        (Right (), Nothing) -> do
+    fres <- case ( res, failed ) of
+        ( Right (), Nothing ) -> do
             when (not $ optKeep opts) $ removeDirectoryRecursive testDir
             return True
         _ -> do
             flip runReaderT out $ do
                 void $ outLine OutputGlobalError Nothing $ "Test ‘" <> textTestName (testName test) <> "’ failed."
             return False
+
+    (optHookTestResult opts) (testName test) fres
+    return fres
 
 
 data LoadedModules = LoadedModules

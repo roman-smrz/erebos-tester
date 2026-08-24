@@ -88,6 +88,9 @@ runSingleTest test = do
             { optDefaultTool = fromMaybe "/bin/true" $ configTool =<< mbconfig
             , optTestDir = ".test" <> show num
             , optKeep = True
+            , optHookTestResult = \tname res -> do
+                flip runReaderT out $ outLine OutputTestRaw Nothing $
+                    "run-test-result " <> testNameBase tname <> " " <> (if res then "done" else "failed")
             }
     liftIO (runTest out opts lmGlobalDefs test)
 
@@ -162,6 +165,5 @@ cmdRun = do
         Left err -> showError "run-failed" err
         Right tests -> do
             forM_ tests $ \test -> do
-                res <- runSingleTest test
-                cmdOut $ "run-test-result " <> testNameBase (testName test) <> " " <> (if res then "done" else "failed")
+                runSingleTest test
             cmdOut "run-done"

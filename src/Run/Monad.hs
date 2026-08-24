@@ -71,6 +71,7 @@ data TestOptions = TestOptions
     , optRepeat :: Int
     , optKeepGoing :: Bool
     , optWait :: Bool
+    , optHookTestResult :: TestName -> Bool -> IO ()
     }
 
 defaultTestOptions :: TestOptions
@@ -86,6 +87,7 @@ defaultTestOptions = TestOptions
     , optRepeat = 1
     , optKeepGoing = False
     , optWait = False
+    , optHookTestResult = \_ _ -> return ()
     }
 
 data Failed = Failed
