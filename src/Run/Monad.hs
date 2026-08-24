@@ -68,6 +68,8 @@ data TestOptions = TestOptions
     , optGDB :: Bool
     , optForce :: Bool
     , optKeep :: Bool
+    , optRepeat :: Int
+    , optKeepGoing :: Bool
     , optWait :: Bool
     }
 
@@ -81,6 +83,8 @@ defaultTestOptions = TestOptions
     , optGDB = False
     , optForce = False
     , optKeep = False
+    , optRepeat = 1
+    , optKeepGoing = False
     , optWait = False
     }
 

@@ -28,9 +28,7 @@ import Version
 
 data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
-    , optRepeat :: Int
     , optExclude :: [ Text ]
-    , optKeepGoing :: Bool
     , optVerbose :: Bool
     , optColor :: Maybe Bool
     , optShowHelp :: Bool
@@ -42,9 +40,7 @@ data CmdlineOptions = CmdlineOptions
 defaultCmdlineOptions :: CmdlineOptions
 defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
-    , optRepeat = 1
     , optExclude = []
-    , optKeepGoing = False
     , optVerbose = False
     , optColor = Nothing
     , optShowHelp = False
@@ -91,13 +87,13 @@ options =
         (NoArg $ to $ \opts -> opts { optKeep = True })
         "keep test directory even if all tests succeed"
     , Option ['r'] ["repeat"]
-        (ReqArg (\str opts -> opts { optRepeat = read str }) "<count>")
+        (ReqArg (\str -> to $ \opts -> opts { optRepeat = read str }) "<count>")
         "number of times to repeat the test(s)"
     , Option [ 'e' ] [ "exclude" ]
         (ReqArg (\str opts -> opts { optExclude = T.pack str : optExclude opts }) "<test|tag>")
         "exclude given test or test tag from execution"
     , Option [] [ "keep-going" ]
-        (NoArg $ \opts -> opts { optKeepGoing = True })
+        (NoArg $ to $ \opts -> opts { optKeepGoing = True })
         "keep going after a failed test"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
@@ -212,15 +208,7 @@ main = do
             { optTcpdump = tcpdump
             }
 
-    let doRun (t : ts) = do
-            runTest out topts lmGlobalDefs t >>= \case
-                True -> doRun ts
-                False
-                    | optKeepGoing opts -> doRun ts >> return False
-                    | otherwise -> return False
-        doRun [] = return True
-
-    ok <- doRun $ concat $ replicate (optRepeat opts) tests
+    ok <- runTests out topts lmGlobalDefs tests
     when (not ok) exitFailure
 
 exitOnError :: Either CustomTestError a -> IO a

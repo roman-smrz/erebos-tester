@@ -1,5 +1,6 @@
 module Run (
     module Run.Monad,
+    runTests,
     runTest,
 
     LoadedModules(..),
@@ -55,6 +56,19 @@ import Script.Object
 import Script.Shell
 import Test
 import Test.Builtins
+
+
+runTests :: Output -> TestOptions -> GlobalDefs -> [ Test ] -> IO Bool
+runTests out opts gdefs tests = do
+    go $ concat $ replicate (optRepeat opts) tests
+  where
+    go (t : ts) = do
+        runTest out opts gdefs t >>= \case
+            True -> go ts
+            False
+                | optKeepGoing opts -> go ts >> return False
+                | otherwise -> return False
+    go [] = return True
 
 
 runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool
