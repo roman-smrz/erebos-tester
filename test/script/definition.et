@@ -18,4 +18,4 @@ test Definition:
         expect /run-test-result Test (.*)/ capture result
         guard (result == "done")
         expect /(.*)/ capture done
-        guard (done == "run-done")
+        guard (done == "run-done 1 1 0 0")

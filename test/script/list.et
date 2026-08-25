@@ -39,4 +39,4 @@ test ListConcat:
         local:
             expect /run-test-result Test (.*)/ capture result
             guard (result == "done")
-            expect /run-done/
+            expect /run-done 1 1 0 0/

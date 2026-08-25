@@ -12,4 +12,4 @@ test VariableExpansion:
         for str in [ "1", "1.3", "abc", "abc" ]:
             expect /child-stdout p $str/
             expect /match p $str/
-        expect /run-done/
+        expect /run-done 1 1 0 0/

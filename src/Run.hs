@@ -1,5 +1,7 @@
 module Run (
     module Run.Monad,
+    Report(..),
+    TestName, textTestName,
     runTests,
     runTest,
 
@@ -58,17 +60,44 @@ import Test
 import Test.Builtins
 
 
-runTests :: Output -> TestOptions -> GlobalDefs -> [ Test ] -> IO Bool
+data Report = Report
+    { reportTotalCount :: Int
+    , reportPassedCount :: Int
+    , reportSkippedCount :: Int
+    , reportFailedCount :: Int
+    , reportFailedList :: [ TestName ]
+    }
+
+reportPassed :: Report -> Report
+reportPassed r = r
+    { reportTotalCount = reportTotalCount r + 1
+    , reportPassedCount = reportPassedCount r + 1
+    }
+
+reportFailed :: TestName -> Report -> Report
+reportFailed tname r = r
+    { reportTotalCount = reportTotalCount r + 1
+    , reportFailedCount = reportFailedCount r + 1
+    , reportFailedList = tname : reportFailedList r
+    }
+
+runTests :: Output -> TestOptions -> GlobalDefs -> [ Test ] -> IO Report
 runTests out opts gdefs tests = do
     go $ concat $ replicate (optRepeat opts) tests
   where
     go (t : ts) = do
         runTest out opts gdefs t >>= \case
-            True -> go ts
-            False
-                | optKeepGoing opts -> go ts >> return False
-                | otherwise -> return False
-    go [] = return True
+            True -> reportPassed <$> go ts
+            False -> reportFailed (testName t) <$> if
+                | optKeepGoing opts -> go ts
+                | otherwise -> go []
+    go [] = return Report
+        { reportTotalCount = 0
+        , reportPassedCount = 0
+        , reportSkippedCount = 0
+        , reportFailedCount = 0
+        , reportFailedList = []
+        }
 
 
 runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool

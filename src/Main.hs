@@ -30,6 +30,7 @@ data CmdlineOptions = CmdlineOptions
     { optTest :: TestOptions
     , optExclude :: [ Text ]
     , optVerbose :: Bool
+    , optReport :: Bool
     , optColor :: Maybe Bool
     , optShowHelp :: Bool
     , optShowVersion :: Bool
@@ -42,6 +43,7 @@ defaultCmdlineOptions = CmdlineOptions
     { optTest = defaultTestOptions
     , optExclude = []
     , optVerbose = False
+    , optReport = False
     , optColor = Nothing
     , optShowHelp = False
     , optShowVersion = False
@@ -95,6 +97,9 @@ options =
     , Option [] [ "keep-going" ]
         (NoArg $ to $ \opts -> opts { optKeepGoing = True })
         "keep going after a failed test"
+    , Option [] [ "report" ]
+        (NoArg $ \opts -> opts { optReport = True, optTest = (optTest opts) { optKeepGoing = True } })
+        "print summary of passing and failing tests (implies --keep-going)"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
@@ -208,8 +213,16 @@ main = do
             { optTcpdump = tcpdump
             }
 
-    ok <- runTests out topts lmGlobalDefs tests
-    when (not ok) exitFailure
+    Report {..} <- runTests out topts lmGlobalDefs tests
+
+    when (optReport opts) $ do
+        putStrLn $ "Total:  " <> show reportTotalCount
+        putStrLn $ "Passed: " <> show reportPassedCount
+        putStrLn $ "Failed: " <> show reportFailedCount
+        forM_ reportFailedList $ \tname -> do
+            putStrLn $ T.unpack $ textTestName tname
+
+    when (reportFailedCount > 0) exitFailure
 
 exitOnError :: Either CustomTestError a -> IO a
 exitOnError (Left err) = do

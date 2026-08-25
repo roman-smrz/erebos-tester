@@ -20,14 +20,16 @@ test TrivialRun:
         local:
             expect /run-test-result AlwaysSucceeds (.*)/ capture result
             guard (result == "done")
-            expect /run-done/
+            expect /run-done ([0-9]+) ([0-9]+) 0 0/ capture total, passed
+            guard (total == passed)
 
         send "run AlwaysFails"
         local:
             expect /match-fail .*/
             expect /run-test-result AlwaysFails (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done ([0-9]+) 0 0 ([0-9]+)/ capture total, failed
+            guard (total == failed)
 
 
 test SimpleRun:
@@ -47,7 +49,7 @@ test SimpleRun:
             local:
                 expect /run-test-result Test (.*)/ capture result
                 guard (result == "done")
-                expect /run-done/
+                expect /run-done 1 1 0 0/
             flush
 
         for file in should_fail:
@@ -61,7 +63,7 @@ test SimpleRun:
             local:
                 expect /run-test-result Test (.*)/ capture result
                 guard (result == "failed")
-                expect /run-done/
+                expect /run-done 1 0 0 1/
             flush
 
 
@@ -88,7 +90,7 @@ test RunConfig:
         expect /child-stdout p abcdef/
         expect /match p abcdef/
         expect /run-test-result ExpectEcho done/
-        expect /run-done/
+        expect /run-done 3 2 0 1/
 
 
 test GetSysInfo:
@@ -107,7 +109,7 @@ test GetSysInfo:
         send "load-config"
         expect /load-config-done/
         send "run SysInfo"
-        expect /run-done/
+        expect /run-done 1 1 0 0/
 
 
 test CallStack:
@@ -126,7 +128,7 @@ test CallStack:
         local:
             expect /run-test-result AG (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done 1 0 0 1/
         flush
 
         send "run AE"
@@ -139,7 +141,7 @@ test CallStack:
         local:
             expect /run-test-result AE (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done 1 0 0 1/
         flush
 
         send "run BG"
@@ -153,7 +155,7 @@ test CallStack:
         local:
             expect /run-test-result BG (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done 1 0 0 1/
         flush
 
         send "run CG"
@@ -169,7 +171,7 @@ test CallStack:
         local:
             expect /run-test-result CG (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done 1 0 0 1/
         flush
 
         send "run BE"
@@ -184,7 +186,7 @@ test CallStack:
         local:
             expect /run-test-result BE (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done 1 0 0 1/
         flush
 
         send "run CE"
@@ -201,7 +203,7 @@ test CallStack:
         local:
             expect /run-test-result CE (.*)/ capture result
             guard (result == "failed")
-            expect /run-done/
+            expect /run-done 1 0 0 1/
         flush
 
 
@@ -223,7 +225,7 @@ test RunTag:
             guard (result == "done")
         local:
             expect /run-(.*)/ capture done
-            guard (done == "done")
+            guard (done == "done 2 2 0 0")
 
         send "run B C"
         local:
@@ -243,7 +245,7 @@ test RunTag:
             guard (result == "done")
         local:
             expect /run-(.*)/ capture done
-            guard (done == "done")
+            guard (done == "done 5 5 0 0")
 
 
 test RunTagExclude:
@@ -264,7 +266,7 @@ test RunTagExclude:
             guard (result == "done")
         local:
             expect /run-(.*)/ capture done
-            guard (done == "done")
+            guard (done == "done 2 2 0 0")
 
         send "run T1 B1 A C ^B ^A1"
         local:
@@ -281,7 +283,7 @@ test RunTagExclude:
             guard (result == "done")
         local:
             expect /run-(.*)/ capture done
-            guard (done == "done")
+            guard (done == "done 4 4 0 0")
 
 
 test RunExcludeConfig1:
@@ -304,7 +306,7 @@ test RunExcludeConfig1:
         expect /run-test-result C2 done/
         local:
             expect /run-(.*)/ capture done
-            guard (done == "done")
+            guard (done == "done 6 6 0 0")
 
 test RunExcludeConfig2:
     node n
@@ -324,4 +326,4 @@ test RunExcludeConfig2:
         expect /run-test-result B2 done/
         local:
             expect /run-(.*)/ capture done
-            guard (done == "done")
+            guard (done == "done 4 4 0 0")

@@ -16,7 +16,7 @@ test ShellSpawn:
         expect /child-fail sh failed at: .*: false/
         expect /child-fail sh exit code: 1/
         expect /run-test-result ShellFalse failed/
-        expect /run-done/
+        expect /run-done 2 1 0 1/
 
 
 def expect_next_stdout from p (expected):
@@ -57,7 +57,7 @@ test ShellEcho:
 
     with p:
         expect /run-test-result Echo done/
-        expect /run-done/
+        expect /run-done 1 1 0 0/
 
 
 test ShellPipe:
@@ -97,7 +97,7 @@ test ShellPipe:
         expect /run-test-result PipeRedirect done/
 
     with p:
-        expect /run-done/
+        expect /run-done 3 3 0 0/
 
 
 test ShellWorkingDirectory:
@@ -136,23 +136,23 @@ test ShellExitOnError:
         send "run Default"
         expect /child-fail sh failed at: .*error-exit.et:4:9: false/
         expect /run-test-result Default failed/
-        expect /run-done/
+        expect /run-done 1 0 0 1/
         flush
 
         send "run DisabledSuccess"
         expect /run-test-result DisabledSuccess done/
-        expect /run-done/
+        expect /run-done 1 1 0 0/
         flush
 
         send "run DisabledFailure"
         expect /run-test-result DisabledFailure failed/
-        expect /run-done/
+        expect /run-done 1 0 0 1/
         flush
 
         send "run Enabled"
         expect /child-fail sh failed at: .*error-exit.et:25:9: false/
         expect /run-test-result Enabled failed/
-        expect /run-done/
+        expect /run-done 1 0 0 1/
         flush
 
 
@@ -166,17 +166,17 @@ test ShellLogic:
 
         send "run NegateFalse"
         expect /run-test-result NegateFalse done/
-        expect /run-done/
+        expect /run-done 1 1 0 0/
         flush
 
         send "run NegateTrue"
         expect /child-fail sh failed at: .*logic.et:9:9: ! true/
         expect /run-test-result NegateTrue failed/
-        expect /run-done/
+        expect /run-done 1 0 0 1/
         flush
 
         send "run NegateNothing"
         expect /child-fail sh failed at: .*logic.et:14:9: !/
         expect /run-test-result NegateNothing failed/
-        expect /run-done/
+        expect /run-done 1 0 0 1/
         flush

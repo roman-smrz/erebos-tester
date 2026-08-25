@@ -24,7 +24,7 @@ test FlushOutput:
 
         expect /run-test-result Test (.*)/ capture result
         guard (result == "failed")
-        expect /run-done/
+        expect /run-done 1 0 0 1/
 
 test IgnoreOutput:
     spawn as p 
@@ -54,4 +54,4 @@ test IgnoreOutput:
 
         expect /run-test-result Test (.*)/ capture result
         guard (result == "failed")
-        expect /run-done/
+        expect /run-done 1 0 0 1/

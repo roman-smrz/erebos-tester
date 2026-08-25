@@ -78,8 +78,8 @@ getNextTestNumber = do
     modify $ \s -> s { tmsNextTestNumber = num + 1 }
     return num
 
-runSingleTest :: Test -> CommandM Bool
-runSingleTest test = do
+runTestsC :: [ Test ] -> CommandM Report
+runTestsC tests = do
     out <- asks tmiOutput
     num <- getNextTestNumber
     Just LoadedModules {..} <- gets tmsModules
@@ -88,11 +88,12 @@ runSingleTest test = do
             { optDefaultTool = fromMaybe "/bin/true" $ configTool =<< mbconfig
             , optTestDir = ".test" <> show num
             , optKeep = True
+            , optKeepGoing = True
             , optHookTestResult = \tname res -> do
                 flip runReaderT out $ outLine OutputTestRaw Nothing $
                     "run-test-result " <> testNameBase tname <> " " <> (if res then "done" else "failed")
             }
-    liftIO (runTest out opts lmGlobalDefs test)
+    liftIO (runTests out opts lmGlobalDefs tests)
 
 
 newtype CommandM a = CommandM (ReaderT TestModeInput (StateT TestModeState (ExceptT String IO)) a)
@@ -164,6 +165,11 @@ cmdRun = do
     case filterTests (cfilter <> pfilter) lm of
         Left err -> showError "run-failed" err
         Right tests -> do
-            forM_ tests $ \test -> do
-                runSingleTest test
-            cmdOut "run-done"
+            Report {..} <- runTestsC tests
+            cmdOut $ T.unwords
+                [ "run-done"
+                , T.pack (show reportTotalCount)
+                , T.pack (show reportPassedCount)
+                , T.pack (show reportSkippedCount)
+                , T.pack (show reportFailedCount)
+                ]
