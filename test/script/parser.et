@@ -3,20 +3,23 @@ module parser
 asset scripts:
     path: ../asset/parser
 
+def expect_load_success using p of file:
+    guard (file /= "") # TODO: forces (file :: String)
+    send "load ${scripts.path}/$file.et" to p
+    expect /load-([a-z-]+).*/ from p capture done
+    guard (done == "done")
+
+def expect_load_failure using p of file giving error:
+    guard (file /= "") # TODO: forces (file :: String)
+    send "load ${scripts.path}/$file.et" to p
+    expect /load-([a-z-]+) ([a-z-]+).*/ from p capture done, msg
+    guard (done == "failed")
+    guard (msg == error)
+
 test Parser:
-    spawn as p 
-    with p:
-        send "load non-existing-file.et"
-        expect /load-failed file-not-found .*/
-
-        send "load ${scripts.path}/indent.et"
-        expect /load-done/
-
-        send "load ${scripts.path}/function.et"
-        expect /load-done/
-
-        send "load ${scripts.path}/function-fail.et"
-        expect /load-failed parse-error/
-
-        send "load ${scripts.path}/tags.et"
-        expect /load-done/
+    spawn as p
+    expect_load_failure using p of "non-existing-file" giving "file-not-found"
+    expect_load_success using p of "indent"
+    expect_load_success using p of "function"
+    expect_load_failure using p of "function-fail" giving "parse-error"
+    expect_load_success using p of "tags"
