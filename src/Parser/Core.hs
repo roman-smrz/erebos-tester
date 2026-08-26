@@ -4,7 +4,9 @@ import Control.Applicative
 import Control.Arrow
 import Control.Monad
 import Control.Monad.State
+import Control.Monad.Writer
 
+import Data.List
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
@@ -23,6 +25,7 @@ import Script.Expr
 import Script.Expr.Class
 import Script.Module
 import Test
+import Util
 
 newtype TestParser a = TestParser (StateT TestParserState (ParsecT CustomTestError TestStream IO) a)
     deriving
@@ -139,24 +142,34 @@ lookupScalarVarExpr off sline name = do
         stype -> return $ SomeExpr $ DynVariable stype sline fqn
 
 
-resolveKnownTypeVars :: SomeExprType -> TestParser SomeExprType
-resolveKnownTypeVars stype = case stype of
-    ExprTypePrim {} -> return stype
-    ExprTypeConstr1 {} -> return stype
-    ExprTypeVar tvar -> do
-        gets (M.lookup tvar . testTypeUnif) >>= \case
-            Just stype' -> resolveKnownTypeVars stype'
-            Nothing -> return stype
-    ExprTypeFunction args body -> ExprTypeFunction <$> resolveKnownTypeVars args <*> resolveKnownTypeVars body
-    ExprTypeArguments args -> ExprTypeArguments <$> mapM (\(SomeArgumentType a t) -> SomeArgumentType a <$> resolveKnownTypeVars t) args
-    ExprTypeApp ctor params -> do
-        ctor' <- resolveKnownTypeVars ctor
-        params' <- mapM resolveKnownTypeVars params
-        return $ case ( ctor', params' ) of
-            ( ExprTypeConstr1 (Proxy :: Proxy c'), [ ExprTypePrim (Proxy :: Proxy p') ] )
-                -> ExprTypePrim (Proxy :: Proxy (c' p'))
-            _ -> ExprTypeApp ctor' params'
-    ExprTypeForall tvar inner -> ExprTypeForall tvar <$> resolveKnownTypeVars inner
+resolveKnownTypeVars :: SomeExprType -> TestParser ( SomeExprType, [ TypeVar ] )
+resolveKnownTypeVars = fmap (fmap (uniq . sort)) . runWriterT . go
+    where
+      go stype = case stype of
+        ExprTypePrim {} -> return stype
+        ExprTypeConstr1 {} -> return stype
+        ExprTypeVar tvar -> do
+            gets (M.lookup tvar . testTypeUnif) >>= \case
+                Just stype' -> go stype'
+                Nothing -> tell [ tvar ] >> return stype
+        ExprTypeFunction args body -> ExprTypeFunction <$> go args <*> go body
+        ExprTypeArguments args -> ExprTypeArguments <$> mapM (\(SomeArgumentType a t) -> SomeArgumentType a <$> go t) args
+        ExprTypeApp ctor params -> do
+            ctor' <- go ctor
+            params' <- mapM go params
+            return $ case ( ctor', params' ) of
+                ( ExprTypeConstr1 (Proxy :: Proxy c'), [ ExprTypePrim (Proxy :: Proxy p') ] )
+                    -> ExprTypePrim (Proxy :: Proxy (c' p'))
+                _ -> ExprTypeApp ctor' params'
+        ExprTypeForall tvar inner -> ExprTypeForall tvar <$> go inner
+
+typeClosure :: SomeExprType -> TestParser SomeExprType
+typeClosure stype = do
+    ( stype', freeVars ) <- resolveKnownTypeVars stype
+    return $ go freeVars stype'
+  where
+    go []       t = t
+    go (v : vs) t = ExprTypeForall v $ go vs t
 
 unify :: Int -> SomeExprType -> SomeExprType -> TestParser SomeExprType
 unify _ (ExprTypeVar aname) (ExprTypeVar bname) | aname == bname = do

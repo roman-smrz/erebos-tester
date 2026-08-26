@@ -102,13 +102,8 @@ parseDefinition href = label "symbol definition" $ do
     modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
     return def
   where
-    getInferredTypes atypes = forM atypes $ \( off, vname, tvar@(TypeVar tvarname) ) -> do
-        let err msg = do
-                registerParseError . FancyError off . S.singleton . ErrorFail $ T.unpack msg
-                return ( vname, SomeArgumentType OptionalArgument (ExprTypeForall (TypeVar "a") (ExprTypeVar (TypeVar "a"))) )
-        gets (M.lookup tvar . testTypeUnif) >>= \case
-            Just t -> return ( vname, SomeArgumentType RequiredArgument t )
-            Nothing -> err $ "ambiguous type for ‘" <> textVarName vname <> " : " <> tvarname <> "’"
+    getInferredTypes atypes = forM atypes $ \( _, vname, tvar ) -> do
+        ( vname, ) . SomeArgumentType OptionalArgument <$> typeClosure (ExprTypeVar tvar)
 
     replaceDynArgs :: forall a. Expr a -> TestParser (Expr a)
     replaceDynArgs expr = do

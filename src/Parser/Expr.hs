@@ -523,9 +523,9 @@ applyFunctionArguments args sexpr@(SomeExpr (expr :: Expr a))
                 unexpectedArguments unexpectedArgs
                 t <- fromMaybe (ExprTypeVar tvar) . M.lookup tvar <$> gets testTypeUnif
                 resolveKnownTypeVars res' >>= \case
-                    res''@(ExprTypePrim (Proxy :: Proxy r)) ->
+                    ( res''@(ExprTypePrim (Proxy :: Proxy r)), _ ) ->
                         return $ SomeExpr (ArgsApp used (ExposeFunType args' (TypeApp res'' t expr) :: Expr (FunctionType r)))
-                    r ->
+                    ( r, _ ) ->
                         return $ SomeExpr (ArgsApp used (ExposeFunType args' (TypeApp r t expr) :: Expr (FunctionType DynamicType)))
             _ -> do
                 unexpectedArguments args
@@ -537,7 +537,7 @@ applyFunctionArguments args sexpr@(SomeExpr (expr :: Expr a))
             ( used, ( _, unexpectedArgs ) ) <- unifyArguments args' args
             unexpectedArguments unexpectedArgs
             resolveKnownTypeVars res' >>= \case
-                ExprTypePrim (Proxy :: Proxy r)
+                ( ExprTypePrim (Proxy :: Proxy r), _ )
                     | Just (Refl :: a :~: FunctionType r) <- eqT
                     -> return $ SomeExpr (ArgsApp used expr)
                 _
