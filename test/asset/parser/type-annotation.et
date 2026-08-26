@@ -1,0 +1,6 @@
+def fun (a) and b:
+    let c = [ a : String, "x" ]
+    let d = [ b : String, "y" : String ]
+
+test Test:
+    let x = "" : String

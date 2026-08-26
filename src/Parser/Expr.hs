@@ -18,6 +18,8 @@ module Parser.Expr (
 
     functionArguments,
     applyFunctionArguments,
+
+    typeExpr,
 ) where
 
 import Control.Applicative (liftA2)
@@ -265,7 +267,7 @@ someExpr complexity = label "expression" $ do
         SimpleTerm -> join termSimple
         FunctionTerm -> join inner
   where
-    inner = makeExprParser termFunction table
+    inner = typeAnnotated $ makeExprParser termFunction table
 
     parens = between (symbol "(") (symbol ")")
 
@@ -409,6 +411,24 @@ someExpr complexity = label "expression" $ do
             region (const err) $
                 foldl1 (<|>) $ map (\(SomeBinOp op) -> tryop op (proxyOf e) (proxyOf f)) ops
 
+    typeAnnotated :: TestParser (TestParser SomeExpr) -> TestParser (TestParser SomeExpr)
+    typeAnnotated p = do
+        off <- stateOffset <$> getParserState
+        p' <- p
+        choice
+            [ do
+                -- colon starts a type annotation, except when at the end of line
+                void $ try $ (string ":" <* notFollowedBy operatorChar <* sc <* notFollowedBy eol)
+                stype <- typeExpr
+                return $ do
+                    se <- p'
+                    unifySomeExpr off stype se
+
+            , do
+                return p'
+            ]
+
+
 typedExpr :: forall a. ExprType a => TermComplexity -> TestParser (Expr a)
 typedExpr complexity = do
     off <- stateOffset <$> getParserState
@@ -535,3 +555,16 @@ applyFunctionArguments args sexpr@(SomeExpr (expr :: Expr a))
                 case kw of
                     Just (ArgumentKeyword tkw) -> "unexpected parameter with keyword ‘" <> tkw <> "’"
                     Nothing                    -> "unexpected parameter"
+
+
+typeExpr :: TestParser SomeExprType
+typeExpr = do
+    off <- stateOffset <$> getParserState
+    name <- constrName <?> "type constructor name"
+
+    case textVarName name of
+        "String" -> return $ ExprTypePrim @Text Proxy
+        _ -> do
+            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+                "type constructor not in scope: ‘" <> textVarName name <> "’"
+            ExprTypeVar <$> newTypeVar
