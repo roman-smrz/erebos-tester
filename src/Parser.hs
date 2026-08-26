@@ -80,11 +80,12 @@ parseDefinition href = label "symbol definition" $ do
     def@( name, expr ) <- localState $ do
         wsymbol "def"
         name <- varName
-        argsDecl <- functionArguments (\off _ -> return . ( off, )) varName mzero (\_ -> return . VarName)
-        atypes <- forM argsDecl $ \( off, vname :: VarName ) -> do
-            tvar <- newTypeVar
-            modify $ \s -> s { testVars = ( vname, ( LocalVarName vname, ExprTypeVar tvar )) : testVars s }
-            return ( off, vname, tvar )
+        argsDecl <- functionArguments (\off _ -> return . ( off, ))
+            (typeAnnotated varName) mzero (\_ -> return . (, Nothing) . VarName)
+        atypes <- forM argsDecl $ \( off, ( vname :: VarName, mbstype :: Maybe SomeExprType ) ) -> do
+            stype <- maybe (ExprTypeVar <$> newTypeVar) return mbstype
+            modify $ \s -> s { testVars = ( vname, ( LocalVarName vname, stype )) : testVars s }
+            return ( off, vname, stype )
         SomeExpr expr <- choice
             [ do
                 osymbol ":"
@@ -102,8 +103,8 @@ parseDefinition href = label "symbol definition" $ do
     modify $ \s -> s { testVars = ( name, ( GlobalVarName (testCurrentModuleName s) name, someExprType expr )) : testVars s }
     return def
   where
-    getInferredTypes atypes = forM atypes $ \( _, vname, tvar ) -> do
-        ( vname, ) . SomeArgumentType OptionalArgument <$> typeClosure (ExprTypeVar tvar)
+    getInferredTypes atypes = forM atypes $ \( _, vname, stype ) -> do
+        ( vname, ) . SomeArgumentType OptionalArgument <$> typeClosure stype
 
     replaceDynArgs :: forall a. Expr a -> TestParser (Expr a)
     replaceDynArgs expr = do
@@ -119,6 +120,18 @@ parseDefinition href = label "symbol definition" $ do
                     = SomeExpr (Variable sline vname :: Expr v)
                 replaceArgs (SomeExpr e) = SomeExpr (go unif e)
             e -> e
+
+    typeAnnotated p = do
+        x <- p
+        choice
+            [ do
+                void $ osymbol ":"
+                stype <- typeExpr
+                return ( x, Just stype )
+
+            , do
+                return ( x, Nothing )
+            ]
 
 parseAsset :: Pos -> TestParser ( VarName, SomeExpr )
 parseAsset href = label "asset definition" $ do

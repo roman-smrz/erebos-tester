@@ -1,6 +1,8 @@
-def fun (a) and b:
-    let c = [ a : String, "x" ]
+def fun (a : String) and (b : String):
+    let c = [ a, "x" ]
     let d = [ b : String, "y" : String ]
+    guard (c /= d)
 
 test Test:
     let x = "" : String
+    fun "a" and "b"
