@@ -123,7 +123,14 @@ The script language is strictly typed without any implicit conversions,
 although types can not be (as of now) declared explicitly and are always inferred.
 Each expression has specific concrete type, polymorphic types are not supported (yet).
 
-#### integer
+Generally, types of expressions should be inferred, but they can also be given
+explicitly to any (sub)expression using the `:` notation:
+```
+let x = 1 : Integer
+let y = (2 : Integer) + (x : Integer)
+```
+
+#### `Integer`
 
 Integer numbers. Entered as decimal literals and used in arithmetic expressions:
 ```
@@ -132,7 +139,7 @@ let y = 3
 let z = x * 2 + y
 ```
 
-#### number
+#### `Number`
 
 Arbitrary-precision numbers. Entered as literals with decimal point or percentage and used in arithmetic expressions:
 ```
@@ -141,7 +148,7 @@ let y = 34%
 let z = x * 2.0 + y
 ```
 
-#### string
+#### `String`
 
 String literals are enclosed in double quotes (`"`),
 using backslash to escape special characters (`"`, `\` and `$`)
@@ -164,7 +171,7 @@ let b = 3
 let s = "abc ${2*a + b}"  # = "abc 7"
 ```
 
-#### regex
+#### `Regex`
 
 Regular expression literals are enclosed in slash characters (`/`):
 ```
@@ -180,16 +187,16 @@ let re1 = /./
 let re2 = /$str$re1/ # match '.' followed by any character
 ```
 
-#### boolean
+#### `Bool`
 
 Result of comparison operators `==` and `/=`.
 Values are `True` and `False`.
 
-#### network
+#### `Network`
 
 Represents network/subnet, created by `subnet` command and used by `subnet`, `node`, `spawn` and network configuration commands.
 
-#### node
+#### `Node`
 
 Represents network node, created by `node` command or implicitly by `spawn`,
 and used by `spawn` or network configuration commands.
@@ -203,9 +210,9 @@ Members:
 : String representation of the node primary IP address.
 
 `network`
-: The network which the node belogs to.
+: The network which the node belongs to.
 
-#### process
+#### `Process`
 
 Represents running process. Created by `spawn`, used by `send` and `expect` commands.
 
@@ -217,7 +224,7 @@ Members:
 `pid`
 : PID of the corresponding system process, `0` if there is none.
 
-#### asset
+#### `Asset`
 
 Represents an asset (file or directory), which can be used during test execution.
 
@@ -236,9 +243,9 @@ Type representing unix signals sent to processes. Values are `SIGINT`, `SIGTERM`
 
 #### list
 
-Lists are written using bracket notation:
+Lists are written using bracket notation, and brackets are also used to express the type:
 ```
-let numbers = [1, 2, 4]
+let numbers = [1, 2, 4] : [Integer]
 ```
 
 List elements can be of any type, but all elements of a particular list must have the same type.
@@ -472,6 +479,12 @@ When defining a function, the unnamed parameter, if any, must be enclosed in
 parentheses:
 ```
 def twice (x) = 2 * x
+```
+
+Type of a given parameter can be also given explicitly using the `:` notation:
+```
+def say (what : String) to (p : Process):
+    send what to p
 ```
 
 ### Modules, exports and imports
