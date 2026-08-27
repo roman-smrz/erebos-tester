@@ -8,6 +8,7 @@ module Script.Expr (
 
     FunctionType, DynamicType,
     ExprType(..), SomeExpr(..),
+    SomePrimType(..),
     TypeVar(..), SomeExprType(..), someExprType, textSomeExprType,
     renameTypeVar, renameVarInType,
 
@@ -293,6 +294,8 @@ instance ExprType DynamicType where
 
 data SomeExpr = forall a. ExprType a => SomeExpr (Expr a)
 
+data SomePrimType = forall a. ExprType a => SomePrimType (Proxy a)
+
 newtype TypeVar = TypeVar Text
     deriving (Eq, Ord)
 
@@ -569,7 +572,7 @@ data Regex = RegexCompiled Text RE.Regex
            | RegexString Text
 
 instance ExprType Regex where
-    textExprType _ = T.pack "regex"
+    textExprType _ = T.pack "Regex"
     textExprValue _ = T.pack "<regex>"
 
     exprExpansionConvFrom = listToMaybe $ catMaybes

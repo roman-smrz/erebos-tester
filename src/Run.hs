@@ -6,7 +6,7 @@ module Run (
     runTest,
 
     LoadedModules(..),
-    loadModules,
+    loadModules',
     evalGlobalDefs,
 
     TestFilter(..),
@@ -204,9 +204,9 @@ data LoadedModules = LoadedModules
     , lmGlobalDefs :: GlobalDefs
     }
 
-loadModules :: [ ( FilePath, Maybe Text ) ] -> IO (Either CustomTestError LoadedModules)
-loadModules files = do
-    parseTestFiles (map fst files) >>= \case
+loadModules' :: [ SomePrimType ] -> [ ( FilePath, Maybe Text ) ] -> IO (Either CustomTestError LoadedModules)
+loadModules' builtinTypes files = do
+    parseTestFiles builtinTypes (map fst files) >>= \case
         Right ( modules, allModules ) -> return $ do
             lmModules <- forM (zip files modules) $ \( ( path, tsel ), m ) -> do
                 tests <- case tsel of

@@ -30,6 +30,10 @@ data Test = Test
     , testSteps :: Expr (TestStep ())
     }
 
+instance ExprType Test where
+    textExprType _ = "Test"
+    textExprValue _ = "<test>"
+
 data Tag = Tag ModuleName VarName
     deriving (Eq)
 

@@ -561,10 +561,4 @@ typeExpr :: TestParser SomeExprType
 typeExpr = do
     off <- stateOffset <$> getParserState
     name <- constrName <?> "type constructor name"
-
-    case textVarName name of
-        "String" -> return $ ExprTypePrim @Text Proxy
-        _ -> do
-            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
-                "type constructor not in scope: ‘" <> textVarName name <> "’"
-            ExprTypeVar <$> newTypeVar
+    lookupType off name

@@ -22,7 +22,7 @@ import Text.Megaparsec.Pos
 import Config
 import Output
 import Parser
-import Run
+import Run.Builtins
 import Script.Expr
 import Test
 

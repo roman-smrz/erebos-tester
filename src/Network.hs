@@ -101,11 +101,11 @@ instance HasNetns Network where getNetns = netNetns
 instance HasNetns Node where getNetns = nodeNetns
 
 instance ExprType Network where
-    textExprType _ = T.pack "network"
+    textExprType _ = T.pack "Network"
     textExprValue n = "<network:" <> textNetworkName (netPrefix n) <> ">"
 
 instance ExprType Node where
-    textExprType _ = T.pack "node"
+    textExprType _ = T.pack "Node"
     textExprValue n = T.pack "<node:" <> textNodeName (nodeName n) <> ">"
 
     recordMembers = map (first T.pack)

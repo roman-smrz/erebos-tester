@@ -66,7 +66,7 @@ instance Eq Process where
     (==) = (==) `on` procStdin
 
 instance ExprType Process where
-    textExprType _ = T.pack "proc"
+    textExprType _ = T.pack "Process"
     textExprValue p = "<process:" <> textProcName (procName p) <> "#" <> textProcId (procId p) <> ">"
 
     recordMembers = map (first T.pack)

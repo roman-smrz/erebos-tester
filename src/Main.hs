@@ -22,7 +22,7 @@ import Config
 import Output
 import Parser.Core
 import Process
-import Run
+import Run.Builtins
 import TestMode
 import Version
 

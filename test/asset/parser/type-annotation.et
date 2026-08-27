@@ -1,8 +1,14 @@
-def fun (a : String) and (b : String):
+def fun (a : String) and (b : Integer) proc (p : Process):
     let c = [ a, "x" ]
-    let d = [ b : String, "y" : String ]
+    let d = [ a ]
+    let e = [ b : Integer, 43 : Integer ]
     guard (c /= d)
+    guard (e == e)
 
 test Test:
     let x = "" : String
-    fun "a" and "b"
+    let y = (2 : Integer)
+    let z = (2 : Integer) + (y : Integer) : Integer
+    let re = /xyz/ : Regex
+    spawn as p
+    fun "a" and ((z) : Integer) proc (p : Process)

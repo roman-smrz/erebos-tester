@@ -51,6 +51,7 @@ executable erebos-tester
         Process
         Process.Signal
         Run
+        Run.Builtins
         Run.Monad
         Sandbox
         Script.Expr

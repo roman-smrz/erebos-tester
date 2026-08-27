@@ -221,23 +221,24 @@ parseTestModule absPath = do
     eof
     return Module {..}
 
-parseTestFiles :: [ FilePath ] -> IO (Either CustomTestError ( [ Module ], [ Module ] ))
-parseTestFiles paths = do
+parseTestFiles :: [ SomePrimType ] -> [ FilePath ] -> IO (Either CustomTestError ( [ Module ], [ Module ] ))
+parseTestFiles builtinTypes paths = do
     parsedModules <- newIORef []
     runExceptT $ do
         requestedModules <- reverse <$> foldM (go parsedModules) [] paths
         allModules <- map snd <$> liftIO (readIORef parsedModules)
         return ( requestedModules, allModules )
   where
+    builtinTypes' = map (\(SomePrimType p) -> ( VarName (textExprType p), ExprTypePrim p )) builtinTypes
     go parsedModules res path = do
-        liftIO (parseTestFile parsedModules Nothing path) >>= \case
+        liftIO (parseTestFile builtinTypes' parsedModules Nothing path) >>= \case
             Left err -> do
                 throwError err
             Right cur -> do
                 return $ cur : res
 
-parseTestFile :: IORef [ ( FilePath, Module ) ] -> Maybe ModuleName -> FilePath -> IO (Either CustomTestError Module)
-parseTestFile parsedModules mbModuleName path = do
+parseTestFile :: [ ( VarName, SomeExprType ) ] -> IORef [ ( FilePath, Module ) ] -> Maybe ModuleName -> FilePath -> IO (Either CustomTestError Module)
+parseTestFile builtinTypes parsedModules mbModuleName path = do
     absPath <- makeAbsolute path
     (lookup absPath <$> readIORef parsedModules) >>= \case
         Just found -> return $ Right found
@@ -247,13 +248,14 @@ parseTestFile parsedModules mbModuleName path = do
                     , testVars = concat
                         [ map (\(( mname, name ), value ) -> ( name, ( GlobalVarName mname name, someExprType value ))) $ M.toList builtins
                         ]
+                    , testTypeVars = builtinTypes
                     , testContext = SomeExpr (Undefined "void" :: Expr Void)
                     , testNextTypeVar = 0
                     , testTypeUnif = M.empty
                     , testCurrentModuleName = fromMaybe (error "current module name should be set at the beginning of parseTestModule") mbModuleName
                     , testParseModule = \(ModuleName current) mname@(ModuleName imported) -> do
                         let projectRoot = iterate takeDirectory absPath !! length current
-                        parseTestFile parsedModules (Just mname) $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
+                        parseTestFile builtinTypes parsedModules (Just mname) $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
                     }
             mbContent <- (Just <$> TL.readFile path) `catchIOError` \e ->
                 if isDoesNotExistError e then return Nothing else ioError e

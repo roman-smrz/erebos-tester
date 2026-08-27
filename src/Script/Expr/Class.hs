@@ -57,7 +57,7 @@ instance ExprType () where
     textExprValue () = "()"
 
 instance ExprType Integer where
-    textExprType _ = T.pack "integer"
+    textExprType _ = T.pack "Integer"
     textExprValue x = T.pack (show x)
 
     exprExpansionConvTo = listToMaybe $ catMaybes
@@ -67,7 +67,7 @@ instance ExprType Integer where
     exprEnumerator _ = Just $ ExprEnumerator enumFromTo enumFromThenTo
 
 instance ExprType Scientific where
-    textExprType _ = T.pack "number"
+    textExprType _ = T.pack "Number"
     textExprValue x = T.pack (show x)
 
     exprExpansionConvTo = listToMaybe $ catMaybes
@@ -75,16 +75,16 @@ instance ExprType Scientific where
         ]
 
 instance ExprType Bool where
-    textExprType _ = T.pack "bool"
-    textExprValue True = T.pack "true"
-    textExprValue False = T.pack "false"
+    textExprType _ = T.pack "Bool"
+    textExprValue True = T.pack "True"
+    textExprValue False = T.pack "False"
 
 instance ExprType Text where
-    textExprType _ = T.pack "string"
+    textExprType _ = T.pack "String"
     textExprValue x = T.pack (show x)
 
 instance ExprType Void where
-    textExprType _ = T.pack "void"
+    textExprType _ = T.pack "Void"
     textExprValue _ = T.pack "<void>"
 
 instance ExprType a => ExprType [ a ] where

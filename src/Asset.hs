@@ -19,7 +19,7 @@ textAssetPath :: AssetPath -> Text
 textAssetPath (AssetPath path) = T.pack path
 
 instance ExprType Asset where
-    textExprType _ = "asset"
+    textExprType _ = "Asset"
     textExprValue asset = "asset:" <> textAssetPath (assetPath asset)
 
     recordMembers =

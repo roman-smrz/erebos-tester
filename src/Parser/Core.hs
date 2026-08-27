@@ -95,6 +95,7 @@ data Toplevel
 data TestParserState = TestParserState
     { testSourcePath :: FilePath
     , testVars :: [ ( VarName, ( FqVarName, SomeExprType )) ]
+    , testTypeVars :: [ ( VarName, SomeExprType ) ]
     , testContext :: SomeExpr
     , testNextTypeVar :: Int
     , testTypeUnif :: Map TypeVar SomeExprType
@@ -140,6 +141,15 @@ lookupScalarVarExpr off sline name = do
         ExprTypeFunction args (ExprTypePrim (pa :: Proxy a)) -> do
             SomeExpr <$> unifyExpr off pa (FunVariable args sline fqn :: Expr (FunctionType a))
         stype -> return $ SomeExpr $ DynVariable stype sline fqn
+
+lookupType :: Int -> VarName -> TestParser SomeExprType
+lookupType off name = do
+    gets (lookup name . testTypeVars) >>= \case
+        Nothing -> do
+            registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $
+                "type not in scope: ‘" <> textVarName name <> "’"
+            return $ ExprTypeVar (TypeVar $ textVarName name)
+        Just x -> return x
 
 
 resolveKnownTypeVars :: SomeExprType -> TestParser ( SomeExprType, [ TypeVar ] )
