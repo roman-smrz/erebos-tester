@@ -560,5 +560,12 @@ applyFunctionArguments args sexpr@(SomeExpr (expr :: Expr a))
 typeExpr :: TestParser SomeExprType
 typeExpr = do
     off <- stateOffset <$> getParserState
-    name <- constrName <?> "type constructor name"
-    lookupType off name
+    choice
+        [ do
+            name <- constrName <?> "type constructor name"
+            lookupType off name
+        , do
+            between (symbol "[") (symbol "]") $ do
+                inner <- typeExpr
+                return $ ExprTypeApp (ExprTypeConstr1 (Proxy :: Proxy [])) [ inner ]
+        ]

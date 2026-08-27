@@ -1,7 +1,8 @@
 def fun (a : String) and (b : Integer) proc (p : Process):
-    let c = [ a, "x" ]
+    let c = [ a, "x" ] : [ String ]
     let d = [ a ]
-    let e = [ b : Integer, 43 : Integer ]
+    let e = [ b : Integer, 43 : Integer ]:[Integer]
+    let f = [[ c, ["y"]]] : [[[ String ] ] ]
     guard (c /= d)
     guard (e == e)
 
