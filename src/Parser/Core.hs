@@ -329,11 +329,9 @@ evalRemainingArguments off (FunctionArguments remaining) expr = do
         arg@( _, SomeArgumentType RequiredArgument _ ) -> err $ "missing " <> showType arg <> " argument"
         ( _, SomeArgumentType OptionalArgument _ ) -> return Nothing
         ( kw, SomeArgumentType (ExprDefault def) _ ) -> return $ Just ( kw, def )
-        ( kw, SomeArgumentType ContextDefault (ExprTypePrim atype) ) -> do
-            SomeExpr context <- gets testContext
-            context' <- unifyExpr off atype context
-            return $ Just ( kw, SomeExpr context' )
-        ( _, SomeArgumentType ContextDefault _ ) -> err "non-primitive context requirement"
+        ( kw, SomeArgumentType ContextDefault atype ) -> do
+            context <- unifySomeExpr off atype =<< gets testContext
+            return $ Just ( kw, context )
     sline <- getSourceLine
     return (FunctionEval sline $ ArgsApp (FunctionArguments $ M.fromAscList defaults) expr)
 
