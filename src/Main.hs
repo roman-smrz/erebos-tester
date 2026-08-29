@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Control.Monad
+import Control.Monad.Reader
 
 import Data.Char
 import Data.Maybe
@@ -24,6 +25,7 @@ import Parser.Core
 import Process
 import Run.Builtins
 import TestMode
+import TextFormat
 import Version
 
 data CmdlineOptions = CmdlineOptions
@@ -215,12 +217,25 @@ main = do
 
     Report {..} <- runTests out topts lmGlobalDefs tests
 
-    when (optReport opts) $ do
-        putStrLn $ "Total:  " <> show reportTotalCount
-        putStrLn $ "Passed: " <> show reportPassedCount
-        putStrLn $ "Failed: " <> show reportFailedCount
-        forM_ reportFailedList $ \tname -> do
-            putStrLn $ T.unpack $ textTestName tname
+    when (optReport opts) $ flip runReaderT out $ do
+        outLineF OutputGlobalInfo Nothing $ "Total:  " <> plainText (T.pack (show reportTotalCount))
+        outLineF OutputGlobalInfo Nothing $ mconcat
+            [ "Passed: "
+            , withStyle (if (reportPassedCount > 0) then setForegroundColor Green noStyle else noStyle) $
+                plainText $ T.pack $ show reportPassedCount
+            ]
+        outLineF OutputGlobalInfo Nothing $ mconcat
+            [ "Failed: "
+            , withStyle (if (reportFailedCount > 0) then setForegroundColor Red noStyle else noStyle) $
+                plainText (T.pack (show reportFailedCount))
+            ]
+        when (reportFailedCount > 0) $ do
+            outLine OutputGlobalInfo Nothing ""
+            outLineF OutputGlobalInfo Nothing $ withStyle (setForegroundColor BrightRed noStyle) $ "Failing tests:"
+            forM_ reportFailedList $ \tname -> do
+                outLineF OutputGlobalInfo Nothing $
+                    withStyle (setForegroundColor Red noStyle) $
+                    plainText $ textTestName tname
 
     when (reportFailedCount > 0) exitFailure
 
