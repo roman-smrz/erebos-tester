@@ -4,6 +4,7 @@ module Output (
     startOutput,
     resetOutputTime,
     outLine,
+    outLineF,
     outPromptGetLine,
     outPromptGetLineCompletion,
 ) where
@@ -26,6 +27,10 @@ import System.IO
 import Text.Printf
 
 import Script.Expr
+
+import TextFormat
+import TextFormat.Ansi
+
 
 data Output = Output
     { outState :: MVar OutputState
@@ -161,7 +166,10 @@ ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
 ioWithOutput act = liftIO . act =<< getOutput
 
 outLine :: MonadOutput m => OutputType -> Maybe Text -> Text -> m ()
-outLine otype prompt line = ioWithOutput $ \out ->
+outLine otype prompt line = outLineF otype prompt (plainText line)
+
+outLineF :: MonadOutput m => OutputType -> Maybe Text -> FormattedText -> m ()
+outLineF otype prompt line = ioWithOutput $ \out ->
     case outStyle (outConfig out) of
         OutputStyleQuiet
             | printWhenQuiet otype -> normalOutput out
@@ -173,7 +181,7 @@ outLine otype prompt line = ioWithOutput $ \out ->
         stime <- readMVar (outStartedAt out)
         nsecs <- toNanoSecs . (`diffTimeSpec` stime) <$> getTime Monotonic
         withMVar (outState out) $ \st -> do
-            forM_ (normalOutputLines otype line) $ \line' -> do
+            forM_ (normalOutputLines otype $ renderLine out line) $ \line' -> do
                 outPrint st $ TL.fromChunks $ concat
                     [ if includeTestTime otype
                         then [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
@@ -188,11 +196,16 @@ outLine otype prompt line = ioWithOutput $ \out ->
                         else []
                     ]
 
+    renderLine out
+        | outUseColor (outConfig out) = fromAnsiText . renderAnsiText
+        | otherwise                   = renderPlainText
+
     testOutput out = do
+        let pline = renderPlainText line
         withMVar (outState out) $ \st -> do
             case otype of
-                OutputTestRaw -> outPrint st $ TL.fromStrict line
-                _ -> forM_ (testOutputLines otype (maybe "-" id prompt) line) $ outPrint st . TL.fromStrict
+                OutputTestRaw -> outPrint st $ TL.fromStrict pline
+                _ -> forM_ (testOutputLines otype (maybe "-" id prompt) pline) $ outPrint st . TL.fromStrict
 
 
 normalOutputLines :: OutputType -> Text -> [ Text ]
