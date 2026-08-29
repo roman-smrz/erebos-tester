@@ -218,22 +218,22 @@ main = do
     Report {..} <- runTests out topts lmGlobalDefs tests
 
     when (optReport opts) $ flip runReaderT out $ do
-        outLineF OutputGlobalInfo Nothing $ "Total:  " <> plainText (T.pack (show reportTotalCount))
-        outLineF OutputGlobalInfo Nothing $ mconcat
+        outLineF OutputGlobalSummary Nothing $ "Total:  " <> plainText (T.pack (show reportTotalCount))
+        outLineF OutputGlobalSummary Nothing $ mconcat
             [ "Passed: "
             , withStyle (if (reportPassedCount > 0) then setForegroundColor Green noStyle else noStyle) $
                 plainText $ T.pack $ show reportPassedCount
             ]
-        outLineF OutputGlobalInfo Nothing $ mconcat
+        outLineF OutputGlobalSummary Nothing $ mconcat
             [ "Failed: "
             , withStyle (if (reportFailedCount > 0) then setForegroundColor Red noStyle else noStyle) $
                 plainText (T.pack (show reportFailedCount))
             ]
         when (reportFailedCount > 0) $ do
-            outLine OutputGlobalInfo Nothing ""
-            outLineF OutputGlobalInfo Nothing $ withStyle (setForegroundColor BrightRed noStyle) $ "Failing tests:"
+            outLine OutputGlobalSummary Nothing ""
+            outLineF OutputGlobalSummary Nothing $ withStyle (setForegroundColor BrightRed noStyle) $ "Failing tests:"
             forM_ reportFailedList $ \tname -> do
-                outLineF OutputGlobalInfo Nothing $
+                outLineF OutputGlobalSummary Nothing $
                     withStyle (setForegroundColor Red noStyle) $
                     plainText $ textTestName tname
 

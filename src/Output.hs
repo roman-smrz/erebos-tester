@@ -57,6 +57,7 @@ data OutputStyle
 data OutputType
     = OutputGlobalInfo
     | OutputGlobalError
+    | OutputGlobalSummary
     | OutputChildStdout
     | OutputChildStderr
     | OutputChildStdin
@@ -92,6 +93,7 @@ outColor :: OutputType -> Text
 outColor = \case
     OutputGlobalInfo -> "0"
     OutputGlobalError -> "31"
+    OutputGlobalSummary -> "0"
     OutputChildStdout -> "0"
     OutputChildStderr -> "31"
     OutputChildStdin -> "0"
@@ -109,6 +111,7 @@ outSign :: OutputType -> Text
 outSign = \case
     OutputGlobalInfo -> ""
     OutputGlobalError -> ""
+    OutputGlobalSummary -> ""
     OutputChildStdout -> " "
     OutputChildStderr -> "!"
     OutputChildStdin -> T.empty
@@ -126,6 +129,7 @@ outArr :: OutputType -> Text
 outArr = \case
     OutputGlobalInfo -> ""
     OutputGlobalError -> ""
+    OutputGlobalSummary -> ""
     OutputChildStdin -> "<"
     _ -> ">"
 
@@ -133,6 +137,7 @@ outTestLabel :: OutputType -> Text
 outTestLabel = \case
     OutputGlobalInfo -> "global-info"
     OutputGlobalError -> "global-error"
+    OutputGlobalSummary -> "global-summary"
     OutputChildStdout -> "child-stdout"
     OutputChildStderr -> "child-stderr"
     OutputChildStdin -> "child-stdin"
@@ -149,6 +154,7 @@ outTestLabel = \case
 printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
     OutputGlobalError -> True
+    OutputGlobalSummary -> True
     OutputChildStderr -> True
     OutputChildFail -> True
     OutputMatchFail {} -> True
@@ -160,6 +166,7 @@ includeTestTime :: OutputType -> Bool
 includeTestTime = \case
     OutputGlobalInfo -> False
     OutputGlobalError -> False
+    OutputGlobalSummary -> False
     _ -> True
 
 ioWithOutput :: MonadOutput m => (Output -> IO a) -> m a
