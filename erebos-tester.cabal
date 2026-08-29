@@ -63,6 +63,9 @@ executable erebos-tester
         Test
         Test.Builtins
         TestMode
+        TextFormat
+        TextFormat.Ansi
+        TextFormat.Types
         Util
         Version
         Version.Git
