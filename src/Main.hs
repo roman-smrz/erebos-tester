@@ -21,6 +21,7 @@ import System.Posix.Terminal
 import System.Posix.Types
 
 import Config
+import JUnit
 import Output
 import Parser.Core
 import Process
@@ -34,6 +35,7 @@ data CmdlineOptions = CmdlineOptions
     , optExclude :: [ Text ]
     , optVerbose :: Bool
     , optReport :: Bool
+    , optJUnitReport :: Maybe FilePath
     , optColor :: Maybe Bool
     , optShowHelp :: Bool
     , optShowVersion :: Bool
@@ -47,6 +49,7 @@ defaultCmdlineOptions = CmdlineOptions
     , optExclude = []
     , optVerbose = False
     , optReport = False
+    , optJUnitReport = Nothing
     , optColor = Nothing
     , optShowHelp = False
     , optShowVersion = False
@@ -103,6 +106,9 @@ options =
     , Option [] [ "report" ]
         (NoArg $ \opts -> opts { optReport = True, optTest = (optTest opts) { optKeepGoing = True } })
         "print summary of passing and failing tests (implies --keep-going)"
+    , Option [] [ "junit-report" ]
+        (ReqArg (\str opts -> opts { optJUnitReport = Just str, optTest = (optTest opts) { optKeepGoing = True } }) "<path>")
+        "write test report in JUnit XML format to <path> (implies --keep-going)"
     , Option [] ["wait"]
         (NoArg $ to $ \opts -> opts { optWait = True })
         "wait at the end of each test"
@@ -216,7 +222,7 @@ main = do
             { optTcpdump = tcpdump
             }
 
-    Report {..} <- runTests out topts lmGlobalDefs tests
+    report@Report {..} <- runTests out topts lmGlobalDefs tests
 
     when (optReport opts) $ flip runReaderT out $ do
         outLineF OutputGlobalSummary Nothing $ "Total tests:  " <> plainText (T.pack (show reportTotalCount))
@@ -240,6 +246,8 @@ main = do
                 outLineF OutputGlobalSummary Nothing $
                     withStyle (setForegroundColor Red noStyle) $
                     plainText $ textTestName tname
+
+    forM_ (optJUnitReport opts) $ \path -> writeJUnitReport path report
 
     when (reportFailedCount > 0) exitFailure
 

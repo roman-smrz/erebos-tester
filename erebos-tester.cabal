@@ -39,6 +39,7 @@ executable erebos-tester
         Asset
         Config
         GDB
+        JUnit
         Network
         Network.Ip
         Output
