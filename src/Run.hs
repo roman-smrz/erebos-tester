@@ -15,6 +15,7 @@ module Run (
 ) where
 
 import Control.Applicative
+import Control.Arrow
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Monad
@@ -22,7 +23,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.Writer
 
-import Data.Bifunctor
+import Data.Char
 import Data.Either
 import Data.List
 import Data.Map qualified as M
@@ -252,24 +253,51 @@ testFilterFromConfig Config {..} = TestFilter
 filterTests :: TestFilter -> LoadedModules -> Either CustomTestError [ Test ]
 filterTests TestFilter {..} LoadedModules {..} = do
     let allTests = concatMap moduleTests lmModules
-    let evalTerm :: Text -> Either CustomTestError (Either Text Tag)
-        evalTerm t =
-            case find ((VarName t ==) . snd . fst) $ M.toList lmGlobalDefs of
-                Just ( _, SomeExpr (expr :: Expr etype))
-                    | Just (Refl :: etype :~: Tag) <- eqT
-                    -> return $ Right $ runSimpleEval (eval expr) lmGlobalDefs []
-                Nothing
-                    | Just _ <- find ((t ==) . testNameBase . testName) allTests
-                    -> return $ Left t
-                _ ->
-                    throwError $ TestOrTagNotFound t Nothing
-    exclude <- partitionEithers <$> mapM evalTerm tfExclude
-    let matches ( tnames, tags ) test =
-            testNameBase (testName test) `elem` tnames || maybe False (any (`elem` tags)) (lookup (testName test) lmTags)
+    let evalTerm :: Text -> Either CustomTestError (Either TestName (Either Tag ModuleName))
+        evalTerm term =
+            case (init &&& last) $ T.splitOn "." term of
+                ( [], name ) | maybe False (isUpper . fst) (T.uncons name) ->
+                    case find ((VarName name ==) . snd . fst) $ M.toList lmGlobalDefs of
+                        Just ( _, SomeExpr (expr :: Expr etype) )
+                            | Just (Refl :: etype :~: Tag) <- eqT
+                            -> return $ Right $ Left $ runSimpleEval (eval expr) lmGlobalDefs []
+                        Nothing
+                            | Just t <- find ((name ==) . testNameBase . testName) allTests
+                            -> return $ Left $ testName t
+                        Nothing
+                            | mname <- ModuleName [ name ]
+                            , Just _ <- find ((mname ==) . moduleName) lmModules
+                            -> return $ Right $ Right mname
+                        _ ->
+                            throwError $ TestOrTagNotFound term Nothing
+                ( ms, name ) | maybe False (isUpper . fst) (T.uncons name) ->
+                    case find ((( ModuleName ms, VarName name ) ==) . fst) $ M.toList lmGlobalDefs of
+                        Just ( _, SomeExpr (expr :: Expr etype) )
+                            | Just (Refl :: etype :~: Tag) <- eqT
+                            -> return $ Right $ Left $ runSimpleEval (eval expr) lmGlobalDefs []
+                        Nothing
+                            | Just t <- find ((TestName (ModuleName ms) name ==) . testName) allTests
+                            -> return $ Left $ testName t
+                        Nothing
+                            | mname <- ModuleName $ ms ++ [ name ]
+                            , Just _ <- find ((mname ==) . moduleName) lmModules
+                            -> return $ Right $ Right mname
+                        _ ->
+                            throwError $ TestOrTagNotFound term Nothing
+                ( ms, name ) | mname <- ModuleName $ ms ++ [ name ] ->
+                    case find ((mname ==) . moduleName) lmModules of
+                        Just _ -> return $ Right $ Right mname
+                        _ -> throwError $ ModuleNotFound mname
+
+    exclude <- fmap partitionEithers . partitionEithers <$> mapM evalTerm tfExclude
+    let matches ( tnames, ( tags, modules ) ) test =
+            testName test `elem` tnames
+                || maybe False (any (`elem` tags)) (lookup (testName test) lmTags)
+                || testNameModule (testName test) `elem` modules
     filter (not . matches exclude) <$> case tfSelect of
         Nothing -> return allTests
         Just tnames -> do
-            selected <- partitionEithers <$> mapM evalTerm tnames
+            selected <- fmap partitionEithers . partitionEithers <$> mapM evalTerm tnames
             return $ filter (matches selected) allTests
 
 
