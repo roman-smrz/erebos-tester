@@ -8,6 +8,7 @@ import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
 
+import Text.Printf
 import Text.Read (readMaybe)
 
 import System.Console.GetOpt
@@ -218,20 +219,23 @@ main = do
     Report {..} <- runTests out topts lmGlobalDefs tests
 
     when (optReport opts) $ flip runReaderT out $ do
-        outLineF OutputGlobalSummary Nothing $ "Total:  " <> plainText (T.pack (show reportTotalCount))
+        outLineF OutputGlobalSummary Nothing $ "Total tests:  " <> plainText (T.pack (show reportTotalCount))
+        let ( mins, secs ) = (floor reportTotalTime :: Integer) `quotRem` 60
+            csecs = floor (reportTotalTime * 100) `rem` 100 :: Integer
+        outLineF OutputGlobalSummary Nothing $ "Total time:   " <> plainText (T.pack $ printf "%d:%02d.%02d" mins secs csecs)
         outLineF OutputGlobalSummary Nothing $ mconcat
-            [ "Passed: "
+            [ "Passed tests: "
             , withStyle (if (reportPassedCount > 0) then setForegroundColor Green noStyle else noStyle) $
                 plainText $ T.pack $ show reportPassedCount
             ]
         outLineF OutputGlobalSummary Nothing $ mconcat
-            [ "Failed: "
+            [ "Failed tests: "
             , withStyle (if (reportFailedCount > 0) then setForegroundColor Red noStyle else noStyle) $
                 plainText (T.pack (show reportFailedCount))
             ]
         when (reportFailedCount > 0) $ do
             outLine OutputGlobalSummary Nothing ""
-            outLineF OutputGlobalSummary Nothing $ withStyle (setForegroundColor BrightRed noStyle) $ "Failing tests:"
+            outLineF OutputGlobalSummary Nothing $ withStyle (setForegroundColor BrightRed noStyle) $ "Failed tests:"
             forM_ reportFailedList $ \tname -> do
                 outLineF OutputGlobalSummary Nothing $
                     withStyle (setForegroundColor Red noStyle) $

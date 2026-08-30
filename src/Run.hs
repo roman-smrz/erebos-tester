@@ -1,6 +1,6 @@
 module Run (
     module Run.Monad,
-    Report(..),
+    Report(..), SingleTestReport(..),
     TestName, textTestName,
     runTests,
     runTest,
@@ -67,19 +67,14 @@ data Report = Report
     , reportSkippedCount :: Int
     , reportFailedCount :: Int
     , reportFailedList :: [ TestName ]
+    , reportTotalTime :: Scientific
+    , reportTests :: [ SingleTestReport ]
     }
 
-reportPassed :: Report -> Report
-reportPassed r = r
-    { reportTotalCount = reportTotalCount r + 1
-    , reportPassedCount = reportPassedCount r + 1
-    }
-
-reportFailed :: TestName -> Report -> Report
-reportFailed tname r = r
-    { reportTotalCount = reportTotalCount r + 1
-    , reportFailedCount = reportFailedCount r + 1
-    , reportFailedList = tname : reportFailedList r
+data SingleTestReport = SingleTestReport
+    { reportTestName :: TestName
+    , reportTestFailed :: Maybe Failed
+    , reportTime :: Scientific
     }
 
 runTests :: Output -> TestOptions -> GlobalDefs -> [ Test ] -> IO Report
@@ -87,21 +82,34 @@ runTests out opts gdefs tests = do
     go $ concat $ replicate (optRepeat opts) tests
   where
     go (t : ts) = do
-        runTest out opts gdefs t >>= \case
-            True -> reportPassed <$> go ts
-            False -> reportFailed (testName t) <$> if
-                | optKeepGoing opts -> go ts
-                | otherwise -> go []
+        single <- runTest out opts gdefs t
+        let failed = isJust (reportTestFailed single)
+        r <- if
+            | failed && not (optKeepGoing opts)
+            -> go []
+            | otherwise
+            -> go ts
+        return Report
+            { reportTotalCount = 1 + reportTotalCount r
+            , reportPassedCount = (if failed then 0 else 1) + reportPassedCount r
+            , reportSkippedCount = reportSkippedCount r
+            , reportFailedCount = (if failed then 1 else 0) + reportFailedCount r
+            , reportFailedList = (if failed then (reportTestName single :) else id) $ reportFailedList r
+            , reportTotalTime = reportTime single + reportTotalTime r
+            , reportTests = single : reportTests r
+            }
     go [] = return Report
         { reportTotalCount = 0
         , reportPassedCount = 0
         , reportSkippedCount = 0
         , reportFailedCount = 0
         , reportFailedList = []
+        , reportTotalTime = 0
+        , reportTests = []
         }
 
 
-runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO Bool
+runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO SingleTestReport
 runTest out opts gdefs test = do
     let testDir = optTestDir opts </> T.unpack (textTestName $ testName test)
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
@@ -159,11 +167,11 @@ runTest out opts gdefs test = do
                         Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
-    resetOutputTime out
-    testRunResult <- newEmptyMVar
-
     flip runReaderT out $ do
         void $ outLine OutputGlobalInfo Nothing $ "Starting test ‘" <> textTestName (testName test) <> "’"
+
+    resetOutputTime out
+    testRunResult <- newEmptyMVar
 
     void $ forkOS $ do
         isolateFilesystem testDir >>= \case
@@ -178,6 +186,7 @@ runTest out opts gdefs test = do
                 putMVar testRunResult ( Left Failed, [] )
 
     ( res, [] ) <- takeMVar testRunResult
+    reportTime <- getElapsedTime out
 
     void $ installHandler processStatusChanged oldHandler Nothing
 
@@ -186,17 +195,18 @@ runTest out opts gdefs test = do
     [] <- readMVar procVar
 
     failed <- atomically $ readTVar (teFailed tenv)
-    fres <- case ( res, failed ) of
+    reportTestFailed <- case ( res, failed ) of
         ( Right (), Nothing ) -> do
             when (not $ optKeep opts) $ removeDirectoryRecursive testDir
-            return True
+            return Nothing
         _ -> do
             flip runReaderT out $ do
                 void $ outLine OutputGlobalError Nothing $ "Test ‘" <> textTestName (testName test) <> "’ failed."
-            return False
+            return $ either Just (const Nothing) res `mplus` failed
 
-    (optHookTestResult opts) (testName test) fres
-    return fres
+    (optHookTestResult opts) (testName test) (isNothing reportTestFailed)
+    let reportTestName = testName test
+    return SingleTestReport {..}
 
 
 data LoadedModules = LoadedModules

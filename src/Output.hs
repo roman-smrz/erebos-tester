@@ -3,6 +3,7 @@ module Output (
     MonadOutput(..),
     startOutput,
     resetOutputTime,
+    getElapsedTime,
     outLine,
     outLineF,
     outPromptGetLine,
@@ -14,6 +15,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 
+import Data.Scientific
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
@@ -88,6 +90,12 @@ startOutput outStyle outUseColor = do
 resetOutputTime :: Output -> IO ()
 resetOutputTime Output {..} = do
     modifyMVar_ outStartedAt . const $ getTime Monotonic
+
+getElapsedTime :: Output -> IO Scientific
+getElapsedTime Output {..} = do
+    stime <- readMVar outStartedAt
+    (/ 1000000000) . fromIntegral . toNanoSecs . (`diffTimeSpec` stime) <$> getTime Monotonic
+
 
 outColor :: OutputType -> Text
 outColor = \case
@@ -185,13 +193,12 @@ outLineF otype prompt line = ioWithOutput $ \out ->
         OutputStyleTest -> testOutput out
   where
     normalOutput out = do
-        stime <- readMVar (outStartedAt out)
-        nsecs <- toNanoSecs . (`diffTimeSpec` stime) <$> getTime Monotonic
+        secs <- getElapsedTime out
         withMVar (outState out) $ \st -> do
             forM_ (normalOutputLines otype $ renderLine out line) $ \line' -> do
                 outPrint st $ TL.fromChunks $ concat
                     [ if includeTestTime otype
-                        then [ T.pack $ printf "[% 2d.%03d] " (nsecs `quot` 1000000000) ((nsecs `quot` 1000000) `rem` 1000) ]
+                        then [ T.pack $ printf "[% 2d.%03d] " (floor secs :: Integer) (floor (secs * 1000) `rem` 1000 :: Integer) ]
                         else []
                     , if outUseColor (outConfig out)
                         then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
