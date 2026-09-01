@@ -95,8 +95,8 @@ parseArgument = choice
     , fmap ShellArgument <$> parseTextArgument
     ]
 
-parseArguments :: TestParser (Expr [ ShellArgument ])
-parseArguments = foldr (liftA2 (:)) (Pure []) <$> many parseArgument
+parseArguments :: TestParser (Expr ShellArguments)
+parseArguments = (ShellArguments <$>) . foldr (liftA2 (:)) (Pure []) <$> many parseArgument
 
 parseCommand :: TestParser (Expr ShellCommand)
 parseCommand = label "shell statement" $ do

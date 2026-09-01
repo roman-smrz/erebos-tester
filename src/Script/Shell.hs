@@ -3,7 +3,7 @@ module Script.Shell (
     ShellStatement(ShellStatement),
     ShellPipeline(ShellPipeline),
     ShellCommand(ShellCommand),
-    ShellArgument(..),
+    ShellArguments(..), ShellArgument(..),
     withShellProcess,
 ) where
 
@@ -62,9 +62,11 @@ data ShellPipeline = ShellPipeline
 
 data ShellCommand = ShellCommand
     { cmdCommand :: Text
-    , cmdExtArguments :: [ ShellArgument ]
+    , cmdExtArguments :: ShellArguments
     , cmdSourceLine :: SourceLine
     }
+
+newtype ShellArguments = ShellArguments { fromShellArguments :: [ ShellArgument ] }
 
 data ShellArgument
     = ShellArgument Text
@@ -73,7 +75,7 @@ data ShellArgument
     | ShellRedirectStderr Bool Text
 
 cmdArguments :: ShellCommand -> [ Text ]
-cmdArguments = catMaybes . map (\case ShellArgument x -> Just x; _ -> Nothing) . cmdExtArguments
+cmdArguments = catMaybes . map (\case ShellArgument x -> Just x; _ -> Nothing) . fromShellArguments . cmdExtArguments
 
 instance ExprType ShellScript where
     textExprType _ = T.pack "ShellScript"
@@ -90,6 +92,10 @@ instance ExprType ShellPipeline where
 instance ExprType ShellCommand where
     textExprType _ = T.pack "ShellCommand"
     textExprValue _ = "<shell-command>"
+
+instance ExprType ShellArguments where
+    textExprType _ = T.pack "ShellArguments"
+    textExprValue _ = "<shell-arguments>"
 
 instance ExprType ShellArgument where
     textExprType _ = T.pack "ShellArgument"
@@ -119,7 +125,7 @@ handledHandle (KeepHandle h) = h
 executeCommand :: ShellExecInfo -> ShellState -> HandleHandling -> HandleHandling -> HandleHandling -> ShellCommand -> TestRun ShellState
 executeCommand sei@ShellExecInfo {..} st pstdin pstdout pstderr scmd@ShellCommand {..} = do
     let args = cmdArguments scmd
-    ( pstdin', pstdout', pstderr' ) <- (\f -> foldM f ( pstdin, pstdout, pstderr ) cmdExtArguments) $ \cur@( cin, cout, cerr ) -> \case
+    ( pstdin', pstdout', pstderr' ) <- (\f -> foldM f ( pstdin, pstdout, pstderr ) (fromShellArguments cmdExtArguments)) $ \cur@( cin, cout, cerr ) -> \case
         ShellRedirectStdin path -> do
             closeIfRequested cin
             h <- liftIO $ openBinaryFile (nodeDir seiNode </> T.unpack path) ReadMode
