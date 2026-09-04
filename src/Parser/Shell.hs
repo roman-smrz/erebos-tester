@@ -92,11 +92,17 @@ parseRedirection = choice
 parseArgument :: TestParser (Expr ShellArgument)
 parseArgument = choice
     [ parseRedirection
+    , expressionExpansion "shell argument" <* sc
     , fmap ShellArgument <$> parseTextArgument
     ]
 
 parseArguments :: TestParser (Expr ShellArguments)
-parseArguments = (ShellArguments <$>) . foldr (liftA2 (:)) (Pure []) <$> many parseArgument
+parseArguments = do
+    arglists <- many $ choice
+        [ expressionExpansion "shell arguments" <* sc
+        , fmap (ShellArguments . (: [])) <$> parseArgument
+        ]
+    return $ fmap mconcat $ foldr (liftA2 (:)) (Pure []) $ arglists
 
 parseCommand :: TestParser (Expr ShellCommand)
 parseCommand = label "shell statement" $ do

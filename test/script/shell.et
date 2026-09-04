@@ -180,3 +180,20 @@ test ShellLogic:
         expect /run-test-result NegateNothing failed/
         expect /run-done 1 0 0 1/
         flush
+
+
+test ShellVariableExpansion:
+    spawn as p
+    with p:
+        send "load ${scripts.path}/expansion.et"
+        local:
+            expect /(load-.*)/ capture done
+            guard (done == "load-done")
+
+        send "run Test"
+        expect /child-stdout sh A some   string B 2 4.5 C/
+        expect /child-stdout sh D a   b c  d e f E/
+        expect /child-stdout sh F 1 2 3 4 5 G/
+        expect /run-test-result Test done/
+        expect /run-done 1 1 0 0/
+        flush

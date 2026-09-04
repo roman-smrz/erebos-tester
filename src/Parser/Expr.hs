@@ -14,6 +14,7 @@ module Parser.Expr (
     variable,
     constructor,
 
+    expressionExpansion,
     stringExpansion,
 
     functionArguments,

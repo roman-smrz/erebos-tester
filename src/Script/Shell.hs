@@ -15,8 +15,10 @@ import Control.Monad.IO.Class
 import Control.Monad.Reader
 
 import Data.Maybe
+import Data.Scientific
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Typeable
 
 import Foreign.C.Types
 import Foreign.Ptr
@@ -67,6 +69,7 @@ data ShellCommand = ShellCommand
     }
 
 newtype ShellArguments = ShellArguments { fromShellArguments :: [ ShellArgument ] }
+    deriving (Semigroup, Monoid)
 
 data ShellArgument
     = ShellArgument Text
@@ -97,9 +100,24 @@ instance ExprType ShellArguments where
     textExprType _ = T.pack "ShellArguments"
     textExprValue _ = "<shell-arguments>"
 
+    exprExpansionConvFrom = listToMaybe $ catMaybes
+        [ cast (ShellArguments . (: []) . ShellArgument)
+        , cast (ShellArguments . (: []) . ShellArgument . T.pack . show @Integer)
+        , cast (ShellArguments . (: []) . ShellArgument . T.pack . show @Scientific)
+        , cast (ShellArguments . map ShellArgument)
+        , cast (ShellArguments . map (ShellArgument . T.pack . show @Integer))
+        , cast (ShellArguments . map (ShellArgument . T.pack . show @Scientific))
+        ]
+
 instance ExprType ShellArgument where
     textExprType _ = T.pack "ShellArgument"
     textExprValue _ = "<shell-argument>"
+
+    exprExpansionConvFrom = listToMaybe $ catMaybes
+        [ cast (ShellArgument)
+        , cast (ShellArgument . T.pack . show @Integer)
+        , cast (ShellArgument . T.pack . show @Scientific)
+        ]
 
 
 data ShellExecInfo = ShellExecInfo
