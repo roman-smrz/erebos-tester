@@ -1,6 +1,6 @@
 module Asset (
     Asset(..),
-    AssetPath(..),
+    AssetPath(..), textAssetPath,
 ) where
 
 import Data.Text (Text)
@@ -27,7 +27,7 @@ instance ExprType Asset where
         ]
 
 instance ExprType AssetPath where
-    textExprType _ = "filepath"
+    textExprType _ = "Filepath"
     textExprValue = ("filepath:" <>) . textAssetPath
 
     exprExpansionConvTo = cast textAssetPath

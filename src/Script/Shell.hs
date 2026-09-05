@@ -34,6 +34,7 @@ import System.Posix.Process
 import System.Posix.Types
 import System.Process hiding (ShellCommand)
 
+import Asset
 import Network
 import Network.Ip
 import Output
@@ -114,6 +115,7 @@ shellExpansionTemplate fromSingle fromList = listToMaybe $ catMaybes
     [ single id
     , single (T.pack . show @Integer)
     , single (T.pack . show @Scientific)
+    , single textAssetPath
     ]
   where
     single :: forall c. (ExprType c) => (c -> Text) -> Maybe (b -> a)
