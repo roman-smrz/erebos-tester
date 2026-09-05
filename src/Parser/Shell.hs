@@ -107,12 +107,25 @@ parseArguments = do
 parseCommand :: TestParser (Expr ShellCommand)
 parseCommand = label "shell statement" $ do
     line <- getSourceLine
-    command <- parseTextArgument
-    args <- parseArguments
-    return $ ShellCommand
-        <$> command
-        <*> args
-        <*> pure line
+    choice
+        [ do
+            args <- expressionExpansion "shell command" <* sc
+            args' <- parseArguments
+            return $ commandFromArgLists line <$> args <*> args'
+        , do
+            command <- parseTextArgument
+            args <- parseArguments
+            return $ ShellCommand
+                <$> command
+                <*> args
+                <*> pure line
+        ]
+
+  where
+    commandFromArgLists line (ShellArguments (ShellArgument cmd : args)) (ShellArguments args') =
+        ShellCommand cmd (ShellArguments (args ++ args')) line
+    commandFromArgLists line (ShellArguments args) (ShellArguments args') =
+        ShellCommand "" (ShellArguments (args ++ args')) line
 
 parsePipeline :: Maybe (Expr ShellPipeline) -> TestParser (Expr ShellPipeline)
 parsePipeline mbupper = do

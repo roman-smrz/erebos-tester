@@ -6,8 +6,14 @@ test Test:
     let num = 4.5
     let list = [ "a   b", "c  d", "e", "f" ]
     let ilist = [ 1 .. 5 ]
+    let cmd = "echo"
+    let cmdlist = [ "echo", "w", "x  y", "  z  " ]
+    let special = [ "<", ">", "|  &", ";" ]
 
     shell on n as sh:
         echo A  $str  B  $int  $num  C
         echo D  $list  E
         echo F  $ilist  G
+        $cmd H   I
+        $cmdlist  J
+        $cmdlist  K  $ilist  L $int M $special  N

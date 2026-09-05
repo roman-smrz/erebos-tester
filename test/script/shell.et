@@ -194,6 +194,9 @@ test ShellVariableExpansion:
         expect /child-stdout sh A some   string B 2 4.5 C/
         expect /child-stdout sh D a   b c  d e f E/
         expect /child-stdout sh F 1 2 3 4 5 G/
+        expect /child-stdout sh H I/
+        expect /child-stdout sh w x  y   z   J/
+        expect /child-stdout sh w x  y   z   K 1 2 3 4 5 L 2 M < > \|  \& \; N/
         expect /run-test-result Test done/
         expect /run-done 1 1 0 0/
         flush
