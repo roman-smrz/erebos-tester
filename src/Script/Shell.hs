@@ -99,24 +99,27 @@ instance ExprType ShellCommand where
 instance ExprType ShellArguments where
     textExprType _ = T.pack "ShellArguments"
     textExprValue _ = "<shell-arguments>"
-
-    exprExpansionConvFrom = listToMaybe $ catMaybes
-        [ cast (ShellArguments . (: []) . ShellArgument)
-        , cast (ShellArguments . (: []) . ShellArgument . T.pack . show @Integer)
-        , cast (ShellArguments . (: []) . ShellArgument . T.pack . show @Scientific)
-        , cast (ShellArguments . map ShellArgument)
-        , cast (ShellArguments . map (ShellArgument . T.pack . show @Integer))
-        , cast (ShellArguments . map (ShellArgument . T.pack . show @Scientific))
-        ]
+    exprExpansionConvFrom = shellExpansionTemplate
+        (Just (ShellArguments . (: []) . ShellArgument))
+        (Just (ShellArguments . map ShellArgument))
 
 instance ExprType ShellArgument where
     textExprType _ = T.pack "ShellArgument"
     textExprValue _ = "<shell-argument>"
+    exprExpansionConvFrom = shellExpansionTemplate (Just ShellArgument) Nothing
 
-    exprExpansionConvFrom = listToMaybe $ catMaybes
-        [ cast (ShellArgument)
-        , cast (ShellArgument . T.pack . show @Integer)
-        , cast (ShellArgument . T.pack . show @Scientific)
+
+shellExpansionTemplate :: forall a b. (Typeable a, ExprType b) => Maybe (Text -> a) -> Maybe ([ Text ] -> a) -> Maybe (b -> a)
+shellExpansionTemplate fromSingle fromList = listToMaybe $ catMaybes
+    [ single id
+    , single (T.pack . show @Integer)
+    , single (T.pack . show @Scientific)
+    ]
+  where
+    single :: forall c. (ExprType c) => (c -> Text) -> Maybe (b -> a)
+    single conv = listToMaybe $ catMaybes
+        [ fromSingle >>= \f -> cast (f . conv)
+        , fromList >>= \f -> cast (f . map conv)
         ]
 
 
