@@ -17,3 +17,4 @@ test Test:
         $cmd H   I
         $cmdlist  J
         $cmdlist  K  $ilist  L $int M $special  N
+        echo ${str}O P$str

@@ -14,6 +14,7 @@ module Parser.Expr (
     variable,
     constructor,
 
+    someExpansion, expansionTypeCheck,
     expressionExpansion,
     stringExpansion,
 
@@ -110,16 +111,19 @@ someExpansion = do
         , between (char '{') (char '}') (someExpr FunctionTerm)
         ]
 
-expressionExpansion :: forall a. ExprType a => Text -> TestParser (Expr a)
-expressionExpansion tname = do
-    off <- stateOffset <$> getParserState
-    SomeExpr e <- someExpansion
+expansionTypeCheck :: forall a. ExprType a => Int -> Text -> SomeExpr -> TestParser (Expr a)
+expansionTypeCheck off tname (SomeExpr e) = do
     let err = do
             registerParseError $ FancyError off $ S.singleton $ ErrorFail $ T.unpack $ T.concat
                 [ tname, T.pack " expansion not defined for '", textExprType e, T.pack "'" ]
             return $ Undefined "expansion not defined for type"
 
     maybe err (return . (<$> e)) $ listToMaybe $ catMaybes [ cast (id :: a -> a), exprExpansionConvTo, exprExpansionConvFrom ]
+
+expressionExpansion :: forall a. ExprType a => Text -> TestParser (Expr a)
+expressionExpansion tname = do
+    off <- stateOffset <$> getParserState
+    expansionTypeCheck off tname =<< someExpansion
 
 stringExpansion :: TestParser (Expr Text)
 stringExpansion = expressionExpansion "string"

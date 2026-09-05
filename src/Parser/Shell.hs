@@ -99,10 +99,24 @@ parseArgument = choice
 parseArguments :: TestParser (Expr ShellArguments)
 parseArguments = do
     arglists <- many $ choice
-        [ expressionExpansion "shell arguments" <* sc
+        [ do
+            off <- stateOffset <$> getParserState
+            se <- someExpansion
+            choice
+                [ do
+                    notFollowedBy space1
+                    arg <- expansionTypeCheck off "shell argument" se
+                    txt <- parseTextArgument
+                    return $ joinArgument <$> arg <*> txt
+                , do
+                    expansionTypeCheck off "shell arguments" se <* sc
+                ]
         , fmap (ShellArguments . (: [])) <$> parseArgument
         ]
     return $ fmap mconcat $ foldr (liftA2 (:)) (Pure []) $ arglists
+  where
+    joinArgument (ShellArgument x) y = ShellArguments [ ShellArgument (x <> y) ]
+    joinArgument ax y = ShellArguments [ ax, ShellArgument y ]
 
 parseCommand :: TestParser (Expr ShellCommand)
 parseCommand = label "shell statement" $ do
