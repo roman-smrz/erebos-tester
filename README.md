@@ -31,17 +31,15 @@ Usage
 -----
 
 The `erebos-tester` tool, when executed without any arguments,
-looks for a `erebos-tester.yaml` file in the current or any parent directory (see below for details).
-Run `erebos-tester --help` for details about command-line parameters.
+looks for an `erebos-tester.yaml` file in the current or any parent directory (see below for details).
+Run `erebos-tester --help` for details about available command-line parameters.
 
-The tester can be installed from sources or directly via cabal:
-```
-cabal install erebos-tester
-```
+### Examples
 
-When available in the `PATH`, it can be run to test the [Haskell Erebos implementation](https://erebosprotocol.net/erebos):
+When available in the `PATH`, it can be run, for example, to test
+the [Haskell Erebos implementation](https://erebosprotocol.net/erebos):
 ```
-git clone git://erebosprotocol.net/erebos
+git clone https://code.erebosprotocol.net/erebos
 cd erebos
 cabal build
 erebos-tester --tool="$(cabal list-bin erebos) test" --verbose
@@ -49,12 +47,14 @@ erebos-tester --tool="$(cabal list-bin erebos) test" --verbose
 
 or the [C++ one](https://erebosprotocol.net/cpp):
 ```
-git clone git://erebosprotocol.net/cpp
+git clone https://code.erebosprotocol.net/cpp
 cd cpp
 cmake -B build
 cmake --build build
 erebos-tester --verbose
 ```
+
+### Running
 
 To run all tests from project configuration (see below), run the tester without any argument:
 ```
@@ -77,6 +77,20 @@ To select single test from a file, use `:` separator:
 ```
 erebos-tester path/to/script.et:TestName
 ```
+
+### Reports
+
+By default, `erebos-tester` stops when a test fails, showing backtrace and
+values of used variables. That can be changed with the following command-line
+options:
+
+* `--report`: run all the tests, continuing even in the case of error, and
+  print a short summary of the number of passed and failed test, and a list of
+  those that failed.
+
+* `--junit-report=<path>`: run all the tests, and write the report to the file
+  in `<path>` using the JUnit XML format.
+
 
 Configuration
 -------------
