@@ -9,6 +9,7 @@ import Data.ByteString.Char8 qualified as BC
 import Data.Function
 import Data.List.NonEmpty qualified as NE
 import Data.Scientific
+import Data.Text qualified as T
 import Data.Text.Encoding
 
 import System.Directory
@@ -34,15 +35,26 @@ writeJUnitReport path Report {..} = do
                 B.hPutStr h $ B.concat
                     [ "<testcase name=\"", encodeUtf8 (testNameBase reportTestName), "\""
                     , " classname=\"", encodeUtf8 (textModuleName $ testNameModule reportTestName), "\""
-                    , " time=\"", showTime reportTime, "\""
+                    , " time=\"", showTime reportTime, "\">"
+                    , "<system-out>"
+                    , encodeUtf8 $ escape reportOutput
+                    , "</system-out>"
                     , case reportTestFailed of
                         Nothing -> do
-                            " />"
+                            ""
                         Just Failed -> do
-                            "><failure message=\"Test failed\"></failure></testcase>"
+                            "<failure message=\"Test failed\">" <> encodeUtf8 (escape reportOutputError) <> "</failure>"
                         Just (ProcessCrashed _) -> do
-                            "><error message=\"Process crashed\"></error></testcase>"
+                            "<error message=\"Process crashed\">" <> encodeUtf8 (escape reportOutputError) <> "</error>"
+                    , "</testcase>"
                     ]
 
             B.hPutStr h $ "</testsuite>"
         B.hPutStr h $ "</testsuites>\n"
+
+  where
+    escape = T.concatMap $ \case
+        '&' -> "&amp;"
+        '<' -> "&lt;"
+        '>' -> "&gt;"
+        c -> T.singleton c

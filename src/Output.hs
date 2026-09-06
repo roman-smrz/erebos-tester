@@ -8,6 +8,8 @@ module Output (
     outLineF,
     outPromptGetLine,
     outPromptGetLineCompletion,
+    collectOutput,
+    collectErrorOutput,
 ) where
 
 import Control.Concurrent.MVar
@@ -48,6 +50,8 @@ data OutputConfig = OutputConfig
 data OutputState = OutputState
     { outPrint :: TL.Text -> IO ()
     , outHistory :: History
+    , outLines :: [ Text ]
+    , outErrLines :: [ Text ]
     }
 
 data OutputStyle
@@ -81,7 +85,12 @@ instance MonadIO m => MonadOutput (ReaderT Output m) where
 
 startOutput :: OutputStyle -> Bool -> IO Output
 startOutput outStyle outUseColor = do
-    outState <- newMVar OutputState { outPrint = TL.putStrLn, outHistory = emptyHistory }
+    outState <- newMVar OutputState
+        { outPrint = TL.putStrLn
+        , outHistory = emptyHistory
+        , outLines = []
+        , outErrLines = []
+        }
     outConfig <- pure OutputConfig {..}
     outStartedAt <- newMVar =<< getTime Monotonic
     hSetBuffering stdout LineBuffering
@@ -161,13 +170,17 @@ outTestLabel = \case
 
 printWhenQuiet :: OutputType -> Bool
 printWhenQuiet = \case
-    OutputGlobalError -> True
     OutputGlobalSummary -> True
+    OutputAlways -> True
+    t -> printIsError t
+
+printIsError :: OutputType -> Bool
+printIsError = \case
+    OutputGlobalError -> True
     OutputChildStderr -> True
     OutputChildFail -> True
     OutputMatchFail {} -> True
     OutputError -> True
-    OutputAlways -> True
     _ -> False
 
 includeTestTime :: OutputType -> Bool
@@ -186,29 +199,37 @@ outLine otype prompt line = outLineF otype prompt (plainText line)
 outLineF :: MonadOutput m => OutputType -> Maybe Text -> FormattedText -> m ()
 outLineF otype prompt line = ioWithOutput $ \out ->
     case outStyle (outConfig out) of
-        OutputStyleQuiet
-            | printWhenQuiet otype -> normalOutput out
-            | otherwise -> return ()
-        OutputStyleVerbose -> normalOutput out
+        OutputStyleQuiet -> normalOutput (printWhenQuiet otype) out
+        OutputStyleVerbose -> normalOutput True out
         OutputStyleTest -> testOutput out
   where
-    normalOutput out = do
+    normalOutput normal out = do
         secs <- getElapsedTime out
-        withMVar (outState out) $ \st -> do
-            forM_ (normalOutputLines otype $ renderLine out line) $ \line' -> do
-                outPrint st $ TL.fromChunks $ concat
-                    [ if includeTestTime otype
-                        then [ T.pack $ printf "[% 2d.%03d] " (floor secs :: Integer) (floor (secs * 1000) `rem` 1000 :: Integer) ]
-                        else []
-                    , if outUseColor (outConfig out)
-                        then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
-                        else []
-                    , [ maybe "" (<> outSign otype <> outArr otype <> " ") prompt ]
-                    , [ line' ]
-                    , if outUseColor (outConfig out)
-                        then [ T.pack "\ESC[0m" ]
-                        else []
-                    ]
+
+        let formatLine color line' = T.concat $ concat
+                [ if includeTestTime otype
+                    then [ T.pack $ printf "[% 2d.%03d] " (floor secs :: Integer) (floor (secs * 1000) `rem` 1000 :: Integer) ]
+                    else []
+                , if color
+                    then [ T.pack "\ESC[", outColor otype, T.pack "m" ]
+                    else []
+                , [ maybe "" (<> outSign otype <> outArr otype <> " ") prompt ]
+                , [ line' ]
+                , if color
+                    then [ T.pack "\ESC[0m" ]
+                    else []
+                ]
+
+        modifyMVar_ (outState out) $ \ost -> do
+            (\f -> foldM f ost (normalOutputLines otype $ renderLine out line)) $ \st line' -> do
+                when normal $ do
+                    outPrint st $ TL.fromStrict $ formatLine (outUseColor (outConfig out)) line'
+                return st
+                    { outLines = formatLine False line' : outLines st
+                    , outErrLines = (if printIsError otype
+                                      then (formatLine False line' :)
+                                      else id) $ outErrLines st
+                    }
 
     renderLine out
         | outUseColor (outConfig out) = fromAnsiText . renderAnsiText
@@ -273,3 +294,14 @@ outPromptGetLineCompletion compl prompt = ioWithOutput $ \out -> do
         return (x, st' { outPrint = outPrint st, outHistory = hist' })
     putMVar (outState out) st'
     return $ fmap T.pack x
+
+
+collectOutput :: Output -> IO Text
+collectOutput Output {..} = do
+    modifyMVar outState $ \st -> do
+        return ( st { outLines = [] }, T.unlines $ reverse $ outLines st )
+
+collectErrorOutput :: Output -> IO Text
+collectErrorOutput Output {..} = do
+    modifyMVar outState $ \st -> do
+        return ( st { outErrLines = [] }, T.unlines $ reverse $ outErrLines st )

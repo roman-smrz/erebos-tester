@@ -75,6 +75,8 @@ data SingleTestReport = SingleTestReport
     { reportTestName :: TestName
     , reportTestFailed :: Maybe Failed
     , reportTime :: Scientific
+    , reportOutput :: Text
+    , reportOutputError :: Text
     }
 
 runTests :: Output -> TestOptions -> GlobalDefs -> [ Test ] -> IO Report
@@ -187,6 +189,8 @@ runTest out opts gdefs test = do
 
     ( res, [] ) <- takeMVar testRunResult
     reportTime <- getElapsedTime out
+    reportOutput <- collectOutput out
+    reportOutputError <- collectErrorOutput out
 
     void $ installHandler processStatusChanged oldHandler Nothing
 
