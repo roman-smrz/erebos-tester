@@ -1,5 +1,21 @@
 # Revision history for erebos-tester
 
+## 0.3.6 -- 2026-09-08
+
+* Added reporting-related command-line options:
+    * `--keep-going` to continue after test failure,
+    * `--report` to print summary of passed/failed tests,
+    * `--junit-report` to generate test report in JUnit XML format.
+* Explicit type annotation can now be added to expressions and to arguments in function definition using the `:` notation.
+* Test dir subdirectory that includes the test module and name is now created for each test.
+* Tests can now be selected (or excluded) using module names and fully-qualified names of Tests and Tags.
+* In the built-in shell interpreter is now implemented:
+    * working directory handling with `pwd` and `cd` commands,
+    * `set +e`/`-e` command to change fail-on-error behavior,
+    * negation using the `!` operator,
+    * dollar-expansion for lists to provide list of shell command arguments.
+* Fixed parsing of disconnect and packet-loss commands.
+
 ## 0.3.5 -- 2026-05-31
 
 * Added tags to group and filter tests.
