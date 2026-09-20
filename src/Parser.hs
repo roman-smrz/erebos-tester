@@ -9,6 +9,7 @@ import Control.Monad
 import Control.Monad.Except
 import Control.Monad.State
 
+import Data.ByteString.Lazy qualified as BL
 import Data.IORef
 import Data.Map qualified as M
 import Data.Maybe
@@ -16,7 +17,7 @@ import Data.Proxy
 import Data.Set qualified as S
 import Data.Text qualified as T
 import Data.Text.Lazy qualified as TL
-import Data.Text.Lazy.IO qualified as TL
+import Data.Text.Lazy.Encoding qualified as TL
 import Data.Void
 
 import Text.Megaparsec hiding (State)
@@ -257,7 +258,7 @@ parseTestFile builtinTypes parsedModules mbModuleName path = do
                         let projectRoot = iterate takeDirectory absPath !! length current
                         parseTestFile builtinTypes parsedModules (Just mname) $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
                     }
-            mbContent <- (Just <$> TL.readFile path) `catchIOError` \e ->
+            mbContent <- (Just . TL.decodeUtf8 <$> BL.readFile path) `catchIOError` \e ->
                 if isDoesNotExistError e then return Nothing else ioError e
             case mbContent of
                 Just content -> do
