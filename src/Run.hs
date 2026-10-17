@@ -126,6 +126,22 @@ runTest out opts gdefs test = do
     procVar <- newMVar []
     timeoutVar <- newMVar ( optTimeout opts, 0 )
 
+    let evalTool = \case
+            ToolPath path -> return path
+            ToolCabal arg
+                | (name : args) <- T.words arg
+                -> do
+                    readCreateProcessWithExitCode (proc "cabal" $ [ "list-bin", T.unpack name ]) "" >>= \case
+                        ( ExitSuccess, cabalOut, _ ) -> do
+                            let path = takeWhile (/= '\n') cabalOut
+                            return $ T.unpack $ T.unwords (T.pack path : args)
+                        _ -> do
+                            ioError $ userError $ "failed to find ‘" <> T.unpack name <> "’ executable path using cabal"
+                | otherwise
+                -> return $ T.unpack arg
+    defaultTool <- evalTool $ optDefaultTool opts
+    procTools <- mapM (sequence . fmap evalTool) $ optProcTools opts
+
     mgdb <- if optGDB opts
         then flip runReaderT out $ do
             gdb <- gdbStart $ atomically . writeTVar failedVar . Just . ProcessCrashed
@@ -136,6 +152,8 @@ runTest out opts gdefs test = do
             { teOutput = out
             , teFailed = failedVar
             , teOptions = opts
+            , teDefaultTool = defaultTool
+            , teProcTools = procTools
             , teTestDir = testDir
             , teNextObjId = objIdVar
             , teNextProcId = procIdVar
@@ -344,9 +362,9 @@ runStep = \case
             Right node -> go node
       where
         go node = do
-            opts <- asks $ teOptions . fst
+            env <- asks fst
             let pname = ProcName tname
-                tool = fromMaybe (optDefaultTool opts) (lookup pname $ optProcTools opts)
+                tool = fromMaybe (teDefaultTool env) (lookup pname $ teProcTools env)
                 cmd = T.unwords $ T.pack tool : map escape args
                 escape = ("'" <>) . (<> "'") . T.replace "'" "'\\''"
             outProcName OutputChildExec pname cmd

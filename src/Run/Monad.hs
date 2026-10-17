@@ -3,6 +3,7 @@ module Run.Monad (
     TestEnv(..),
     TestState(..),
     TestOptions(..), defaultTestOptions,
+    ConfigTool(..),
     Failed(..),
 
     finally,
@@ -24,6 +25,7 @@ import Data.Scientific
 import Data.Set (Set)
 import Data.Text qualified as T
 
+import Config
 import {-# SOURCE #-} GDB
 import Network.Ip
 import Output
@@ -43,6 +45,8 @@ data TestEnv = TestEnv
     { teOutput :: Output
     , teFailed :: TVar (Maybe Failed)
     , teOptions :: TestOptions
+    , teDefaultTool :: FilePath
+    , teProcTools :: [ ( ProcName, FilePath ) ]
     , teTestDir :: FilePath
     , teNextObjId :: MVar Int
     , teNextProcId :: MVar Int
@@ -60,8 +64,8 @@ data TestState = TestState
     }
 
 data TestOptions = TestOptions
-    { optDefaultTool :: String
-    , optProcTools :: [(ProcName, String)]
+    { optDefaultTool :: ConfigTool
+    , optProcTools :: [ ( ProcName, ConfigTool ) ]
     , optTestDir :: FilePath
     , optTimeout :: Scientific
     , optTcpdump :: Maybe FilePath
@@ -76,7 +80,7 @@ data TestOptions = TestOptions
 
 defaultTestOptions :: TestOptions
 defaultTestOptions = TestOptions
-    { optDefaultTool = ""
+    { optDefaultTool = ToolPath ""
     , optProcTools = []
     , optTestDir = ".test"
     , optTimeout = 1

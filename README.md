@@ -19,8 +19,8 @@ The test framework uses two components from the tested project:
 
    The test tool can be set either:
    * by the `--tool` command-line parameter of `erebos-tester`, or
-   * in the `erebos-tester.yaml` configuration file, or
-   * by the `EREBOS_TEST_TOOL` environment variable.
+   * by the `EREBOS_TEST_TOOL` environment variable, or
+   * in the `erebos-tester.yaml` configuration file.
 
 2. Test script – defines how to run the instances of test tool and in what kind
    of network topology. Contains commands to send to the test tool instances
@@ -100,7 +100,11 @@ per-project configuration can be done using `erebos-tester.yaml` file placed in 
 (or other directory from which the tests will be executed).
 This is a YAML file with following fields:
 
-* `tool`: path to the test tool, which may be overridden by the `--tool` command-line option.
+* `tool`: test tool (may be overridden by the `--tool` command-line option or `EREBOS_TEST_TOOL` environment variable), and can be either:
+    * `string` giving path to the executable, or
+    * mapping with one of the following keys:
+        * `path`: `string` giving path to executable
+        * `cabal`: `string` giving cabal executable name
 * `tests`: glob pattern that expands to all the test script files that should be used.
 * `select`: tests or tags to be selected for running by default (if not provided, all tests will be executed);
     given as a single `string` or a list of `string`s.

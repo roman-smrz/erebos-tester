@@ -84,7 +84,7 @@ runTestsC tests = do
     Just LoadedModules {..} <- gets tmsModules
     mbconfig <- asks tmiConfig
     let opts = defaultTestOptions
-            { optDefaultTool = fromMaybe "/bin/true" $ configTool =<< mbconfig
+            { optDefaultTool = fromMaybe (ToolPath "/bin/true") $ configTool =<< mbconfig
             , optTestDir = ".test" <> show num
             , optKeep = True
             , optKeepGoing = True

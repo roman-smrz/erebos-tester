@@ -66,9 +66,9 @@ data TcpdumpOption
 options :: [ OptDescr (CmdlineOptions -> CmdlineOptions) ]
 options =
     [ Option ['T'] ["tool"]
-        (ReqArg (\str -> to $ \opts -> case break (==':') str of
-                                            (path, []) -> opts { optDefaultTool = path }
-                                            (pname, (_:path)) -> opts { optProcTools = (ProcName (T.pack pname), path) : optProcTools opts }
+        (ReqArg (\str -> to $ \opts -> case break (== ':') str of
+                                            ( path, [] ) -> opts { optDefaultTool = ToolPath path }
+                                            ( pname, _ : path ) -> opts { optProcTools = ( ProcName (T.pack pname), ToolPath path ) : optProcTools opts }
                 ) "<path>")
         "test tool to be used"
     , Option ['v'] ["verbose"]
@@ -140,8 +140,14 @@ main = do
     config <- mapM parseConfig =<< findConfig
     let baseDir = maybe "." configDir config
 
-    envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool ->
-        return $ fromMaybe (error "No test tool defined") $ mbtool `mplus` (return . (baseDir </>) =<< configTool =<< config)
+    envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool -> if
+        | Just envpath <- mbtool
+            -> return $ ToolPath envpath
+        | Just conftool <- configTool =<< config
+            -> case conftool of
+                ToolPath cpath -> return $ ToolPath $ baseDir </> cpath
+                ToolCabal ccabal -> return $ ToolCabal ccabal
+        | otherwise -> return $ error "No test tool defined"
 
     let initOpts = defaultCmdlineOptions
             { optTest = defaultTestOptions
@@ -183,11 +189,13 @@ main = do
         testMode config
         exitSuccess
 
-    case words $ optDefaultTool $ optTest opts of
-        (path : _) -> getPermissions path >>= \perms -> do
-            when (not $ executable perms) $ do
-                fail $ "‘" <> path <> "’ is not executable"
-        _ -> fail $ "invalid tool argument: ‘" <> optDefaultTool (optTest opts) <> "’"
+    case optDefaultTool $ optTest opts of
+        ToolPath tpath -> case words tpath of
+            (path : _) -> getPermissions path >>= \perms -> do
+                when (not $ executable perms) $ do
+                    fail $ "‘" <> path <> "’ is not executable"
+            _ -> fail $ "invalid tool argument: ‘" <> tpath <> "’"
+        ToolCabal _ -> return ()
 
     files <- if not (null ofiles)
         then return $ flip map ofiles $ \ofile ->

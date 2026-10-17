@@ -1,5 +1,6 @@
 module Config (
     Config(..),
+    ConfigTool(..),
     findConfig,
     parseConfig,
     getConfigTestFiles,
@@ -20,7 +21,7 @@ import System.FilePath.Glob
 
 data Config = Config
     { configDir :: FilePath
-    , configTool :: Maybe FilePath
+    , configTool :: Maybe ConfigTool
     , configTests :: [ Pattern ]
     , configSelect :: Maybe [ Text ]
     , configExclude :: [ Text ]
@@ -28,9 +29,18 @@ data Config = Config
     }
     deriving (Show)
 
+data ConfigTool
+    = ToolPath FilePath
+    | ToolCabal Text
+    deriving (Show)
+
 instance FromYAML (FilePath -> Config) where
     parseYAML = withMap "Config" $ \m -> do
-        configTool <- (fmap T.unpack <$> m .:? "tool")
+        configTool <- foldr1 (<|>)
+            [ Just . ToolPath . T.unpack <$> m .: "tool" -- tool path as string
+            , Just <$> m .: "tool"
+            , return Nothing
+            ]
         configTests <- (map (compile . T.unpack) <$> foldr1 (<|>)
                 [ fmap (:[]) (m .: "tests") -- single pattern
                 , m .:? "tests" .!= []      -- list of patterns
@@ -54,6 +64,12 @@ instance FromYAML Number where
         Scalar _ (SFloat x) -> return $ Number $ realToFrac x
         Scalar _ (SInt x) -> return $ Number $ fromIntegral x
         node -> typeMismatch "int or float" node
+
+instance FromYAML ConfigTool where
+    parseYAML = withMap "tool specification" $ \m -> foldr1 (<|>)
+        [ ToolPath . T.unpack <$> m .: "path"
+        , ToolCabal <$> m .: "cabal"
+        ]
 
 findConfig :: IO (Maybe FilePath)
 findConfig = go "."
