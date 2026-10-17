@@ -29,6 +29,8 @@ import Network.Ip
 import Script.Expr
 import Script.Expr.Class
 
+import Error
+
 {-
 NETWORK STRUCTURE
 =================
@@ -193,7 +195,7 @@ newNode nodeNetwork vname = atomicallyWithIO $ do
 
     postpone $ do
         exists <- doesPathExist nodeDir
-        when exists $ ioError $ userError $ nodeDir ++ " exists"
+        when exists $ throwOtherError $ "node directory ‘" <> T.pack nodeDir <> "’ already exists"
         createDirectoryIfMissing True nodeDir
 
     let node = Node {..}

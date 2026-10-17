@@ -44,6 +44,7 @@ import System.Posix.Signals
 import System.Process
 
 import Config
+import Error
 import GDB
 import Network
 import Network.Ip
@@ -117,7 +118,7 @@ runTest out opts gdefs test = do
     when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
         if isDoesNotExistError e then return () else ioError e
     exists <- doesPathExist testDir
-    when exists $ ioError $ userError $ testDir ++ " exists"
+    when exists $ throwOtherError $ "test directory ‘" <> T.pack testDir <> "’ already exists"
     createDirectoryIfMissing True testDir
 
     failedVar <- newTVarIO Nothing
@@ -136,12 +137,12 @@ runTest out opts gdefs test = do
                             let path = takeWhile (/= '\n') cabalOut
                             return $ T.unpack $ T.unwords (T.pack path : args)
                         _ -> do
-                            ioError $ userError $ "failed to find ‘" <> T.unpack name <> "’ executable path using cabal"
+                            throwOtherError $ "failed to find ‘" <> name <> "’ executable path using cabal"
                 | otherwise
                 -> return $ T.unpack arg
     defaultTool <- case optDefaultTool opts of
         Just tool -> evalTool tool
-        Nothing -> ioError $ userError "No test tool defined"
+        Nothing -> throwOtherError "no test tool defined"
     procTools <- mapM (sequence . fmap evalTool) $ optProcTools opts
 
     mgdb <- if optGDB opts

@@ -20,6 +20,7 @@ import System.Posix.Terminal
 import System.Posix.Types
 
 import Config
+import Error
 import JUnit
 import Output
 import Parser.Core
@@ -180,14 +181,14 @@ main = do
                 -> case conftool of
                     ToolPath cpath -> return $ ToolPath $ baseDir </> cpath
                     ToolCabal ccabal -> return $ ToolCabal ccabal
-            | otherwise -> fail "no test tool defined"
+            | otherwise -> throwOtherError "no test tool defined"
 
     case defaultTool of
         ToolPath tpath -> case words tpath of
             (path : _) -> getPermissions path >>= \perms -> do
                 when (not $ executable perms) $ do
-                    fail $ "‘" <> path <> "’ is not executable"
-            _ -> fail $ "invalid tool argument: ‘" <> tpath <> "’"
+                    throwOtherError $ "‘" <> T.pack path <> "’ is not executable"
+            _ -> throwOtherError $ "invalid tool argument: ‘" <> T.pack tpath <> "’"
         ToolCabal _ -> return ()
 
     files <- if not (null ofiles)
@@ -197,7 +198,7 @@ main = do
                 (path, _)        -> (path, Nothing)
         else map (, Nothing) <$> maybe (return []) (getConfigTestFiles) config
 
-    when (null files) $ fail $ "No test files"
+    when (null files) $ throwOtherError $ "no test files"
 
     useColor <- case optColor opts of
         Just use -> return use
