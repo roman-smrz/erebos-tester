@@ -124,7 +124,7 @@ runTest out opts gdefs test = do
     objIdVar <- newMVar 1
     procIdVar <- newMVar 1
     procVar <- newMVar []
-    timeoutVar <- newMVar ( optTimeout opts, 0 )
+    timeoutVar <- newMVar ( fromMaybe 1 $ optTimeout opts, 0 )
 
     let evalTool = \case
             ToolPath path -> return path
@@ -139,7 +139,9 @@ runTest out opts gdefs test = do
                             ioError $ userError $ "failed to find ‘" <> T.unpack name <> "’ executable path using cabal"
                 | otherwise
                 -> return $ T.unpack arg
-    defaultTool <- evalTool $ optDefaultTool opts
+    defaultTool <- case optDefaultTool opts of
+        Just tool -> evalTool tool
+        Nothing -> ioError $ userError "No test tool defined"
     procTools <- mapM (sequence . fmap evalTool) $ optProcTools opts
 
     mgdb <- if optGDB opts

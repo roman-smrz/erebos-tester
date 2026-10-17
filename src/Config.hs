@@ -71,19 +71,20 @@ instance FromYAML ConfigTool where
         , ToolCabal <$> m .: "cabal"
         ]
 
-findConfig :: IO (Maybe FilePath)
-findConfig = go "."
+findConfig :: Bool -> IO (Maybe FilePath)
+findConfig tryParents = go "."
   where
     name = "erebos-tester.yaml"
     go path = do
         doesFileExist (path </> name) >>= \case
             True -> return $ Just $ path </> name
-            False -> doesDirectoryExist (path </> "..") >>= \case
+            False | tryParents -> doesDirectoryExist (path </> "..") >>= \case
                 True -> do
                     parent <- canonicalizePath $ path </> ".."
                     if parent /= path then go parent
                                       else return Nothing
                 False -> return Nothing
+            False -> return Nothing
 
 parseConfig :: FilePath -> IO Config
 parseConfig path = do

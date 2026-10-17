@@ -4,12 +4,12 @@ module TestMode (
     testMode,
 ) where
 
+import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 
 import Data.List
-import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
@@ -84,7 +84,7 @@ runTestsC tests = do
     Just LoadedModules {..} <- gets tmsModules
     mbconfig <- asks tmiConfig
     let opts = defaultTestOptions
-            { optDefaultTool = fromMaybe (ToolPath "/bin/true") $ configTool =<< mbconfig
+            { optDefaultTool = (configTool =<< mbconfig) `mplus` Just (ToolPath "/bin/true")
             , optTestDir = ".test" <> show num
             , optKeep = True
             , optKeepGoing = True

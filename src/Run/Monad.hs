@@ -64,10 +64,10 @@ data TestState = TestState
     }
 
 data TestOptions = TestOptions
-    { optDefaultTool :: ConfigTool
+    { optDefaultTool :: Maybe ConfigTool
     , optProcTools :: [ ( ProcName, ConfigTool ) ]
     , optTestDir :: FilePath
-    , optTimeout :: Scientific
+    , optTimeout :: Maybe Scientific
     , optTcpdump :: Maybe FilePath
     , optGDB :: Bool
     , optForce :: Bool
@@ -80,10 +80,10 @@ data TestOptions = TestOptions
 
 defaultTestOptions :: TestOptions
 defaultTestOptions = TestOptions
-    { optDefaultTool = ToolPath ""
+    { optDefaultTool = Nothing
     , optProcTools = []
     , optTestDir = ".test"
-    , optTimeout = 1
+    , optTimeout = Nothing
     , optTcpdump = Nothing
     , optGDB = False
     , optForce = False

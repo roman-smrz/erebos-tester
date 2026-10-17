@@ -4,7 +4,6 @@ import Control.Monad
 import Control.Monad.Reader
 
 import Data.Char
-import Data.Maybe
 import Data.Text (Text)
 import Data.Text qualified as T
 
@@ -67,7 +66,7 @@ options :: [ OptDescr (CmdlineOptions -> CmdlineOptions) ]
 options =
     [ Option ['T'] ["tool"]
         (ReqArg (\str -> to $ \opts -> case break (== ':') str of
-                                            ( path, [] ) -> opts { optDefaultTool = ToolPath path }
+                                            ( path, [] ) -> opts { optDefaultTool = Just (ToolPath path) }
                                             ( pname, _ : path ) -> opts { optProcTools = ( ProcName (T.pack pname), ToolPath path ) : optProcTools opts }
                 ) "<path>")
         "test tool to be used"
@@ -137,29 +136,9 @@ hiddenOptions =
 
 main :: IO ()
 main = do
-    config <- mapM parseConfig =<< findConfig
-    let baseDir = maybe "." configDir config
-
-    envtool <- lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool -> if
-        | Just envpath <- mbtool
-            -> return $ ToolPath envpath
-        | Just conftool <- configTool =<< config
-            -> case conftool of
-                ToolPath cpath -> return $ ToolPath $ baseDir </> cpath
-                ToolCabal ccabal -> return $ ToolCabal ccabal
-        | otherwise -> return $ error "No test tool defined"
-
-    let initOpts = defaultCmdlineOptions
-            { optTest = defaultTestOptions
-                { optDefaultTool = envtool
-                , optTestDir = normalise $ baseDir </> optTestDir defaultTestOptions
-                , optTimeout = fromMaybe (optTimeout defaultTestOptions) $ configTimeout =<< config
-                }
-            }
-
     args <- getArgs
     (opts, oselection) <- case getOpt Permute (options ++ hiddenOptions) args of
-        (o, files, []) -> return (foldl (flip id) initOpts o, files)
+        (o, files, []) -> return (foldl (flip id) defaultCmdlineOptions o, files)
         (_, _, errs) -> do
             hPutStrLn stderr $ concat errs <> "Try `erebos-tester --help' for more information."
             exitFailure
@@ -185,11 +164,25 @@ main = do
         putStrLn versionLine
         exitSuccess
 
+    config <- mapM parseConfig =<< findConfig (not $ optTestMode opts)
+    let baseDir = maybe "." configDir config
+
     when (optTestMode opts) $ do
         testMode config
         exitSuccess
 
-    case optDefaultTool $ optTest opts of
+    defaultTool <- case optDefaultTool $ optTest opts of
+        Just tool -> return tool
+        Nothing -> lookupEnv "EREBOS_TEST_TOOL" >>= \mbtool -> if
+            | Just envpath <- mbtool
+                -> return $ ToolPath envpath
+            | Just conftool <- configTool =<< config
+                -> case conftool of
+                    ToolPath cpath -> return $ ToolPath $ baseDir </> cpath
+                    ToolCabal ccabal -> return $ ToolCabal ccabal
+            | otherwise -> fail "no test tool defined"
+
+    case defaultTool of
         ToolPath tpath -> case words tpath of
             (path : _) -> getPermissions path >>= \perms -> do
                 when (not $ executable perms) $ do
@@ -227,7 +220,10 @@ main = do
         TcpdumpOff -> return Nothing
 
     let topts = (optTest opts)
-            { optTcpdump = tcpdump
+            { optDefaultTool = Just defaultTool
+            , optTestDir = normalise $ baseDir </> optTestDir defaultTestOptions
+            , optTimeout = optTimeout (optTest opts) `mplus` (configTimeout =<< config)
+            , optTcpdump = tcpdump
             }
 
     report@Report {..} <- runTests out topts lmGlobalDefs tests
