@@ -137,10 +137,7 @@ a file that contains multiple tests.
 
 ### Types
 
-The script language is strictly typed without any implicit conversions,
-although types can not be (as of now) declared explicitly and are always inferred.
-Each expression has specific concrete type, polymorphic types are not supported (yet).
-
+The script language is strictly typed without any implicit conversions.
 Generally, types of expressions should be inferred, but they can also be given
 explicitly to any (sub)expression using the `:` notation:
 ```
@@ -441,7 +438,7 @@ Where `<node>` is the network node on which to run the script (it will be run in
 and `<name>`, if given, is the name of the variable that will refer to the shell process (this can be used e.g. in the `expect` command to check the standard output of the script).
 As with the `spawn` command, the resulting process is terminated at the end of the current scope.
 
-By default the shell process exists with failure whenever any command exits with non-zero status.
+By default the shell process exits with failure whenever any command exits with non-zero status.
 This behavior can be disabled using the `set +e` command (and re-enabled with `set -e`).
 
 
