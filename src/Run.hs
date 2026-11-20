@@ -367,11 +367,13 @@ runStep = \case
         go node = do
             env <- asks fst
             let pname = ProcName tname
-                tool = fromMaybe (teDefaultTool env) (lookup pname $ teProcTools env)
-                cmd = T.unwords $ T.pack tool : map escape args
+                ( tool, cargs ) = fromMaybe ( "", [] ) $ uncons $ words $
+                    fromMaybe (teDefaultTool env) (lookup pname $ teProcTools env)
+                args' = cargs ++ map T.unpack args
+                cmd = T.unwords $ T.pack tool : map escape (map T.pack args')
                 escape = ("'" <>) . (<> "'") . T.replace "'" "'\\''"
             outProcName OutputChildExec pname cmd
-            withProcess (Right node) pname killWith (T.unpack cmd) $ runStep . inner
+            withProcess (Right node) pname killWith tool args' $ runStep . inner
 
     SpawnShell mbname node script inner -> do
         let tname | Just (TypedVarName (VarName name)) <- mbname = name
@@ -429,7 +431,7 @@ withNetwork :: Network -> (Network -> TestRun a) -> TestRun a
 withNetwork net inner = do
     tcpdump <- asks (optTcpdump . teOptions . fst) >>= return . \case
         Just path -> withProcess (Left net) ProcNameTcpdump (Just (Signal softwareTermination))
-            (path ++ " -i br0 -w './br0.pcap' -U -Z root") . const
+            path [ "-i", "br0", "-w", "./br0.pcap", "-U", "-Z", "root" ] . const
         Nothing -> id
 
     tcpdump $ inner net

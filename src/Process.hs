@@ -141,18 +141,15 @@ startProcessIOLoops process@Process {..} hout herr = do
         | Right (Just _) <- regexMatch re line = True
         | otherwise = False
 
-spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> TestRun Process
-spawnOn target procName procKillWith cmd = do
+spawnOn :: Either Network Node -> ProcName -> Maybe Signal -> String -> [ String ] -> TestRun Process
+spawnOn target procName procKillWith cmd args = do
     -- When executing command given with relative path, turn it to absolute one,
-    -- because working directory will be changed for the shell wrapper.
-    cmd' <- liftIO $ do
-        case span (/= ' ') cmd of
-            ( path, rest )
-                | any isPathSeparator path && isRelative path
-                -> do
-                    path' <- makeAbsolute path
-                    return (path' ++ rest)
-            _ -> return cmd
+    -- because working directory will be changed for the process.
+    cmd' <- if
+        | any isPathSeparator cmd && isRelative cmd
+        -> liftIO $ makeAbsolute cmd
+        | otherwise
+        -> return cmd
 
     procId <- case procName of
         ProcNameTcpdump -> return $ ProcessId (-1)
@@ -162,8 +159,8 @@ spawnOn target procName procKillWith cmd = do
 
     let netns = either getNetns getNetns target
     currentEnv <- liftIO $ getEnvironment
-    (Just procStdin, Just hout, Just herr, handle) <- liftIO $ do
-        runInNetworkNamespace netns $ createProcess (shell cmd')
+    ( Just procStdin, Just hout, Just herr, handle ) <- liftIO $ do
+        runInNetworkNamespace netns $ createProcess (proc cmd' args)
             { std_in = CreatePipe, std_out = CreatePipe, std_err = CreatePipe
             , cwd = Just (either netDir nodeDir target)
             , env = Just $ ( "EREBOS_DIR", "." ) : currentEnv
@@ -222,11 +219,11 @@ closeTestProcess process = do
     timeout <- getCurrentTimeout
     closeProcess timeout process
 
-withProcess :: Either Network Node -> ProcName -> Maybe Signal -> String -> (Process -> TestRun a) -> TestRun a
-withProcess target pname killWith cmd inner = do
+withProcess :: Either Network Node -> ProcName -> Maybe Signal -> String -> [ String ] -> (Process -> TestRun a) -> TestRun a
+withProcess target pname killWith cmd args inner = do
     procVar <- asks $ teProcesses . fst
 
-    process <- spawnOn target pname killWith cmd
+    process <- spawnOn target pname killWith cmd args
     liftIO $ modifyMVar_ procVar $ return . (process:)
 
     inner process `finally` do
