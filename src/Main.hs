@@ -82,7 +82,7 @@ options =
         "never use colors for output (default when stdout is not a tty)"
     , Option ['t'] ["timeout"]
         (ReqArg (\str -> to $ \opts -> case readMaybe str of
-                                            Just timeout -> opts { optTimeout = timeout }
+                                            Just timeout -> opts { optTimeout = Just timeout }
                                             Nothing -> error "timeout must be a number") "<seconds>")
         "default timeout in seconds with microsecond precision"
     , Option ['g'] ["gdb"]
