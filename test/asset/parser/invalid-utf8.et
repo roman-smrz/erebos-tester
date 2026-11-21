@@ -1,0 +1,4 @@
+# Script with invalid UTF-8: the byte 0xE9 is Latin-1 é, not valid UTF-8
+test Test:
+    let x = "café"
+    guard (x == x)

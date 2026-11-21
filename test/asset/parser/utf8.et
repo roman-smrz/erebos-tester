@@ -1,0 +1,4 @@
+# Script with valid non-ASCII UTF-8 content: Šíleně žluťoučký kůň …
+test Test:
+    let x = "… úpěl ďábelské ódy “‘quoted’”"
+    guard (x == x)

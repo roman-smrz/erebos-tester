@@ -22,3 +22,8 @@ test Parser:
     expect_load_failure using p of "function-fail" giving "parse-error"
     expect_load_success using p of "tags"
     expect_load_success using p of "type-annotation"
+
+test ParseUtf8:
+    spawn as p
+    expect_load_success using p of "utf8"
+    expect_load_failure using p of "invalid-utf8" giving "parse-error"

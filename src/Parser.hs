@@ -11,6 +11,7 @@ import Control.Monad.State
 
 import Data.ByteString.Lazy qualified as BL
 import Data.IORef
+import Data.List.NonEmpty (NonEmpty(..))
 import Data.Map qualified as M
 import Data.Maybe
 import Data.Proxy
@@ -258,10 +259,12 @@ parseTestFile builtinTypes parsedModules mbModuleName path = do
                         let projectRoot = iterate takeDirectory absPath !! length current
                         parseTestFile builtinTypes parsedModules (Just mname) $ projectRoot </> foldr (</>) "" (map T.unpack imported) <.> takeExtension absPath
                     }
-            mbContent <- (Just . TL.decodeUtf8 <$> BL.readFile path) `catchIOError` \e ->
+            mbContent <- (Just . decodeSource path <$> BL.readFile path) `catchIOError` \e ->
                 if isDoesNotExistError e then return Nothing else ioError e
             case mbContent of
-                Just content -> do
+                Just (Left bundle) -> do
+                    return $ Left $ ImportModuleError bundle
+                Just (Right content) -> do
                     runTestParser content initState (parseTestModule absPath) >>= \case
                         Left bundle -> do
                             return $ Left $ ImportModuleError bundle
@@ -269,3 +272,27 @@ parseTestFile builtinTypes parsedModules mbModuleName path = do
                             modifyIORef parsedModules (( absPath, testModule ) : )
                             return $ Right testModule
                 Nothing -> return $ Left $ maybe (FileNotFound path) ModuleNotFound mbModuleName
+
+decodeSource :: FilePath -> BL.ByteString -> Either (ParseErrorBundle TestStream CustomTestError) TestStream
+decodeSource path bytes =
+    case TL.decodeUtf8' bytes of
+        Right content -> Right content
+        -- Decode leniently with two different replacement characters; the
+        -- results first differ at the position of the first invalid byte.
+        Left _ -> do
+            let decodeWith c = TL.decodeUtf8With (\_ _ -> Just c) bytes
+                content  = decodeWith '\xFFFD'
+                content' = decodeWith '\xFFFE'
+                off = case TL.commonPrefixes content content' of
+                    Just ( prefix, _, _ ) -> TL.length prefix
+                    Nothing -> 0
+            Left ParseErrorBundle
+                { bundleErrors = FancyError (fromIntegral off) (S.singleton $ ErrorFail "invalid UTF-8 encoding") :| []
+                , bundlePosState = PosState
+                    { pstateInput = content
+                    , pstateOffset = 0
+                    , pstateSourcePos = initialPos path
+                    , pstateTabWidth = defaultTabWidth
+                    , pstateLinePrefix = ""
+                    }
+                }
