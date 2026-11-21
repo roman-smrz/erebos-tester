@@ -3,14 +3,12 @@ module parser
 asset scripts:
     path: ../asset/parser
 
-def expect_load_success using p of file:
-    guard (file /= "") # TODO: forces (file :: String)
+def expect_load_success using p of (file : String):
     send "load ${scripts.path}/$file.et" to p
     expect /load-([a-z-]+).*/ from p capture done
     guard (done == "done")
 
-def expect_load_failure using p of file giving error:
-    guard (file /= "") # TODO: forces (file :: String)
+def expect_load_failure using p of (file : String) giving error:
     send "load ${scripts.path}/$file.et" to p
     expect /load-([a-z-]+) ([a-z-]+).*/ from p capture done, msg
     guard (done == "failed")
