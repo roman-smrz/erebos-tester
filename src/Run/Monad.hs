@@ -1,6 +1,7 @@
 module Run.Monad (
     TestRun(..),
-    TestEnv(..),
+    GlobalTestEnv(..),
+    SingleTestEnv(..),
     TestState(..),
     TestOptions(..), defaultTestOptions,
     ConfigTool(..),
@@ -33,20 +34,24 @@ import {-# SOURCE #-} Process
 import Script.Expr
 import Script.Object
 
-newtype TestRun a = TestRun { fromTestRun :: ReaderT (TestEnv, TestState) (ExceptT Failed (WriterT [ SomeObject TestRun ] IO)) a }
+newtype TestRun a = TestRun { fromTestRun :: ReaderT ( SingleTestEnv, TestState ) (ExceptT Failed (WriterT [ SomeObject TestRun ] IO)) a }
   deriving
     ( Functor, Applicative, Monad
-    , MonadReader ( TestEnv, TestState )
+    , MonadReader ( SingleTestEnv, TestState )
     , MonadWriter [ SomeObject TestRun ]
     , MonadIO
     )
 
-data TestEnv = TestEnv
+data GlobalTestEnv = GlobalTestEnv
     { teOutput :: Output
-    , teFailed :: TVar (Maybe Failed)
     , teOptions :: TestOptions
     , teDefaultTool :: FilePath
     , teProcTools :: [ ( ProcName, FilePath ) ]
+    }
+
+data SingleTestEnv = SingleTestEnv
+    { teGlobal :: GlobalTestEnv
+    , teFailed :: TVar (Maybe Failed)
     , teTestDir :: FilePath
     , teNextObjId :: MVar Int
     , teNextProcId :: MVar Int
@@ -123,7 +128,7 @@ instance MonadEval TestRun where
     withDictionary f = local (fmap $ \s -> s { tsLocals = f (tsLocals s) })
 
 instance MonadOutput TestRun where
-    getOutput = asks $ teOutput . fst
+    getOutput = asks $ teOutput . teGlobal . fst
 
 instance MonadPIO TestRun where
     postpone = liftIO

@@ -3,7 +3,6 @@ module Run (
     Report(..), SingleTestReport(..),
     TestName, textTestName,
     runTests,
-    runTest,
 
     LoadedModules(..),
     loadModules',
@@ -81,52 +80,7 @@ data SingleTestReport = SingleTestReport
     }
 
 runTests :: Output -> TestOptions -> GlobalDefs -> [ Test ] -> IO Report
-runTests out opts gdefs tests = do
-    go $ concat $ replicate (optRepeat opts) tests
-  where
-    go (t : ts) = do
-        single <- runTest out opts gdefs t
-        let failed = isJust (reportTestFailed single)
-        r <- if
-            | failed && not (optKeepGoing opts)
-            -> go []
-            | otherwise
-            -> go ts
-        return Report
-            { reportTotalCount = 1 + reportTotalCount r
-            , reportPassedCount = (if failed then 0 else 1) + reportPassedCount r
-            , reportSkippedCount = reportSkippedCount r
-            , reportFailedCount = (if failed then 1 else 0) + reportFailedCount r
-            , reportFailedList = (if failed then (reportTestName single :) else id) $ reportFailedList r
-            , reportTotalTime = reportTime single + reportTotalTime r
-            , reportTests = single : reportTests r
-            }
-    go [] = return Report
-        { reportTotalCount = 0
-        , reportPassedCount = 0
-        , reportSkippedCount = 0
-        , reportFailedCount = 0
-        , reportFailedList = []
-        , reportTotalTime = 0
-        , reportTests = []
-        }
-
-
-runTest :: Output -> TestOptions -> GlobalDefs -> Test -> IO SingleTestReport
-runTest out opts gdefs test = do
-    let testDir = optTestDir opts </> T.unpack (textTestName $ testName test)
-    when (optForce opts) $ removeDirectoryRecursive testDir `catchIOError` \e ->
-        if isDoesNotExistError e then return () else ioError e
-    exists <- doesPathExist testDir
-    when exists $ throwOtherError $ "test directory ‘" <> T.pack testDir <> "’ already exists"
-    createDirectoryIfMissing True testDir
-
-    failedVar <- newTVarIO Nothing
-    objIdVar <- newMVar 1
-    procIdVar <- newMVar 1
-    procVar <- newMVar []
-    timeoutVar <- newMVar ( fromMaybe 1 $ optTimeout opts, 0 )
-
+runTests teOutput teOptions gdefs tests = do
     let evalTool = \case
             ToolPath path -> return path
             ToolCabal arg
@@ -140,29 +94,65 @@ runTest out opts gdefs test = do
                             throwOtherError $ "failed to find ‘" <> name <> "’ executable path using cabal"
                 | otherwise
                 -> return $ T.unpack arg
-    defaultTool <- case optDefaultTool opts of
+    teDefaultTool <- case optDefaultTool teOptions of
         Just tool -> evalTool tool
         Nothing -> throwOtherError "no test tool defined"
-    procTools <- mapM (sequence . fmap evalTool) $ optProcTools opts
+    teProcTools <- mapM (sequence . fmap evalTool) $ optProcTools teOptions
 
-    mgdb <- if optGDB opts
-        then flip runReaderT out $ do
-            gdb <- gdbStart $ atomically . writeTVar failedVar . Just . ProcessCrashed
+    let env = GlobalTestEnv {..}
+    let go (t : ts) = do
+            single <- runTest env gdefs t
+            let failed = isJust (reportTestFailed single)
+            r <- if
+                | failed && not (optKeepGoing teOptions)
+                -> go []
+                | otherwise
+                -> go ts
+            return Report
+                { reportTotalCount = 1 + reportTotalCount r
+                , reportPassedCount = (if failed then 0 else 1) + reportPassedCount r
+                , reportSkippedCount = reportSkippedCount r
+                , reportFailedCount = (if failed then 1 else 0) + reportFailedCount r
+                , reportFailedList = (if failed then (reportTestName single :) else id) $ reportFailedList r
+                , reportTotalTime = reportTime single + reportTotalTime r
+                , reportTests = single : reportTests r
+                }
+        go [] = return Report
+            { reportTotalCount = 0
+            , reportPassedCount = 0
+            , reportSkippedCount = 0
+            , reportFailedCount = 0
+            , reportFailedList = []
+            , reportTotalTime = 0
+            , reportTests = []
+            }
+    go $ concat $ replicate (optRepeat teOptions) tests
+
+
+runTest :: GlobalTestEnv -> GlobalDefs -> Test -> IO SingleTestReport
+runTest teGlobal@GlobalTestEnv {..} gdefs test = do
+    let teTestDir = optTestDir teOptions </> T.unpack (textTestName $ testName test)
+    when (optForce teOptions) $ removeDirectoryRecursive teTestDir `catchIOError` \e ->
+        if isDoesNotExistError e then return () else ioError e
+    exists <- doesPathExist teTestDir
+    when exists $ throwOtherError $ "test directory ‘" <> T.pack teTestDir <> "’ already exists"
+    createDirectoryIfMissing True teTestDir
+
+    teFailed <- newTVarIO Nothing
+    teNextObjId <- newMVar 1
+    teNextProcId <- newMVar 1
+    teProcesses <- newMVar []
+    teTimeout <- newMVar ( fromMaybe 1 $ optTimeout teOptions, 0 )
+
+    mgdb <- if optGDB teOptions
+        then flip runReaderT teOutput $ do
+            gdb <- gdbStart $ atomically . writeTVar teFailed . Just . ProcessCrashed
             Just . (, gdbProcess gdb) <$> liftIO (newMVar gdb)
         else return Nothing
 
-    let tenv = TestEnv
-            { teOutput = out
-            , teFailed = failedVar
-            , teOptions = opts
-            , teDefaultTool = defaultTool
-            , teProcTools = procTools
-            , teTestDir = testDir
-            , teNextObjId = objIdVar
-            , teNextProcId = procIdVar
-            , teProcesses = procVar
-            , teTimeout = timeoutVar
-            , teGDB = fst <$> mgdb
+    let tenv = SingleTestEnv
+            { teGDB = fst <$> mgdb
+            , ..
             }
         tstate = TestState
             { tsGlobals = gdefs
@@ -174,62 +164,62 @@ runTest out opts gdefs test = do
 
     let sigHandler SignalInfo { siginfoSpecific = NoSignalSpecificInfo } = return ()
         sigHandler SignalInfo { siginfoSpecific = chld } = do
-            processes <- readMVar procVar
+            processes <- readMVar teProcesses
             forM_ processes $ \p -> do
                 mbpid <- either getPid (\_ -> return Nothing) (procHandle p)
-                when (mbpid == Just (siginfoPid chld)) $ flip runReaderT out $ do
+                when (mbpid == Just (siginfoPid chld)) $ flip runReaderT teOutput $ do
                     let err detail = outProc OutputChildFail p detail
                     case siginfoStatus chld of
                         Exited ExitSuccess -> outProc OutputChildInfo p $ T.pack $ "child exited successfully"
                         Exited (ExitFailure code) -> do
                             err $ T.pack $ "child process exited with status " ++ show code
-                            liftIO $ atomically $ writeTVar (teFailed tenv) $ Just Failed
+                            liftIO $ atomically $ writeTVar teFailed $ Just Failed
                         Terminated sig _ -> do
                             err $ T.pack $ "child terminated with signal " ++ show sig
-                            liftIO $ atomically $ writeTVar (teFailed tenv) $ Just $ ProcessCrashed p
+                            liftIO $ atomically $ writeTVar teFailed $ Just $ ProcessCrashed p
                         Stopped sig -> err $ T.pack $ "child stopped with signal " ++ show sig
     oldHandler <- installHandler processStatusChanged (CatchInfo sigHandler) Nothing
 
-    flip runReaderT out $ do
+    flip runReaderT teOutput $ do
         void $ outLine OutputGlobalInfo Nothing $ "Starting test ‘" <> textTestName (testName test) <> "’"
 
-    resetOutputTime out
+    resetOutputTime teOutput
     testRunResult <- newEmptyMVar
 
     void $ forkOS $ do
-        isolateFilesystem testDir >>= \case
+        isolateFilesystem teTestDir >>= \case
             True -> do
                 tres <- runWriterT $ runExceptT $ flip runReaderT (tenv, tstate) $ fromTestRun $ do
                     withInternet $ \_ -> do
                         runStep =<< eval (testSteps test)
-                        when (optWait opts) $ do
+                        when (optWait teOptions) $ do
                             void $ outPromptGetLine $ "Test ‘" <> textTestName (testName test) <> "’ completed, waiting..."
                 putMVar testRunResult tres
             _ -> do
                 putMVar testRunResult ( Left Failed, [] )
 
     ( res, [] ) <- takeMVar testRunResult
-    reportTime <- getElapsedTime out
-    reportOutput <- collectOutput out
-    reportOutputError <- collectErrorOutput out
+    reportTime <- getElapsedTime teOutput
+    reportOutput <- collectOutput teOutput
+    reportOutputError <- collectErrorOutput teOutput
 
     void $ installHandler processStatusChanged oldHandler Nothing
 
-    Right () <- runExceptT $ flip runReaderT out $ do
+    Right () <- runExceptT $ flip runReaderT teOutput $ do
         maybe (return ()) (closeProcess 1 . snd) mgdb
-    [] <- readMVar procVar
+    [] <- readMVar teProcesses
 
-    failed <- atomically $ readTVar (teFailed tenv)
+    failed <- atomically $ readTVar teFailed
     reportTestFailed <- case ( res, failed ) of
         ( Right (), Nothing ) -> do
-            when (not $ optKeep opts) $ removeDirectoryRecursive testDir
+            when (not $ optKeep teOptions) $ removeDirectoryRecursive teTestDir
             return Nothing
         _ -> do
-            flip runReaderT out $ do
+            flip runReaderT teOutput $ do
                 void $ outLine OutputGlobalError Nothing $ "Test ‘" <> textTestName (testName test) <> "’ failed."
             return $ either Just (const Nothing) res `mplus` failed
 
-    (optHookTestResult opts) (testName test) (isNothing reportTestFailed)
+    (optHookTestResult teOptions) (testName test) (isNothing reportTestFailed)
     let reportTestName = testName test
     return SingleTestReport {..}
 
@@ -365,7 +355,7 @@ runStep = \case
             Right node -> go node
       where
         go node = do
-            env <- asks fst
+            env <- asks $ teGlobal . fst
             let pname = ProcName tname
                 ( tool, cargs ) = fromMaybe ( "", [] ) $ uncons $ words $
                     fromMaybe (teDefaultTool env) (lookup pname $ teProcTools env)
@@ -429,7 +419,7 @@ withSubnet parent tvname inner = do
 
 withNetwork :: Network -> (Network -> TestRun a) -> TestRun a
 withNetwork net inner = do
-    tcpdump <- asks (optTcpdump . teOptions . fst) >>= return . \case
+    tcpdump <- asks (optTcpdump . teOptions . teGlobal . fst) >>= return . \case
         Just path -> withProcess (Left net) ProcNameTcpdump (Just (Signal softwareTermination))
             path [ "-i", "br0", "-w", "./br0.pcap", "-U", "-Z", "root" ] . const
         Nothing -> id
