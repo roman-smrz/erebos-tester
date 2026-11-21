@@ -36,11 +36,7 @@ data ConfigTool
 
 instance FromYAML (FilePath -> Config) where
     parseYAML = withMap "Config" $ \m -> do
-        configTool <- foldr1 (<|>)
-            [ Just . ToolPath . T.unpack <$> m .: "tool" -- tool path as string
-            , Just <$> m .: "tool"
-            , return Nothing
-            ]
+        configTool <- m .:? "tool"
         configTests <- (map (compile . T.unpack) <$> foldr1 (<|>)
                 [ fmap (:[]) (m .: "tests") -- single pattern
                 , m .:? "tests" .!= []      -- list of patterns
@@ -66,9 +62,13 @@ instance FromYAML Number where
         node -> typeMismatch "int or float" node
 
 instance FromYAML ConfigTool where
-    parseYAML = withMap "tool specification" $ \m -> foldr1 (<|>)
-        [ ToolPath . T.unpack <$> m .: "path"
-        , ToolCabal <$> m .: "cabal"
+    parseYAML n = foldr1 (<|>) $ map ($ n)
+        [ withMap "tool specification" $ \m -> foldr1 (<|>)
+            [ ToolPath . T.unpack <$> m .: "path"
+            , ToolCabal <$> m .: "cabal"
+            ]
+        , withStr "tool path" $ return . ToolPath . T.unpack
+        , typeMismatch "tool specification"
         ]
 
 findConfig :: Bool -> IO (Maybe FilePath)
