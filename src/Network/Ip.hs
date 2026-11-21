@@ -154,9 +154,11 @@ runInNetworkNamespace :: NetworkNamespace -> IO a -> IO a
 runInNetworkNamespace netns act = do
     mvar <- newEmptyMVar
     void $ forkOS $ do
-        setNetworkNamespace netns
-        putMVar mvar =<< act
-    takeMVar mvar
+        putMVar mvar =<< do
+            try @SomeException $ do
+                setNetworkNamespace netns
+                act
+    either throwIO return =<< takeMVar mvar
 
 
 textNetnsName :: NetworkNamespace -> Text
